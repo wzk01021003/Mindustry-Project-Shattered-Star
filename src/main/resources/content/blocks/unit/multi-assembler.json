@@ -12,38 +12,31 @@
         "silicon/650"
     ],
     "consumePower": 5,
-    "consumeLiquid": {
-        "liquid": "cryofluid", "amount": 0.5 },
-    "plans": [
+    "recipe": [
         {
             "unit": "dagger",
-            "time": 900,
-            "requirements": [
+            "craftTime": 900,
+            "inputItems": [
                 "silicon/10",
                 "lead/10"
             ]
         },
         {
             "unit": "flare",
-            "time": 900,
-            "requirements": [
+            "craftTime": 900,
+            "inputItems": [
                 "silicon/15"
             ]
         },
         {
             "unit": "vanquish",
-            "time": 3000,
-            "requirements": [
+            "craftTime": 3000,
+            "inputItems": [
+                "silicon/20"
+            ],
+            "inputPayloads": [
                 "stell/4",
                 "tungsten-wall-large/10"
-            ]
-        },
-        {
-            "unit": "conquer",
-            "time": 9000,
-            "requirements": [
-                "locus/6",
-                "carbide-wall-large/20"
             ]
         }
     ]
