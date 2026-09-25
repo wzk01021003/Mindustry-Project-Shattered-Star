@@ -1,35 +1,18 @@
 package project;
 
-import arc.*;
 import arc.util.*;
-import mindustry.game.EventType.*;
 import mindustry.mod.*;
-import mindustry.ui.dialogs.*;
 import project.blocks.MultiAssembler;
 
 public class ShatteredStarMod extends Mod{
 
     public ShatteredStarMod(){
         Log.info("Loaded ShatteredStarMod constructor.");
-
-        //listen for game load event
-        Events.on(ClientLoadEvent.class, e -> {
-            //show dialog upon startup
-            Time.runTask(10f, () -> {
-                BaseDialog dialog = new BaseDialog("frog");
-                dialog.cont.add("behold").row();
-                //mod sprites are prefixed with the mod name (this mod is called 'example-java-mod' in its config)
-                dialog.cont.image(Core.atlas.find("ss-frog")).pad(20f).row();
-                dialog.cont.button("I see", dialog::hide).size(100f, 50f);
-                dialog.show();
-            });
-        });
     }
 
     @Override
     public void loadContent(){
-        Log.info("Loading some example content.");
-
+        Log.info("Loading content.");
+        new MultiAssembler("multi-assembler");
     }
-
 }

@@ -20,10 +20,10 @@
 * @author < 晓伟 136 adapter : v3 >
 * @应该不算anthor < R 147 adapter : v4 >
 * @readme <
-    Version 6.0 To version 7.0 Not available due to changes in game source code,
-    for example, NumberValue becomes StatValues.number, This means that some parameters and internal functions are changed,
-    i just change some parameters and functions, to make it can adapt ver 7.0(and StatValue can be extended[line 554])
-    Item display has been fixed
+Version 6.0 To version 7.0 Not available due to changes in game source code,
+for example, NumberValue becomes StatValues.number, This means that some parameters and internal functions are changed,
+i just change some parameters and functions, to make it can adapt ver 7.0(and StatValue can be extended[line 554])
+Item display has been fixed
 >
 */
 
@@ -71,14 +71,14 @@ function MultiCrafterBuild() {
             var liquids = recs[i].input.liquids;
             for(var j = 0, len = items.length; j < len; j++) {
                 (function(that, stack) {
-                    table.add(new ReqImage(new StatValues.stack(stack.item, stack.amount), () => that.items != null && that.items.has(stack.item, stack.amount))).size(8 * 4);
-                })(this, items[j]);
+                        table.add(new ReqImage(new StatValues.stack(stack.item, stack.amount), () => that.items != null && that.items.has(stack.item, stack.amount))).size(8 * 4);
+                    })(this, items[j]);
             };
             z += len;
             for(var l = 0, len = liquids.length; l < len; l++) {
                 (function(that, stack) {
-                    table.add(new ReqImage(new StatValues.stack(stack.liquid, stack.amount), () => that.liquids != null && that.liquids.get(stack.liquid) > stack.amount)).size(8 * 4);
-                })(this, liquids[l]);
+                        table.add(new ReqImage(new StatValues.stack(stack.liquid, stack.amount), () => that.liquids != null && that.liquids.get(stack.liquid) > stack.amount)).size(8 * 4);
+                    })(this, liquids[l]);
             };
             z += len;
             if(z == 0) {
@@ -220,8 +220,8 @@ function MultiCrafterBuild() {
         var eLiquids = this.liquids;
         if(this.block.doDumpToggle() && current == -1) return;
         var que = this.toOutputItemSet.orderedItems(),
-            len = que.size,
-            itemEntry = this.dumpItemEntry;
+        len = que.size,
+        itemEntry = this.dumpItemEntry;
         if(this.timer.get(this.block.dumpTime) && len > 0) {
             for(var i = 0; i < len; i++) {
                 var candidate = que.get((i + itemEntry) % len);
@@ -234,7 +234,7 @@ function MultiCrafterBuild() {
             if(i != len) this.dumpItemEntry = (i + itemEntry) % len;
         };
         var que = this.toOutputLiquidset.orderedItems(),
-            len = que.size;
+        len = que.size;
         if(len > 0) {
             for(var i = 0; i < len; i++) {
                 var liquid = que.get(i);
@@ -256,12 +256,12 @@ function MultiCrafterBuild() {
         table.setPosition(relative.x, Math.min(pos, relative.y - Math.ceil(this.itemHas / 3) * 48 - 4), Align.top);
         if(!this.block.getInvFrag().isShown() && Vars.control.input.frag.config.getSelectedTile() == this && this.items.total() > 0) this.block.getInvFrag().showFor(this);
     };*/
-   
+
     this.buildConfiguration = function(table) {
-        
+
         if(typeof this.block["getRecipes"] !== "function") return;
         const recs = this.block.getRecipes(),
-            invFrag = this.block.getInvFrag();
+        invFrag = this.block.getInvFrag();
         if(!invFrag.isBuilt()) invFrag.build(table.parent);
         if(invFrag.isShown()) {
             invFrag.hide();
@@ -274,15 +274,15 @@ function MultiCrafterBuild() {
         var recLen = recs.length;
         for(var i = 0; i < recLen; i++) {
             (function(i, that) {
-                var output = recs[i].output;
-                var wui = new TextureRegionDrawable(Tex.whiteui);
-                var button = table.button(Tex.pane,40,() => that.configure(button.isChecked() ? i : -1)).group(group).get();
-                button.getStyle().up = Styles.black3;
-                button.getStyle().down = Styles.flatOver;
-                button.getStyle().checked = Styles.accentDrawable;
-                button.getStyle().imageUp = new TextureRegionDrawable(output.items.length > 0 ? output.items[0].item.uiIcon : output.liquids.length > 0 ? output.liquids[0].liquid.uiIcon : output.power > 0 ? Icon.power : Icon.cancel);
-                button.update(() => button.setChecked(i==that._toggle));
-            })(i, this);
+                    var output = recs[i].output;
+                    var wui = new TextureRegionDrawable(Tex.whiteui);
+                    var button = table.button(Tex.pane,40,() => that.configure(button.isChecked() ? i : -1)).group(group).get();
+                    button.getStyle().up = Styles.black3;
+                    button.getStyle().down = Styles.flatOver;
+                    button.getStyle().checked = Styles.accentDrawable;
+                    button.getStyle().imageUp = new TextureRegionDrawable(output.items.length > 0 ? output.items[0].item.uiIcon : output.liquids.length > 0 ? output.liquids[0].liquid.uiIcon : output.power > 0 ? Icon.power : Icon.cancel);
+                    button.update(() => button.setChecked(i==that._toggle));
+                })(i, this);
         };
         table.row();
         var lengths = [];
@@ -389,11 +389,11 @@ function MultiCrafterBuild() {
         this.super$write(write);
         write.s(this._toggle);
         var queItem = this.toOutputItemSet.orderedItems(),
-            len = queItem.size;
+        len = queItem.size;
         write.s(len);
         for(var i = 0; i < len; i++) write.s(queItem.get(i).id);
         var queLiquid = this.toOutputLiquidset.orderedItems(),
-            len = queLiquid.size;
+        len = queLiquid.size;
         write.s(len);
         for(var i = 0; i < len; i++) write.s(queLiquid.get(i).id);
     };
@@ -403,9 +403,9 @@ function MultiCrafterBuild() {
         this.toOutputItemSet.clear();
         this.toOutputLiquidset.clear();
         var len = read.s(),
-            vc = Vars.content,
-            ci = ContentType.item,
-            cl = ContentType.liquid;
+        vc = Vars.content,
+        ci = ContentType.item,
+        cl = ContentType.liquid;
         for(var i = 0; i < len; i++) this.toOutputItemSet.add(vc.getByID(ci, read.s()));
         var len = read.s();
         for(var i = 0; i < len; i++) this.toOutputLiquidset.add(vc.getByID(cl, read.s()));
@@ -447,27 +447,27 @@ function MultiCrafterBlock() {
     this.powerBarI = false;
     this.powerBarO = false;
     this._invFrag = extend(BlockInventoryFragment, {
-        _built: false,
-        isBuilt() {
-            return this._built;
-        },
-        visible: false,
-        isShown() {
-            return this.visible;
-        },
-        showFor(t) {
-            this.visible = true;
-            this.super$showFor(t);
-        },
-        hide() {
-            this.visible = false;
-            this.super$hide();
-        },
-        build(parent) {
-            this._built = true;
-            this.super$build(parent);
-        }
-    });
+            _built: false,
+            isBuilt() {
+                return this._built;
+            },
+            visible: false,
+            isShown() {
+                return this.visible;
+            },
+            showFor(t) {
+                this.visible = true;
+                this.super$showFor(t);
+            },
+            hide() {
+                this.visible = false;
+                this.super$hide();
+            },
+            build(parent) {
+                this._built = true;
+                this.super$build(parent);
+            }
+        });
     this.getInvFrag = function() {
         return this._invFrag;
     };
@@ -475,7 +475,7 @@ function MultiCrafterBlock() {
         for(var i = 0; i < this.tmpRecs.length; i++) {
             var tmp = this.tmpRecs[i];
             var isInputExist = tmp.input != null,
-                isOutputExist = tmp.output != null;
+            isOutputExist = tmp.output != null;
             var tmpInput = tmp.input;
             var tmpOutput = tmp.output;
             if(isInputExist && tmpInput.power > 0) this.powerBarI = true;
@@ -556,15 +556,15 @@ function MultiCrafterBlock() {
         };
         this.hasPower = this.powerBarI || this.powerBarO;
         if(this.powerBarI) this.consumeBuilder.add(extend(ConsumePower, {
-            requestedPower(entity) {
-                if(typeof entity["getToggle"] !== "function") return 0;
-                var i = entity.getToggle();
-                if(i < 0) return 0;
-                var input = entity.block.getRecipes()[i].input.power;
-                if(input > 0 && entity.getCond()) return input;
-                return 0;
-            }
-        }));
+                    requestedPower(entity) {
+                        if(typeof entity["getToggle"] !== "function") return 0;
+                        var i = entity.getToggle();
+                        if(i < 0) return 0;
+                        var input = entity.block.getRecipes()[i].input.power;
+                        if(input > 0 && entity.getCond()) return input;
+                        return 0;
+                    }
+                }));
         this.consumesPower = this.powerBarI;
         this.outputsPower = this.powerBarO;
         this.super$init();
@@ -577,54 +577,54 @@ function MultiCrafterBlock() {
         if(this.powerBarI) this.stats.remove(Stat.powerUse);
         this.stats.remove(Stat.productionTime);
         this.stats.add(Stat.input, new JavaAdapter(StatValue, {
-        display(table){
-            table.row();
-            var recLen = recs.length;
-            for(var i = 0; i < recLen; i++) {
-                var rec = recs[i];
-                var outputItems = rec.output.items,
-                    inputItems = rec.input.items;
-                var outputLiquids = rec.output.liquids,
-                    inputLiquids = rec.input.liquids;
-                var inputPower = rec.input.power,
-                    outputPower = rec.output.power;
-                table.table(infoStyle.up, part => {
-                    part.add("[accent]" + Stat.input.localized()).expandX().left().row();
-                    part.table(cons(row => {
-                        for(var l = 0, len = inputItems.length; l < len; l++) row.add(new StatValues.displayItem(inputItems[l].item, inputItems[l].amount, true)).padRight(5);
-                    })).left().row();
-                    part.table(cons(row => {
-                        for(var l = 0, len = inputLiquids.length; l < len; l++) row.add(new StatValues.displayLiquid(inputLiquids[l].liquid, inputLiquids[l].amount, false));
-                    })).left().row();
-                    if(inputPower > 0) {
-                        part.table(cons(row => {
-                            row.add("[lightgray]" + Stat.powerUse.localized() + ":[]").padRight(4);
-                            (StatValues.number(recs[i].input.power * 60, StatUnit.powerSecond)).display(row);
-                        })).left().row();
-                    }
-                    part.add("[accent]" + Stat.output.localized()).left().row();
-                    part.table(cons(row => {
-                        for(var jj = 0, len = outputItems.length; jj < len; jj++) row.add(new StatValues.displayItem(outputItems[jj].item, outputItems[jj].amount, true)).padRight(5);
-                    })).left().row();
-                    part.table(cons(row => {
-                        for(var jj = 0, len = outputLiquids.length; jj < len; jj++) row.add(new StatValues.displayLiquid(outputLiquids[jj].liquid, outputLiquids[jj].amount, false));
-                    })).left().row();
-                    if(outputPower > 0) {
-                        part.table(cons(row => {
-                            row.add("[lightgray]" + Stat.basePowerGeneration.localized() + ":[]").padRight(4);
-                            (StatValues.number(recs[i].output.power * 60, StatUnit.powerSecond)).display(row);
-                        })).left().row();
-                    }
-                    part.table(cons(row => {
-                        row.add("[lightgray]" + Stat.productionTime.localized() + ":[]").padRight(4);
-                        (StatValues.number(rec.craftTime / 60, StatUnit.seconds)).display(row);
-                    })).left().row();
-                    if(typeof this["customDisplay"] === "function") this.customDisplay(part, i);
-                }).color(colorStat).left().growX();
-                table.add().size(18).row();
-            }
-        },
-        }));
+                    display(table){
+                        table.row();
+                        var recLen = recs.length;
+                        for(var i = 0; i < recLen; i++) {
+                            var rec = recs[i];
+                            var outputItems = rec.output.items,
+                            inputItems = rec.input.items;
+                            var outputLiquids = rec.output.liquids,
+                            inputLiquids = rec.input.liquids;
+                            var inputPower = rec.input.power,
+                            outputPower = rec.output.power;
+                            table.table(infoStyle.up, part => {
+                                    part.add("[accent]" + Stat.input.localized()).expandX().left().row();
+                                    part.table(cons(row => {
+                                                for(var l = 0, len = inputItems.length; l < len; l++) row.add(new StatValues.displayItem(inputItems[l].item, inputItems[l].amount, true)).padRight(5);
+                                            })).left().row();
+                                    part.table(cons(row => {
+                                                for(var l = 0, len = inputLiquids.length; l < len; l++) row.add(new StatValues.displayLiquid(inputLiquids[l].liquid, inputLiquids[l].amount, false));
+                                            })).left().row();
+                                    if(inputPower > 0) {
+                                        part.table(cons(row => {
+                                                    row.add("[lightgray]" + Stat.powerUse.localized() + ":[]").padRight(4);
+                                                    (StatValues.number(recs[i].input.power * 60, StatUnit.powerSecond)).display(row);
+                                                })).left().row();
+                                    }
+                                    part.add("[accent]" + Stat.output.localized()).left().row();
+                                    part.table(cons(row => {
+                                                for(var jj = 0, len = outputItems.length; jj < len; jj++) row.add(new StatValues.displayItem(outputItems[jj].item, outputItems[jj].amount, true)).padRight(5);
+                                            })).left().row();
+                                    part.table(cons(row => {
+                                                for(var jj = 0, len = outputLiquids.length; jj < len; jj++) row.add(new StatValues.displayLiquid(outputLiquids[jj].liquid, outputLiquids[jj].amount, false));
+                                            })).left().row();
+                                    if(outputPower > 0) {
+                                        part.table(cons(row => {
+                                                    row.add("[lightgray]" + Stat.basePowerGeneration.localized() + ":[]").padRight(4);
+                                                    (StatValues.number(recs[i].output.power * 60, StatUnit.powerSecond)).display(row);
+                                                })).left().row();
+                                    }
+                                    part.table(cons(row => {
+                                                row.add("[lightgray]" + Stat.productionTime.localized() + ":[]").padRight(4);
+                                                (StatValues.number(rec.craftTime / 60, StatUnit.seconds)).display(row);
+                                            })).left().row();
+                                    if(typeof this["customDisplay"] === "function") this.customDisplay(part, i);
+                                }).color(colorStat).left().growX();
+                            table.add().size(18).row();
+                        }
+                    },
+                }));
     };
     this.setBars = function() {
         this.super$setBars();
@@ -635,9 +635,9 @@ function MultiCrafterBlock() {
         var i = 0;
         if(!this._liquidSet.isEmpty()) {
             this._liquidSet.each(k => {
-                this.addBar("liquid" + i, entity => new Bar(() => k.localizedName, () => k.barColor == null ? k.color : k.barColor, () => entity.liquids.get(k) / this.liquidCapacity));
-                i++;
-            });
+                    this.addBar("liquid" + i, entity => new Bar(() => k.localizedName, () => k.barColor == null ? k.color : k.barColor, () => entity.liquids.get(k) / this.liquidCapacity));
+                    i++;
+                });
         }
     }
     this.outputsItems = function() {

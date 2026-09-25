@@ -6,33 +6,36 @@ import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
 import arc.math.Mathf;
 import arc.scene.ui.layout.Table;
+import arc.struct.ObjectMap;
 import arc.struct.Seq;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
 import mindustry.Vars;
+import mindustry.ctype.ContentType;
 import mindustry.ctype.UnlockableContent;
+import mindustry.gen.Building;
 import mindustry.gen.Unit;
 import mindustry.type.ItemStack;
 import mindustry.type.LiquidStack;
 import mindustry.type.PayloadStack;
 import mindustry.type.UnitType;
 import mindustry.world.Tile;
+import mindustry.world.blocks.payloads.Payload;
 import mindustry.world.blocks.production.GenericCrafter;
 import mindustry.world.meta.Stat;
-import mindustry.world.meta.StatUnit;
 
 public class MultiAssembler extends GenericCrafter {
 
-    /** 最多同时排队的单位数量 */
+    /** 最多排队数量 */
     public int maxCount = 8;
-    /** 区域计算时额外留白（格） */
-    public float padding = 3f;
-    /** 区域边长上限 */
-    public int maxAreaSize = 24;
+    /** 区域半径（格），影响能放多少单位、多大的单位 */
+    public int areaRadius = 5;
+    /** 最大载荷容量 */
+    public int payloadCapacity = 30;
 
-    /** 配方列表，由 JSON 填充 */
-    public UnitRecipe[] recipe;
-    public Seq<UnitRecipe> recipes = new Seq<>();
+    /** 供 JSON 填充的配方数组 */
+    public Recipe[] recipe;
+    public Seq<Recipe> recipes = new Seq<>();
 
     public MultiAssembler(String name) {
         super(name);
@@ -43,52 +46,52 @@ public class MultiAssembler extends GenericCrafter {
         hasItems = true;
         hasLiquids = true;
         hasPower = true;
+        acceptsPayload = true;
 
-        // 点击 UI 添加单位到队列
+        // 点击 UI 按钮时把对应配方加入队列
         config(Integer.class, (MultiAssemblerBuild build, Integer index) -> {
-                if (index >= 0 && index < recipes.size) {
-                    build.addJob(recipes.get(index));
-                }
-            });
+            if (index >= 0 && index < recipes.size) {
+                build.addJob(recipes.get(index));
+            }
+        });
     }
 
     @Override
     public void init() {
-        super.init();
-        // 解析 JSON 里的配方
+        // 解析 JSON 里的 recipe 数组
         if (recipe != null) {
-            for (UnitRecipe r : recipe) {
-                r.parsePayloads();
+            for (Recipe r : recipe) {
+                r.init();
                 recipes.add(r);
             }
             recipe = null;
         }
+        super.init();
     }
 
     @Override
     public void setStats() {
         super.setStats();
         stats.add(Stat.output, table -> {
-                table.clearChildren();
-                table.left();
-                for (UnitRecipe r : recipes) {
-                    table.table(t -> {
-                            t.left();
-                            t.add("[accent]" + r.unit.localizedName + "[]").padRight(8);
-                            t.add("[lightgray]时间: " + (r.craftTime / 60f) + "s[]").padRight(8);
-                            t.row();
-                            t.add("[lightgray]需求: []");
-                            // 这里修复了报错：使用 t.image 代替 t.add
-                            for (ItemStack s : r.inputItems) t.image(s.item.uiIcon).size(24f).padRight(2);
-                            for (LiquidStack s : r.inputLiquids) t.image(s.liquid.uiIcon).size(24f).padRight(2);
-                            for (PayloadStack s : r.cachedInputPayloads) t.image(s.item.uiIcon).size(24f).padRight(2);
-                        }).left().row();
-                }
-            });
+            table.clearChildren();
+            table.left();
+            for (Recipe r : recipes) {
+                table.table(t -> {
+                    t.left();
+                    t.add("[accent]" + r.unit.localizedName + "[]").padRight(8);
+                    t.add("[lightgray]" + (r.craftTime / 60f) + "s[]").padRight(8);
+                    t.row();
+                    t.add("[lightgray]需求: []");
+                    for (ItemStack s : r.inputItems) t.image(s.item.uiIcon).size(24f).padRight(2);
+                    for (LiquidStack s : r.inputLiquids) t.image(s.liquid.uiIcon).size(24f).padRight(2);
+                    for (PayloadStack s : r.cachedInputPayloads) t.image(s.item.uiIcon).size(24f).padRight(2);
+                }).left().row();
+            }
+        });
     }
 
     /** 单个单位的配方 */
-    public static class UnitRecipe {
+    public static class Recipe {
         public UnitType unit;
         public float craftTime = 60f;
         public ItemStack[] inputItems = {};
@@ -96,16 +99,20 @@ public class MultiAssembler extends GenericCrafter {
         public String[] inputPayloads = {};
         public transient PayloadStack[] cachedInputPayloads = {};
 
-        public UnitRecipe() {}
+        public Recipe() {}
 
-        public void parsePayloads() {
+        public void init() {
+            if (inputItems == null) inputItems = new ItemStack[0];
+            if (inputLiquids == null) inputLiquids = new LiquidStack[0];
+            if (inputPayloads == null) inputPayloads = new String[0];
+
             Seq<PayloadStack> list = new Seq<>();
             for (String s : inputPayloads) {
                 if (s == null || s.isEmpty()) continue;
                 String[] parts = s.split("/");
                 if (parts.length != 2) continue;
-                UnlockableContent content = Vars.content.getByName(mindustry.ctype.ContentType.block, parts[0]);
-                if (content == null) content = Vars.content.getByName(mindustry.ctype.ContentType.unit, parts[0]);
+                UnlockableContent content = Vars.content.getByName(ContentType.block, parts[0]);
+                if (content == null) content = Vars.content.getByName(ContentType.unit, parts[0]);
                 if (content != null) {
                     try {
                         int amount = Integer.parseInt(parts[1]);
@@ -119,11 +126,11 @@ public class MultiAssembler extends GenericCrafter {
 
     /** 单个生产任务 */
     public static class UnitJob {
-        public UnitRecipe recipe;
+        public Recipe recipe;
         public float progress;
         public int offsetX, offsetY;
 
-        public UnitJob(UnitRecipe recipe, int offsetX, int offsetY) {
+        public UnitJob(Recipe recipe, int offsetX, int offsetY) {
             this.recipe = recipe;
             this.offsetX = offsetX;
             this.offsetY = offsetY;
@@ -132,33 +139,47 @@ public class MultiAssembler extends GenericCrafter {
 
     public class MultiAssemblerBuild extends GenericCrafterBuild {
         public Seq<UnitJob> jobs = new Seq<>();
+        /** 已接收的载荷计数：内容 -> 数量 */
+        public ObjectMap<UnlockableContent, Integer> payloadCounts = new ObjectMap<>();
 
-        /** 往队列里加一个单位，会自动分配落点 */
-        public void addJob(UnitRecipe recipe) {
+        /** 接收载荷时，直接计数（不做飞入动画，简化处理） */
+        @Override
+        public boolean acceptPayload(Building source, Payload payload) {
+            int current = payloadCounts.get(payload.content(), 0);
+            return current < payloadCapacity;
+        }
+
+        @Override
+        public void handlePayload(Building source, Payload payload) {
+            int current = payloadCounts.get(payload.content(), 0);
+            payloadCounts.put(payload.content(), current + 1);
+        }
+
+        /** 往队列里加一个单位 */
+        public void addJob(Recipe r) {
             if (jobs.size >= maxCount) return;
-            int unitTiles = Mathf.ceil(recipe.unit.hitSize / Vars.tilesize);
-            int[] slot = findFreeSlot(unitTiles);
+            int[] slot = findFreeSlot(r.unit);
             if (slot == null) return;
-            jobs.add(new UnitJob(recipe, slot[0], slot[1]));
+            jobs.add(new UnitJob(r, slot[0], slot[1]));
         }
 
         /** 找一个不跟其他 job 冲突的落点 */
-        public int[] findFreeSlot(int unitTiles) {
-            int areaSize = Math.max(5, maxAreaSize / 2);
-            int half = areaSize / 2;
-            for (int gy = -half; gy < areaSize - half; gy++) {
-                for (int gx = -half; gx < areaSize - half; gx++) {
+        public int[] findFreeSlot(UnitType unit) {
+            int tiles = (int)Math.ceil(unit.hitSize / Vars.tilesize);
+            int area = Math.max(areaRadius * 2 + 1, tiles + 2);
+            int half = area / 2;
+            for (int gy = -half; gy < area - half; gy++) {
+                for (int gx = -half; gx < area - half; gx++) {
                     boolean conflict = false;
                     for (UnitJob j : jobs) {
-                        int otherTiles = Mathf.ceil(j.recipe.unit.hitSize / Vars.tilesize);
-                        if (Math.abs(j.offsetX - gx) < Math.max(unitTiles, otherTiles)
-                            && Math.abs(j.offsetY - gy) < Math.max(unitTiles, otherTiles)) {
+                        int jt = (int)Math.ceil(j.recipe.unit.hitSize / Vars.tilesize);
+                        int need = Math.max(tiles, jt);
+                        if (Math.abs(j.offsetX - gx) < need && Math.abs(j.offsetY - gy) < need) {
                             conflict = true;
                             break;
                         }
                     }
-                    if (!conflict) return new int[]{
-                        gx, gy};
+                    if (!conflict) return new int[]{gx, gy};
                 }
             }
             return null;
@@ -172,31 +193,42 @@ public class MultiAssembler extends GenericCrafter {
             table.label(() -> "选择生产单位:").left().padTop(6f).row();
 
             for (int i = 0; i < recipes.size; i++) {
-                final int index = i;
-                UnitRecipe r = recipes.get(i);
-                table.button(r.unit.localizedName, () -> configure(index))
-                .size(120f, 45f).pad(3f).row();
+                final int idx = i;
+                Recipe r = recipes.get(i);
+                table.button(r.unit.localizedName, () -> configure(idx))
+                    .size(120f, 45f).pad(3f).row();
             }
 
             table.row();
-            table.label(() -> "生产队列 (" + jobs.size + "/" + maxCount + "):").left().padTop(6f).row();
+            table.label(() -> "队列 (" + jobs.size + "/" + maxCount + "):").left().padTop(6f).row();
 
-            for (int i = 0; i < jobs.size; i++) {
-                UnitJob job = jobs.get(i);
-                table.label(() -> job.recipe.unit.localizedName + "  "
-                    + (int)(job.progress / job.recipe.craftTime * 100) + "%").left().row();
+            for (UnitJob j : jobs) {
+                table.label(() -> j.recipe.unit.localizedName + "  "
+                    + (int)(j.progress / j.recipe.craftTime * 100) + "%").left().row();
+            }
+
+            // 显示当前载荷计数
+            if (!payloadCounts.isEmpty()) {
+                table.row();
+                table.label(() -> "已收载荷:").left().padTop(6f).row();
+                for (ObjectMap.Entry<UnlockableContent, Integer> e : payloadCounts) {
+                    table.table(t -> {
+                        t.image(e.key.uiIcon).size(24f).padRight(4f);
+                        t.label(() -> "x" + e.value).left();
+                    }).left().row();
+                }
             }
         }
 
         /** 判断某个落点能不能放下单位 */
-        public boolean canPlaceAt(UnitType type, int gx, int gy) {
-            int unitTiles = Mathf.ceil(type.hitSize / Vars.tilesize);
-            for (int dy = 0; dy < unitTiles; dy++) {
-                for (int dx = 0; dx < unitTiles; dx++) {
+        public boolean canPlace(UnitType unit, int gx, int gy) {
+            int tiles = (int)Math.ceil(unit.hitSize / Vars.tilesize);
+            for (int dy = 0; dy < tiles; dy++) {
+                for (int dx = 0; dx < tiles; dx++) {
                     Tile t = Vars.world.tile(tile.x + gx + dx, tile.y + gy + dy);
                     if (t == null) return false;
-                    if (!type.flying && (t.solid() || t.floor().isDeep())) return false;
-                    if (type.flying && t.solid()) return false;
+                    if (!unit.flying && (t.solid() || t.floor().isDeep())) return false;
+                    if (unit.flying && t.solid()) return false;
                 }
             }
             return true;
@@ -210,24 +242,24 @@ public class MultiAssembler extends GenericCrafter {
 
             for (int i = jobs.size - 1; i >= 0; i--) {
                 UnitJob job = jobs.get(i);
+                Recipe r = job.recipe;
 
-                if (!canPlaceAt(job.recipe.unit, job.offsetX, job.offsetY)) {
+                // 落点不合法就暂停这个任务
+                if (!canPlace(r.unit, job.offsetX, job.offsetY)) {
                     job.progress = 0f;
                     continue;
                 }
-
-                if (!hasMaterials(job.recipe)) {
-                    continue;
-                }
+                // 材料不足就暂停
+                if (!hasMaterials(r)) continue;
 
                 job.progress += eff;
-                if (job.progress >= job.recipe.craftTime) {
-                    consumeMaterials(job.recipe);
+                if (job.progress >= r.craftTime) {
+                    consumeMaterials(r);
 
-                    Unit u = job.recipe.unit.create(team);
+                    Unit u = r.unit.create(team);
                     u.set(
-                        tile.x * Vars.tilesize + (job.offsetX + 0.5f) * Vars.tilesize,
-                        tile.y * Vars.tilesize + (job.offsetY + 0.5f) * Vars.tilesize
+                        tile.worldx() + (job.offsetX + 0.5f) * Vars.tilesize,
+                        tile.worldy() + (job.offsetY + 0.5f) * Vars.tilesize
                     );
                     u.rotation = rotation * 90f;
                     u.add();
@@ -237,27 +269,31 @@ public class MultiAssembler extends GenericCrafter {
             }
         }
 
-        /** 检查材料是否足够 */
-        public boolean hasMaterials(UnitRecipe recipe) {
-            for (ItemStack stack : recipe.inputItems) {
-                if (items.get(stack.item) < stack.amount) return false;
+        /** 检查材料：物品 + 液体 + 载荷 */
+        public boolean hasMaterials(Recipe r) {
+            for (ItemStack s : r.inputItems) {
+                if (items.get(s.item) < s.amount) return false;
             }
-            for (LiquidStack stack : recipe.inputLiquids) {
-                if (liquids.get(stack.liquid) < stack.amount) return false;
+            for (LiquidStack s : r.inputLiquids) {
+                if (liquids.get(s.liquid) < s.amount) return false;
             }
-            for (PayloadStack stack : recipe.cachedInputPayloads) {
-                if (getPayloads() == null || getPayloads().get(stack.item) < stack.amount) return false;
+            for (PayloadStack s : r.cachedInputPayloads) {
+                int have = payloadCounts.get(s.item, 0);
+                if (have < s.amount) return false;
             }
             return true;
         }
 
-        /** 消耗材料 */
-        public void consumeMaterials(UnitRecipe recipe) {
-            for (ItemStack stack : recipe.inputItems) items.remove(stack.item, stack.amount);
-            for (LiquidStack stack : recipe.inputLiquids) liquids.remove(stack.liquid, stack.amount);
-            if (getPayloads() != null) {
-                for (PayloadStack stack : recipe.cachedInputPayloads) {
-                    getPayloads().remove(stack.item, stack.amount);
+        /** 消耗材料：物品 + 液体 + 载荷 */
+        public void consumeMaterials(Recipe r) {
+            for (ItemStack s : r.inputItems) items.remove(s.item, s.amount);
+            for (LiquidStack s : r.inputLiquids) liquids.remove(s.liquid, s.amount);
+            for (PayloadStack s : r.cachedInputPayloads) {
+                int have = payloadCounts.get(s.item, 0);
+                if (have <= s.amount) {
+                    payloadCounts.remove(s.item);
+                } else {
+                    payloadCounts.put(s.item, have - s.amount);
                 }
             }
         }
@@ -265,26 +301,26 @@ public class MultiAssembler extends GenericCrafter {
         @Override
         public void drawSelect() {
             super.drawSelect();
-            if (jobs.isEmpty()) return;
 
+            // 绘制所有任务的位置框
             for (UnitJob job : jobs) {
-                int unitTiles = Mathf.ceil(job.recipe.unit.hitSize / Vars.tilesize);
-                boolean ok = canPlaceAt(job.recipe.unit, job.offsetX, job.offsetY);
+                int tiles = (int)Math.ceil(job.recipe.unit.hitSize / Vars.tilesize);
+                boolean ok = canPlace(job.recipe.unit, job.offsetX, job.offsetY);
                 Color c = ok ? Color.green : Color.red;
 
                 Draw.color(c, 0.3f);
                 Fill.rect(
-                    tile.x * Vars.tilesize + (job.offsetX + unitTiles / 2f) * Vars.tilesize,
-                    tile.y * Vars.tilesize + (job.offsetY + unitTiles / 2f) * Vars.tilesize,
-                    unitTiles * Vars.tilesize, unitTiles * Vars.tilesize
+                    tile.worldx() + (job.offsetX + tiles / 2f) * Vars.tilesize,
+                    tile.worldy() + (job.offsetY + tiles / 2f) * Vars.tilesize,
+                    tiles * Vars.tilesize, tiles * Vars.tilesize
                 );
 
                 Draw.color(c);
                 Lines.stroke(1.2f);
                 Lines.rect(
-                    tile.x * Vars.tilesize + job.offsetX * Vars.tilesize,
-                    tile.y * Vars.tilesize + job.offsetY * Vars.tilesize,
-                    unitTiles * Vars.tilesize, unitTiles * Vars.tilesize
+                    tile.worldx() + job.offsetX * Vars.tilesize,
+                    tile.worldy() + job.offsetY * Vars.tilesize,
+                    tiles * Vars.tilesize, tiles * Vars.tilesize
                 );
             }
             Draw.reset();
@@ -300,6 +336,12 @@ public class MultiAssembler extends GenericCrafter {
                 write.i(j.offsetX);
                 write.i(j.offsetY);
             }
+            // 载荷计数
+            write.i(payloadCounts.size);
+            for (ObjectMap.Entry<UnlockableContent, Integer> e : payloadCounts) {
+                write.s(e.key.id);
+                write.i(e.value);
+            }
         }
 
         @Override
@@ -313,10 +355,19 @@ public class MultiAssembler extends GenericCrafter {
                 int ox = read.i();
                 int oy = read.i();
                 if (idx >= 0 && idx < recipes.size) {
-                    UnitJob job = new UnitJob(recipes.get(idx), ox, oy);
-                    job.progress = prog;
-                    jobs.add(job);
+                    UnitJob j = new UnitJob(recipes.get(idx), ox, oy);
+                    j.progress = prog;
+                    jobs.add(j);
                 }
+            }
+            int pn = read.i();
+            payloadCounts.clear();
+            for (int i = 0; i < pn; i++) {
+                int id = read.s();
+                int count = read.i();
+                UnlockableContent c = Vars.content.getByID(ContentType.block, id);
+                if (c == null) c = Vars.content.getByID(ContentType.unit, id);
+                if (c != null) payloadCounts.put(c, count);
             }
         }
     }
