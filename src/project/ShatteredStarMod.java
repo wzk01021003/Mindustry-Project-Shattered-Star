@@ -5,6 +5,7 @@ import arc.util.*;
 import mindustry.game.EventType.*;
 import mindustry.mod.*;
 import mindustry.ui.dialogs.*;
+import project.blocks.MultiAssembler;
 
 public class ShatteredStarMod extends Mod{
 
@@ -28,6 +29,8 @@ public class ShatteredStarMod extends Mod{
     @Override
     public void loadContent(){
         Log.info("Loading some example content.");
+
+        new MultiAssembler("multi-assembler");
     }
 
 }
