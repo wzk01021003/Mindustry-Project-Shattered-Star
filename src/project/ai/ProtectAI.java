@@ -12,13 +12,13 @@ import mindustry.gen.Unit;
 import project.content.ProtectModeRegistry;
 import project.content.ProtectModes;
 
+import static mindustry.Vars.*;
+
 /**
  * 保护 AI：
  *  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
  *  - 行为按 ProtectModes 分四种：ATTACK / PUSH / SHIELD / PASSIVE
- *  - 完全不动原版寻路
- *
- * 关键：锚点从外层 CommandAI 的 targetPos 读取（玩家点位置时存在那里）
+ *  - 非飞行单位用 ControlPathfinder 显式寻路（会绕开墙 / 建筑）
  */
 public class ProtectAI extends AIController {
 
@@ -27,7 +27,13 @@ public class ProtectAI extends AIController {
     public static float engageRange = 220f;
     public static float pushContact = 20f;
     public static float shieldOffset = 45f;
-    public static float retargetInterval = 15f;
+
+    /** 非飞行 moveTo 的 smoothing，100f 与原版 CommandAI 一致 */
+    public static float groundSmoothing = 100f;
+    /** 飞行 moveTo 的 smoothing */
+    public static float flySmoothing = 40f;
+    /** 距离终点小于这个值直接 moveTo，不走寻路 */
+    public static float directApproachDist = 40f;
 
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
@@ -40,11 +46,14 @@ public class ProtectAI extends AIController {
     public ProtectModes mode;
     protected boolean initialized = false;
 
-    /** 复用向量传 moveTo 的目标坐标 */
     protected final Vec2 targetVec = new Vec2();
 
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
+
+    protected boolean isFlying() {
+        return unit.type.flying;
+    }
 
     protected void ensureInit() {
         if (initialized) return;
@@ -82,11 +91,45 @@ public class ProtectAI extends AIController {
             default:      doAttack(enemy);  break;
         }
 
-        if (!unit.type.flying && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
+        if (!isFlying() && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
             unit.elevation = Mathf.approachDelta(unit.elevation, 0f, unit.type.descentSpeed);
         }
 
         antiStuck();
+    }
+
+    // ================================================================
+    //  寻路核心：目标远就调 pathfinder，目标近才直接 moveTo
+    // ================================================================
+
+    /**
+     * 走向 (x, y)。飞行单位直接 moveTo；地面单位远距离时显式寻路绕墙。
+     * @param range 保留的距离（离目标多远停下）
+     */
+    protected void pathTowards(float x, float y, float range) {
+        // 飞行：直线
+        if (isFlying()) {
+            targetVec.set(x, y);
+            moveTo(targetVec, range, flySmoothing);
+            return;
+        }
+
+        // 距离目标近：直接冲
+        float distToTarget = Mathf.dst(unit.x, unit.y, x, y);
+        if (distToTarget <= directApproachDist) {
+            targetVec.set(x, y);
+            moveTo(targetVec, range, groundSmoothing);
+            return;
+        }
+
+        // 远：请求寻路
+        Tmp.v2.set(x, y);
+        var result = controlPath.getPathPosition(unit, Tmp.v2);
+
+        if (result.move) {
+            moveTo(result.dest, range, groundSmoothing);
+        }
+        // 找不到路径就什么都不做，下一帧再试
     }
 
     // ================================================================
@@ -103,11 +146,11 @@ public class ProtectAI extends AIController {
             if (dst <= engage) {
                 unit.lookAt(enemy);
             } else {
-                moveTo(enemy, engage, 100f);
+                // 朝敌人走，也要寻路
+                pathTowards(enemy.getX(), enemy.getY(), engage);
             }
         } else {
-            targetVec.set(anchorX, anchorY);
-            moveTo(targetVec, followDist, 100f);
+            pathTowards(anchorX, anchorY, followDist);
         }
     }
 
@@ -116,44 +159,43 @@ public class ProtectAI extends AIController {
         if (enemy != null) {
             float dst = unit.dst(enemy);
 
+            // 推开需要贴脸，先寻路接近，最后 20 格直接冲
             if (dst > pushContact) {
-                Tmp.v1.set(enemy.getX(), enemy.getY()).sub(unit).setLength(unit.speed());
-                unit.movePref(Tmp.v1);
+                pathTowards(enemy.getX(), enemy.getY(), pushContact);
             } else {
+                // 已经贴上：用力推
                 Tmp.v1.set(enemy.getX(), enemy.getY()).sub(unit).setLength(unit.speed() * 1.5f);
                 unit.movePref(Tmp.v1);
             }
             unit.lookAt(enemy);
         } else {
-            targetVec.set(anchorX, anchorY);
-            moveTo(targetVec, followDist, 100f);
+            pathTowards(anchorX, anchorY, followDist);
         }
     }
 
     /** 护盾：挡在锚点和敌人之间 */
     protected void doShield(Teamc enemy) {
         if (enemy != null) {
+            // 锚点 → 敌人方向，偏移 shieldOffset 的位置
             Tmp.v1.set(enemy.getX() - anchorX, enemy.getY() - anchorY).setLength(shieldOffset);
-            Tmp.v2.set(anchorX + Tmp.v1.x, anchorY + Tmp.v1.y);
+            float tx = anchorX + Tmp.v1.x;
+            float ty = anchorY + Tmp.v1.y;
 
-            float dst = unit.dst(Tmp.v2.x, Tmp.v2.y);
+            float dst = unit.dst(tx, ty);
 
             if (dst > 15f) {
-                targetVec.set(Tmp.v2.x, Tmp.v2.y);
-                moveTo(targetVec, 10f, 100f);
+                pathTowards(tx, ty, 10f);
             } else {
                 unit.lookAt(enemy);
             }
         } else {
-            targetVec.set(anchorX, anchorY);
-            moveTo(targetVec, followDist * 0.6f, 100f);
+            pathTowards(anchorX, anchorY, followDist * 0.6f);
         }
     }
 
     /** 被动：只跟随锚点 */
     protected void doPassive() {
-        targetVec.set(anchorX, anchorY);
-        moveTo(targetVec, followDist, 100f);
+        pathTowards(anchorX, anchorY, followDist);
     }
 
     // ================================================================
