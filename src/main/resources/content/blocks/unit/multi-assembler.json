@@ -1,49 +1,50 @@
 {
-  "type": "MultiAssembler",
-  "size": 5,
-  "health": 3500,
-  "maxCount": 8,
-  "padding": 3,
-  "maxAreaSize": 24,
-  "requirements": [
-    "thorium/500",
-    "oxide/150",
-    "carbide/80",
-    "silicon/650"
-  ],
-  "consumePower": 5,
-  "consumeLiquid": { "liquid": "cryofluid", "amount": 0.5 },
-  "plans": [
-    {
-      "unit": "dagger",
-      "time": 900,
-      "requirements": [
-        "silicon/10",
-        "lead/10"
-      ]
-    },
-    {
-      "unit": "flare",
-      "time": 900,
-      "requirements": [
-        "silicon/15"
-      ]
-    },
-    {
-      "unit": "vanquish",
-      "time": 3000,
-      "requirements": [
-        "stell/4",
-        "tungsten-wall-large/10"
-      ]
-    },
-    {
-      "unit": "conquer",
-      "time": 9000,
-      "requirements": [
-        "locus/6",
-        "carbide-wall-large/20"
-      ]
-    }
-  ]
+    "type": "MultiAssembler",
+    "size": 5,
+    "health": 3500,
+    "maxCount": 8,
+    "padding": 3,
+    "maxAreaSize": 24,
+    "requirements": [
+        "thorium/500",
+        "oxide/150",
+        "carbide/80",
+        "silicon/650"
+    ],
+    "consumePower": 5,
+    "consumeLiquid": {
+        "liquid": "cryofluid", "amount": 0.5 },
+    "plans": [
+        {
+            "unit": "dagger",
+            "time": 900,
+            "requirements": [
+                "silicon/10",
+                "lead/10"
+            ]
+        },
+        {
+            "unit": "flare",
+            "time": 900,
+            "requirements": [
+                "silicon/15"
+            ]
+        },
+        {
+            "unit": "vanquish",
+            "time": 3000,
+            "requirements": [
+                "stell/4",
+                "tungsten-wall-large/10"
+            ]
+        },
+        {
+            "unit": "conquer",
+            "time": 9000,
+            "requirements": [
+                "locus/6",
+                "carbide-wall-large/20"
+            ]
+        }
+    ]
 }

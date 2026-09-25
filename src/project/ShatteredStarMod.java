@@ -30,7 +30,6 @@ public class ShatteredStarMod extends Mod{
     public void loadContent(){
         Log.info("Loading some example content.");
 
-        new MultiAssembler("multi-assembler");
     }
 
 }
