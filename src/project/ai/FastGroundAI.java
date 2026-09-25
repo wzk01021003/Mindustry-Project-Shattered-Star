@@ -8,16 +8,15 @@ import mindustry.gen.Teamc;
 
 public class FastGroundAI extends GroundAI {
 
+    // ============ 控距参数 ============
     public static float engageFactor = 0.85f;
     public static float retreatFactor = 0.55f;
 
-    /** 是否在射程内横向移动（绕圈）。默认关闭，进射程就停下 */
     public static boolean strafeInRange = false;
-    /** 横向移动强度（0~1），只有 strafeInRange = true 时才用 */
     public static float sideSpreadStrength = 0.4f;
-    /** 横向移动的额外随机相位幅度（度） */
     public static float jitterAmp = 10f;
 
+    // ============ 卡死检测 ============
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
@@ -34,44 +33,44 @@ public class FastGroundAI extends GroundAI {
     public void updateMovement() {
         super.updateMovement();
         applyCombatLayer();
+        forceFaceTarget();
         antiStuck();
     }
 
     protected void applyCombatLayer() {
         if (unit == null || !unit.isAdded()) return;
         if (unit.type.weapons.isEmpty()) return;
-        if (unit.range() <= 0f) return;
 
         Teamc enemy = target;
         if (enemy == null) return;
 
-        float dst = unit.dst(enemy);
-        float range = Math.max(unit.range(), 40f);
+        // ★ 控距用最小武器射程
+        float range = Math.max(AIUtils.minRange(unit.type), 40f);
         float engage = range * engageFactor;
         float retreat = range * retreatFactor;
 
-        // 太远：让原版 AI 继续接近
+        float dst = unit.dst(enemy);
         if (dst > engage) return;
 
         float speed = unit.speed();
         float angleToEnemy = Mathf.angle(enemy.getX() - unit.x, enemy.getY() - unit.y);
 
         if (dst < retreat) {
-            // 太近：后退（不管 strafeInRange 开不开，后退都生效）
             Tmp.v1.trns(angleToEnemy + 180f, speed);
             unit.movePref(Tmp.v1);
         } else if (strafeInRange) {
-            // 射程内且开启横移：绕圈
             float sideSign = (unit.id % 2 == 0) ? 1f : -1f;
             float jitter = Mathf.sin(Time.time * 0.05f + unit.id * 0.37f) * jitterAmp;
             Tmp.v1.trns(angleToEnemy + 90f * sideSign + jitter, speed * sideSpreadStrength);
             unit.movePref(Tmp.v1);
         }
-        // 否则：什么都不做，停下 —— 让它自然站在原地开火
+    }
 
-        if (!unit.type.omniMovement) {
-            unit.lookAt(enemy);
-        }
+    protected void forceFaceTarget() {
+        if (target == null) return;
+        if (unit.type.weapons.isEmpty()) return;
+        if (unit.type.omniMovement) return;
+        unit.lookAt(target);
     }
 
     protected void antiStuck() {

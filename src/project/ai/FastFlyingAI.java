@@ -11,7 +11,6 @@ public class FastFlyingAI extends FlyingAI {
     public static float engageFactor = 0.85f;
     public static float retreatFactor = 0.55f;
 
-    /** 飞行单位默认开启横移（盘旋看起来更自然） */
     public static boolean strafeInRange = true;
     public static float sideSpreadStrength = 0.5f;
     public static float jitterAmp = 10f;
@@ -32,22 +31,22 @@ public class FastFlyingAI extends FlyingAI {
     public void updateMovement() {
         super.updateMovement();
         applyCombatLayer();
+        forceFaceTarget();
         antiStuck();
     }
 
     protected void applyCombatLayer() {
         if (unit == null || !unit.isAdded()) return;
         if (unit.type.weapons.isEmpty()) return;
-        if (unit.range() <= 0f) return;
 
         Teamc enemy = target;
         if (enemy == null) return;
 
-        float dst = unit.dst(enemy);
-        float range = Math.max(unit.range(), 40f);
+        float range = Math.max(AIUtils.minRange(unit.type), 40f);
         float engage = range * engageFactor;
         float retreat = range * retreatFactor;
 
+        float dst = unit.dst(enemy);
         if (dst > engage) return;
 
         float speed = unit.speed();
@@ -62,6 +61,13 @@ public class FastFlyingAI extends FlyingAI {
             Tmp.v1.trns(angleToEnemy + 90f * sideSign + jitter, speed * sideSpreadStrength);
             unit.movePref(Tmp.v1);
         }
+    }
+
+    protected void forceFaceTarget() {
+        if (target == null) return;
+        if (unit.type.weapons.isEmpty()) return;
+        if (unit.type.omniMovement) return;
+        unit.lookAt(target);
     }
 
     protected void antiStuck() {

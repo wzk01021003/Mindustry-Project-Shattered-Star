@@ -35,9 +35,19 @@ public class ProtectAI extends AIController {
     public static float slotRadius = 70f;
     public static float slotAngleOffset = 137.508f;
     public static float attackOffset = 18f;
-    public static float separationMul = 2.8f;
-    public static float separationStrength = 0.8f;
     public static float anchorFollowRange = 40f;
+
+    // ============ 分离参数 ============
+    /** 双方 hitSize 之和的倍数 */
+    public static float separationFactor = 0.65f;
+    /** 额外固定间距（格） */
+    public static float separationMargin = 4f;
+    /** 搜索半径 = hitSize × 此值 */
+    public static float sepSearchMul = 3f;
+    /** 搜索半径额外固定值 */
+    public static float sepSearchMargin = 20f;
+    /** 分离力强度 */
+    public static float separationStrength = 0.8f;
 
     // ============ 运行时状态 ============
     public float anchorX, anchorY;
@@ -62,7 +72,8 @@ public class ProtectAI extends AIController {
         if (initialized) return;
         initialized = true;
         mode = ProtectModeRegistry.get(unit.type);
-        hasWeapons = !unit.type.weapons.isEmpty() && unit.range() > 0f;
+        // ★ 有武器判定：需要存在有效射程的武器
+        hasWeapons = !unit.type.weapons.isEmpty() && AIUtils.minRange(unit.type) > 0f;
     }
 
     protected float slotAngle() {
@@ -74,6 +85,10 @@ public class ProtectAI extends AIController {
         out.set(centerX + Angles.trnsx(ang, slotRadius),
                 centerY + Angles.trnsy(ang, slotRadius));
     }
+
+    // ================================================================
+    //  锚点
+    // ================================================================
 
     protected void refreshAnchor() {
         if (unit == null) return;
@@ -110,11 +125,16 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  主循环
+    // ================================================================
+
     @Override
     public void updateMovement() {
         ensureInit();
         refreshAnchor();
 
+        // 索敌：以锚点为中心，用最大射程（要能看到远处的敌人）
         if (hasAnchor && hasWeapons) {
             if (retarget() || target == null
                 || Units.invalidateTarget(target, unit.team, unit.x, unit.y, Float.MAX_VALUE)) {
@@ -165,17 +185,24 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  分离力（自适应）
+    // ================================================================
+
     protected void applySeparation() {
-        float sepRadius = unit.hitSize * separationMul;
+        if (unit == null || !unit.isAdded()) return;
+
+        float sepRadius = AIUtils.separationRadius(unit, sepSearchMul, sepSearchMargin);
         sepAccum.setZero();
 
         Units.nearby(unit.team, unit.x, unit.y, sepRadius, other -> {
             if (other == unit) return;
-            if (!AIUtils.sameMovementClass(unit, other)) return;  // ← 只对同类分散
+            if (!AIUtils.sameMovementClass(unit, other)) return;
             if (!(other.controller() instanceof ProtectAI)) return;
 
+            float minDist = AIUtils.separationDistance(unit, other, separationFactor, separationMargin);
             float dst = unit.dst(other);
-            float minDist = (unit.hitSize + other.hitSize) / 2f + 6f;
+
             if (dst < minDist && dst > 0.01f) {
                 float strength = (minDist - dst) / minDist;
                 sepAccum.add((unit.x - other.x) / dst * strength,
@@ -188,6 +215,10 @@ public class ProtectAI extends AIController {
             unit.vel.add(sepAccum);
         }
     }
+
+    // ================================================================
+    //  寻路
+    // ================================================================
 
     protected void pathTowards(float x, float y, float range) {
         if (isFlying()) {
@@ -211,12 +242,18 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  四种模式
+    // ================================================================
+
+    /** 攻击：追敌人走槽位偏移；无敌人回槽位 */
     protected void doAttack(Teamc enemy) {
         if (!hasWeapons) { doPassive(); return; }
 
         if (enemy != null) {
             float dst = unit.dst(enemy);
-            float range = Math.max(unit.range(), 40f);
+            // ★ 控距用最小武器射程
+            float range = Math.max(AIUtils.minRange(unit.type), 40f);
             float engage = range * 0.85f;
 
             if (dst > engage) {
@@ -225,6 +262,7 @@ public class ProtectAI extends AIController {
                 float oy = Angles.trnsy(ang, attackOffset);
                 pathTowards(enemy.getX() + ox, enemy.getY() + oy, engage);
             }
+            // 射程内：不动，让 updateMovement 末尾的 lookAt + controlWeapons 处理
         } else {
             getSlotPos(anchorX, anchorY, targetVec);
             pathTowards(targetVec.x, targetVec.y, 5f);
@@ -254,6 +292,7 @@ public class ProtectAI extends AIController {
 
     protected void doShield(Teamc enemy) {
         if (enemy != null) {
+            // 锚点 → 敌人方向偏移 shieldOffset，再按槽位角度微调
             Tmp.v1.set(enemy.getX() - anchorX, enemy.getY() - anchorY).setLength(shieldOffset);
             float ang = slotAngle();
             float ox = Angles.trnsx(ang, 15f);
@@ -273,6 +312,10 @@ public class ProtectAI extends AIController {
         getSlotPos(anchorX, anchorY, targetVec);
         pathTowards(targetVec.x, targetVec.y, 5f);
     }
+
+    // ================================================================
+    //  卡死检测
+    // ================================================================
 
     protected void antiStuck() {
         if (unit == null || !unit.isAdded()) return;
