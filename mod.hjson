@@ -1,7 +1,7 @@
 displayName: "Project Shattered Starr"
 name: "ss"
 author: "A4PAPER"
-main: "projectroject.ShatteredStarMod"
+main: "project.ShatteredStarMod"
 description: "A Mindustry Java mod template."
 version: 0.2.0
 minGameVersion: 160
