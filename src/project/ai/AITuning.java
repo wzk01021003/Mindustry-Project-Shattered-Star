@@ -58,7 +58,6 @@ public class AITuning {
 
             Turret t = (Turret) b;
             t.targetInterval = interval;
-            t.targetSwitchInterval = interval;
             count++;
         }
         Log.info("[ss] Applied targetInterval=" + interval + " to " + count + " turrets.");

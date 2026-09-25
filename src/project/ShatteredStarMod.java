@@ -9,6 +9,7 @@ import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.units.AIController;
 import mindustry.game.EventType.UnitCreateEvent;
+import mindustry.gen.UnitController;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.AITuning;
@@ -81,7 +82,7 @@ public class ShatteredStarMod extends Mod {
             Log.err("Failed to register commands to content list", t);
         }
 
-        // ============ 3. 加指令到所有支持指挥的单位 ============
+        // ============ 3. 加指令 ============
         int count = 0;
         for (UnitType type : content.units()) {
             if (type == null) continue;
@@ -109,7 +110,7 @@ public class ShatteredStarMod extends Mod {
             e.unit.command().command(globalFactoryCommand);
         });
 
-        // ============ 5. 把原版 AI 替换成快速索敌版 ============
+        // ============ 5. 替换原版 AI 为快速索敌版 ============
         Events.on(UnitCreateEvent.class, e -> {
             if (!smartAIEnabled) return;
             if (e.unit == null) return;
@@ -117,9 +118,10 @@ public class ShatteredStarMod extends Mod {
             Time.run(1f, () -> {
                 if (e.unit == null || !e.unit.isValid()) return;
 
-                AIController c = e.unit.controller();
+                UnitController uc = e.unit.controller();
+                if (!(uc instanceof AIController)) return;
+                AIController c = (AIController) uc;
 
-                // 已经是我们自己的 AI
                 if (c instanceof FastGroundAI) return;
                 if (c instanceof FastFlyingAI) return;
                 if (c instanceof HuntAI) return;
