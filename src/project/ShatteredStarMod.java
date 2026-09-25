@@ -1,18 +1,80 @@
 package project;
 
-import arc.util.*;
-import mindustry.mod.*;
+import arc.util.Log;
+import mindustry.ai.UnitCommand;
+import mindustry.mod.Mod;
+import mindustry.type.UnitType;
+import project.ai.HuntAI;
 import project.blocks.MultiAssembler;
 
-public class ShatteredStarMod extends Mod{
+import static mindustry.Vars.content;
 
-    public ShatteredStarMod(){
+public class ShatteredStarMod extends Mod {
+
+    /** 狩猎：远程 kiting，自动判断狗斗 */
+    public static UnitCommand huntCommand;
+    /** 狗斗：强制贴脸 */
+    public static UnitCommand dogfightCommand;
+
+    public ShatteredStarMod() {
         Log.info("Loaded ShatteredStarMod constructor.");
     }
 
     @Override
-    public void loadContent(){
+    public void loadContent() {
         Log.info("Loading content.");
         new MultiAssembler("multi-assembler");
+    }
+
+    @Override
+    public void init() {
+        Log.info("Initializing ShatteredStarMod.");
+
+        // ============ 1. 创建指令 ============
+        huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
+        huntCommand.drawTarget = false;
+        huntCommand.switchToMove = false;
+        huntCommand.resetTarget = false;
+        huntCommand.exactArrival = false;
+
+        dogfightCommand = new UnitCommand("ss-dogfight", "rightOpen", u -> {
+            HuntAI ai = new HuntAI();
+            ai.forceDogfighter = true;
+            return ai;
+        });
+        dogfightCommand.drawTarget = false;
+        dogfightCommand.switchToMove = false;
+        dogfightCommand.resetTarget = false;
+        dogfightCommand.exactArrival = false;
+
+        // ============ 2. 保险：注册到 content.unitCommands() ============
+        try {
+            if (content.unitCommands().indexOf(huntCommand, true) == -1) {
+                content.unitCommands().add(huntCommand);
+            }
+            if (content.unitCommands().indexOf(dogfightCommand, true) == -1) {
+                content.unitCommands().add(dogfightCommand);
+            }
+        } catch (Throwable t) {
+            Log.err("Failed to register commands to content list", t);
+        }
+
+        // ============ 3. 给所有支持指挥的单位加上这两个指令 ============
+        int count = 0;
+        for (UnitType type : content.units()) {
+            if (type == null) continue;
+            if (type.internal) continue;
+            if (type.weapons.isEmpty) continue;       // 无武器不狩猎
+            if (type.commands.isEmpty()) continue;    // 不支持指挥
+
+            if (!type.commands.contains(huntCommand)) {
+                type.commands.add(huntCommand);
+            }
+            if (!type.commands.contains(dogfightCommand)) {
+                type.commands.add(dogfightCommand);
+            }
+            count++;
+        }
+        Log.info("Registered ss-hunt / ss-dogfight to " + count + " unit types.");
     }
 }
