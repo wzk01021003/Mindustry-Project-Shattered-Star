@@ -2,19 +2,11 @@ package project;
 
 import arc.Events;
 import arc.util.Log;
-import arc.util.Time;
 import mindustry.ai.UnitCommand;
-import mindustry.ai.types.CommandAI;
-import mindustry.ai.types.FlyingAI;
-import mindustry.ai.types.GroundAI;
-import mindustry.entities.units.AIController;
-import mindustry.entities.units.UnitController;   // ← 正确的包
 import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
-import project.ai.AITuning;
-import project.ai.FastFlyingAI;
-import project.ai.FastGroundAI;
+import project.ai.GuardAI;
 import project.ai.HuntAI;
 import project.ai.ProtectAI;
 import project.blocks.MultiAssembler;
@@ -25,12 +17,11 @@ import static mindustry.Vars.content;
 public class ShatteredStarMod extends Mod {
 
     public static UnitCommand huntCommand;
-    public static UnitCommand dogfightCommand;
     public static UnitCommand protectCommand;
+    public static UnitCommand guardCommand;
 
     public static UnitCommand globalFactoryCommand = null;
     public static boolean globalFactoryCommandEnabled = false;
-    public static boolean smartAIEnabled = true;
 
     public ShatteredStarMod() {
         Log.info("Loaded ShatteredStarMod constructor.");
@@ -47,24 +38,12 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
-        AITuning.init();
-
         // ============ 1. 指令 ============
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
         huntCommand.drawTarget = false;
         huntCommand.switchToMove = false;
         huntCommand.resetTarget = false;
         huntCommand.exactArrival = false;
-
-        dogfightCommand = new UnitCommand("ss-dogfight", "rightOpen", u -> {
-            HuntAI ai = new HuntAI();
-            ai.forceDogfighter = true;
-            return ai;
-        });
-        dogfightCommand.drawTarget = false;
-        dogfightCommand.switchToMove = false;
-        dogfightCommand.resetTarget = false;
-        dogfightCommand.exactArrival = false;
 
         protectCommand = new UnitCommand("ss-protect", "effect", u -> new ProtectAI());
         protectCommand.drawTarget = true;
@@ -73,27 +52,34 @@ public class ShatteredStarMod extends Mod {
         protectCommand.exactArrival = false;
         protectCommand.snapToBuilding = true;
 
-        // ============ 2. 注册 ============
+        guardCommand = new UnitCommand("ss-guard", "commandRetreat", u -> new GuardAI());
+        guardCommand.drawTarget = true;
+        guardCommand.switchToMove = false;
+        guardCommand.resetTarget = false;
+        guardCommand.exactArrival = false;
+        guardCommand.snapToBuilding = false;
+
+        // ============ 2. 注册到 content ============
         try {
             register(huntCommand);
-            register(dogfightCommand);
             register(protectCommand);
+            register(guardCommand);
         } catch (Throwable t) {
-            Log.err("Failed to register commands to content list", t);
+            Log.err("Failed to register commands", t);
         }
 
-        // ============ 3. 加指令 ============
+        // ============ 3. 给所有支持指挥的单位加上指令 ============
         int count = 0;
         for (UnitType type : content.units()) {
             if (type == null) continue;
             if (type.internal) continue;
             if (type.commands.isEmpty()) continue;
 
-            if (!type.weapons.isEmpty()) {
-                if (!type.commands.contains(huntCommand)) type.commands.add(huntCommand);
-                if (!type.commands.contains(dogfightCommand)) type.commands.add(dogfightCommand);
+            if (!type.weapons.isEmpty() && !type.commands.contains(huntCommand)) {
+                type.commands.add(huntCommand);
             }
             if (!type.commands.contains(protectCommand)) type.commands.add(protectCommand);
+            if (!type.commands.contains(guardCommand)) type.commands.add(guardCommand);
             count++;
         }
         Log.info("Registered commands to " + count + " unit types.");
@@ -108,35 +94,6 @@ public class ShatteredStarMod extends Mod {
             if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
 
             e.unit.command().command(globalFactoryCommand);
-        });
-
-        // ============ 5. 替换原版 AI 为快速索敌版 ============
-        Events.on(UnitCreateEvent.class, e -> {
-            if (!smartAIEnabled) return;
-            if (e.unit == null) return;
-
-            Time.run(1f, () -> {
-                if (e.unit == null || !e.unit.isValid()) return;
-
-                UnitController uc = e.unit.controller();
-                if (!(uc instanceof AIController)) return;
-                AIController c = (AIController) uc;
-
-                if (c instanceof FastGroundAI) return;
-                if (c instanceof FastFlyingAI) return;
-                if (c instanceof HuntAI) return;
-                if (c instanceof ProtectAI) return;
-                if (c instanceof CommandAI) return;
-
-                AIController replacement = null;
-                if (c instanceof GroundAI) replacement = new FastGroundAI();
-                else if (c instanceof FlyingAI) replacement = new FastFlyingAI();
-
-                if (replacement != null) {
-                    replacement.unit(e.unit);
-                    e.unit.controller(replacement);
-                }
-            });
         });
     }
 
