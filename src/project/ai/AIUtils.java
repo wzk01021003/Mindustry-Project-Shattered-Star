@@ -33,8 +33,16 @@ public class AIUtils {
     }
 
     // ================================================================
-    //  射程（从武器算）
+    //  射程
     // ================================================================
+
+    /** 单个武器的实际射程 = lifetime × speed（BulletType 没有 range() 方法） */
+    public static float weaponRange(Weapon w) {
+        if (w == null || w.bullet == null) return 0f;
+        // 优先用 rangeOverride
+        if (w.bullet.rangeOverride > 0f) return w.bullet.rangeOverride;
+        return w.bullet.lifetime * w.bullet.speed;
+    }
 
     /**
      * 单位所有武器里**最小**的射程。
@@ -46,9 +54,7 @@ public class AIUtils {
 
         float min = Float.MAX_VALUE;
         for (int i = 0; i < type.weapons.size; i++) {
-            Weapon w = type.weapons.get(i);
-            if (w == null || w.bullet == null) continue;
-            float r = w.bullet.range();
+            float r = weaponRange(type.weapons.get(i));
             if (r > 0 && r < min) min = r;
         }
         return min == Float.MAX_VALUE ? 0f : min;
@@ -56,16 +62,14 @@ public class AIUtils {
 
     /**
      * 单位所有武器里**最大**的射程。
-     * 用于索敌范围（索敌用最大射程，才能看到远处的敌人）。
+     * 用于索敌范围。
      */
     public static float maxRange(UnitType type) {
         if (type.weapons.isEmpty()) return 0f;
 
         float max = 0f;
         for (int i = 0; i < type.weapons.size; i++) {
-            Weapon w = type.weapons.get(i);
-            if (w == null || w.bullet == null) continue;
-            float r = w.bullet.range();
+            float r = weaponRange(type.weapons.get(i));
             if (r > max) max = r;
         }
         return max;
@@ -84,7 +88,7 @@ public class AIUtils {
     }
 
     /**
-     * 分离搜索半径。保证能搜到最远的"应该分离"的邻居。
+     * 分离搜索半径。
      */
     public static float separationRadius(Unit a, float mul, float margin) {
         return a.hitSize * mul + margin;
