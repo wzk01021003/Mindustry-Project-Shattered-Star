@@ -4,6 +4,7 @@ import arc.math.Mathf;
 import arc.math.geom.Vec2;
 import arc.util.Time;
 import arc.util.Tmp;
+import mindustry.ai.types.CommandAI;
 import mindustry.entities.Units;
 import mindustry.entities.units.AIController;
 import mindustry.gen.Teamc;
@@ -13,9 +14,11 @@ import project.content.ProtectModes;
 
 /**
  * 保护 AI：
- *  - 玩家点"保护"命令 + 点一个友方建筑/单位 → 单位去保护它
+ *  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
  *  - 行为按 ProtectModes 分四种：ATTACK / PUSH / SHIELD / PASSIVE
  *  - 完全不动原版寻路
+ *
+ * 关键：锚点从外层 CommandAI 的 targetPos 读取（玩家点位置时存在那里）
  */
 public class ProtectAI extends AIController {
 
@@ -37,7 +40,7 @@ public class ProtectAI extends AIController {
     public ProtectModes mode;
     protected boolean initialized = false;
 
-    /** 复用这个向量传 moveTo 的目标坐标，避免每帧分配 */
+    /** 复用向量传 moveTo 的目标坐标 */
     protected final Vec2 targetVec = new Vec2();
 
     protected float lastX = Float.NaN, lastY = Float.NaN;
@@ -49,9 +52,22 @@ public class ProtectAI extends AIController {
         mode = ProtectModeRegistry.get(unit.type);
     }
 
+    /** 从外层 CommandAI 读取玩家点的目标坐标 */
+    protected void refreshAnchor() {
+        if (unit == null) return;
+        var c = unit.controller();
+        if (c instanceof CommandAI cai && cai.targetPos != null) {
+            anchorX = cai.targetPos.x;
+            anchorY = cai.targetPos.y;
+            hasAnchor = true;
+        }
+    }
+
     @Override
     public void updateMovement() {
         ensureInit();
+        refreshAnchor();
+
         if (!hasAnchor) return;
 
         Teamc enemy = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
