@@ -5,14 +5,17 @@ import arc.util.Log;
 import arc.util.Time;
 import mindustry.ai.UnitCommand;
 import mindustry.ai.types.CommandAI;
+import mindustry.ai.types.FlyingAI;
+import mindustry.ai.types.GroundAI;
 import mindustry.entities.units.AIController;
 import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.AITuning;
+import project.ai.FastFlyingAI;
+import project.ai.FastGroundAI;
 import project.ai.HuntAI;
 import project.ai.ProtectAI;
-import project.ai.SmartAIWrapper;
 import project.blocks.MultiAssembler;
 import project.content.ProtectModeRegistry;
 
@@ -43,7 +46,6 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
-        // ★ 启动全局 AI 调优（每帧根据 FPS 决定索敌间隔，应用到炮塔）
         AITuning.init();
 
         // ============ 1. 指令 ============
@@ -70,7 +72,7 @@ public class ShatteredStarMod extends Mod {
         protectCommand.exactArrival = false;
         protectCommand.snapToBuilding = true;
 
-        // ============ 2. 注册到 content ============
+        // ============ 2. 注册 ============
         try {
             register(huntCommand);
             register(dogfightCommand);
@@ -79,7 +81,7 @@ public class ShatteredStarMod extends Mod {
             Log.err("Failed to register commands to content list", t);
         }
 
-        // ============ 3. 给所有支持指挥的单位加上指令 ============
+        // ============ 3. 加指令到所有支持指挥的单位 ============
         int count = 0;
         for (UnitType type : content.units()) {
             if (type == null) continue;
@@ -107,7 +109,7 @@ public class ShatteredStarMod extends Mod {
             e.unit.command().command(globalFactoryCommand);
         });
 
-        // ============ 5. 智能包装层 ============
+        // ============ 5. 把原版 AI 替换成快速索敌版 ============
         Events.on(UnitCreateEvent.class, e -> {
             if (!smartAIEnabled) return;
             if (e.unit == null) return;
@@ -115,14 +117,23 @@ public class ShatteredStarMod extends Mod {
             Time.run(1f, () -> {
                 if (e.unit == null || !e.unit.isValid()) return;
 
-                var c = e.unit.controller();
-                if (!(c instanceof AIController)) return;
-                if (c instanceof SmartAIWrapper) return;
-                if (c instanceof CommandAI) return;
+                AIController c = e.unit.controller();
+
+                // 已经是我们自己的 AI
+                if (c instanceof FastGroundAI) return;
+                if (c instanceof FastFlyingAI) return;
                 if (c instanceof HuntAI) return;
                 if (c instanceof ProtectAI) return;
+                if (c instanceof CommandAI) return;
 
-                e.unit.controller(new SmartAIWrapper((AIController) c));
+                AIController replacement = null;
+                if (c instanceof GroundAI) replacement = new FastGroundAI();
+                else if (c instanceof FlyingAI) replacement = new FastFlyingAI();
+
+                if (replacement != null) {
+                    replacement.unit(e.unit);
+                    e.unit.controller(replacement);
+                }
             });
         });
     }

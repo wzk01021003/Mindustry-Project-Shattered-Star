@@ -11,7 +11,6 @@ import static mindustry.Vars.content;
 
 public class AITuning {
 
-    /** 当前索敌间隔（帧）。所有 AI 应读取这个值 */
     public static float targetInterval = 1f;
 
     private static float lastAppliedInterval = -1f;
@@ -52,13 +51,15 @@ public class AITuning {
 
     private static void applyToTurrets(float interval) {
         int count = 0;
-        for (Block b : content.blocks()) {
-            if (b instanceof Turret) {
-                Turret t = (Turret) b;
-                t.targetInterval = interval;
-                t.targetSwitchInterval = interval;
-                count++;
-            }
+        for (int i = 0; i < content.blocks().size; i++) {
+            Block b = content.blocks().get(i);
+            if (b == null) continue;
+            if (!(b instanceof Turret)) continue;
+
+            Turret t = (Turret) b;
+            t.targetInterval = interval;
+            t.targetSwitchInterval = interval;
+            count++;
         }
         Log.info("[ss] Applied targetInterval=" + interval + " to " + count + " turrets.");
     }
