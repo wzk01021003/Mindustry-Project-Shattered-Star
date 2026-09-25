@@ -9,26 +9,12 @@ import mindustry.world.blocks.defense.turrets.Turret;
 
 import static mindustry.Vars.content;
 
-/**
- * 全局 AI 调优：
- *  - 根据 FPS 动态决定索敌间隔
- *  - 应用到所有炮塔 + 所有使用 AITuning.targetInterval 的 AI
- *
- * FPS 档位：
- *   >= 55  → 1 帧（每帧索敌）
- *   >= 45  → 2 帧
- *   >= 35  → 3 帧
- *   >= 25  → 5 帧
- *   <  25  → 10 帧
- */
 public class AITuning {
 
     /** 当前索敌间隔（帧）。所有 AI 应读取这个值 */
     public static float targetInterval = 1f;
 
-    /** 上次应用到炮塔的 interval，避免每帧都遍历 content */
     private static float lastAppliedInterval = -1f;
-
     private static int sampleFrames = 0;
     private static boolean inited = false;
 
@@ -40,7 +26,6 @@ public class AITuning {
     }
 
     private static void tick() {
-        // 每 60 帧采样一次，避免 FPS 抖动导致频繁切换
         sampleFrames++;
         if (sampleFrames < 60) return;
         sampleFrames = 0;
@@ -59,7 +44,6 @@ public class AITuning {
             Log.info("[ss] FPS=" + (int) fps + " -> targetInterval=" + newInterval);
         }
 
-        // 只在 interval 变化时重写炮塔字段
         if (newInterval != lastAppliedInterval) {
             lastAppliedInterval = newInterval;
             applyToTurrets(newInterval);
@@ -69,7 +53,8 @@ public class AITuning {
     private static void applyToTurrets(float interval) {
         int count = 0;
         for (Block b : content.blocks()) {
-            if (b instanceof Turret t) {
+            if (b instanceof Turret) {
+                Turret t = (Turret) b;
                 t.targetInterval = interval;
                 t.targetSwitchInterval = interval;
                 count++;

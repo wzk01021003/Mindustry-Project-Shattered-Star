@@ -25,30 +25,52 @@ public class SmartAIWrapper extends AIController {
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
 
-    /** 用于按 AITuning.targetInterval 强制 delegate 重索敌 */
-    protected float retargetTimer = 0f;
-
     public SmartAIWrapper(AIController delegate) {
         this.delegate = delegate;
     }
 
     @Override
     public void updateUnit() {
+        // 1. 让 delegate 决定寻路 / 移动
         if (delegate != null) {
             if (delegate.unit() != unit) delegate.unit(unit);
-
-            // ★ 根据 AITuning.targetInterval 定时强制 delegate 重新索敌
-            retargetTimer += Time.delta;
-            if (retargetTimer >= AITuning.targetInterval) {
-                retargetTimer = 0f;
-                delegate.timer.reset(AIController.timerTarget, 1000f);
-            }
-
             delegate.updateUnit();
         }
 
+        // 2. wrapper 自己高频索敌（用 AITuning.targetInterval 控制频率）
+        quickRetarget();
+
+        // 3. 战斗层
         applyCombatLayer();
+
+        // 4. 防卡死
         antiStuck();
+    }
+
+    /**
+     * 用 wrapper 自己的 timer 做高频索敌，覆盖 delegate.target。
+     * wrapper 是 AIController 子类，可以访问自己的 protected timer。
+     */
+    protected void quickRetarget() {
+        if (unit == null) return;
+        if (unit.type.weapons.isEmpty()) return;
+        if (unit.range() <= 0f) return;
+
+        if (retarget() || target == null
+            || Units.invalidateTarget(target, unit.team, unit.x, unit.y, Float.MAX_VALUE)) {
+            target = Units.closestTarget(unit.team, unit.x, unit.y,
+                unit.range() * 1.5f,
+                u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
+                b -> unit.type.targetGround);
+
+            // 同步给 delegate，让它的射击逻辑用新 target
+            if (delegate != null) delegate.target = target;
+        }
+    }
+
+    @Override
+    public boolean retarget() {
+        return timer.get(timerTarget, AITuning.targetInterval);
     }
 
     protected void applyCombatLayer() {
@@ -56,10 +78,9 @@ public class SmartAIWrapper extends AIController {
         if (unit.type.weapons.isEmpty()) return;
         if (unit.range() <= 0f) return;
 
-        Teamc enemy = Units.closestTarget(unit.team, unit.x, unit.y,
-            unit.range() * 1.5f,
-            u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
-            b -> unit.type.targetGround);
+        // 用 wrapper 自己的 target（会同步给 delegate）
+        Teamc enemy = target;
+        if (enemy == null && delegate != null) enemy = delegate.target;
         if (enemy == null) return;
 
         float dst = unit.dst(enemy);
