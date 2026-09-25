@@ -1,8 +1,9 @@
-displayName: "Java Mod Template"
-name: "example-java-mod"
+displayName: "Project Shattered Star"
+name: "ss"
 author: "A4PAPER"
-main: "example.ExampleJavaMod"
+main: "projectroject.ShatteredStarMod"
 description: "A Mindustry Java mod template."
 version: 0.2.0
 minGameVersion: 160
 java: true
+hasScript: true
