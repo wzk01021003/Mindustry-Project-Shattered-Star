@@ -13,20 +13,14 @@ import mindustry.gen.Unit;
  *  - 寻路 / 寻敌 / 目标选择：完全交给原版 AI（delegate）
  *  - 战斗层：进入射程后，控制距离（kiting）+ 横向分散
  *  - 兜底：卡死检测 + 救援推力
- *
- * 关键原则：距离大于 engage 时完全不介入，让原 AI 自由寻路接近。
- *          只有进入射程后才接管移动向量。
  */
 public class SmartAIWrapper extends AIController {
 
     public final AIController delegate;
 
     // ============ 战斗层参数 ============
-    /** 进入"交战接管"的距离 = 射程 × 此系数 */
     public static float engageFactor = 0.85f;
-    /** 后退距离 = 射程 × 此系数 */
     public static float retreatFactor = 0.55f;
-    /** 横向分散速度比例（0~1） */
     public static float sideSpreadStrength = 0.6f;
 
     // ============ 卡住检测参数 ============
@@ -50,25 +44,18 @@ public class SmartAIWrapper extends AIController {
             delegate.updateUnit();
         }
 
-        // 2. 叠加战斗层（只影响移动向量，不改目标 / 不改寻路）
+        // 2. 叠加战斗层
         applyCombatLayer();
 
         // 3. 兜底：卡住检测
         antiStuck();
     }
 
-    /**
-     * 战斗层：
-     *  - 距离 > engage：不介入，原 AI 继续寻路接近
-     *  - 距离在 (retreat, engage)：横向移动，保持距离 + 分散
-     *  - 距离 < retreat：后退，拉开距离
-     */
     protected void applyCombatLayer() {
         if (unit == null || !unit.isAdded()) return;
-        if (unit.type.weapons.isEmpty) return;
+        if (unit.type.weapons.isEmpty()) return;   // ← 就是这里
         if (unit.range() <= 0f) return;
 
-        // 找最近敌人（单位或建筑）
         Teamc enemy = Units.closestTarget(unit.team, unit.x, unit.y,
             unit.range() * 1.5f,
             u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
@@ -80,32 +67,26 @@ public class SmartAIWrapper extends AIController {
         float engage = range * engageFactor;
         float retreat = range * retreatFactor;
 
-        // 距离还远 → 原 AI 处理接近（它自己会寻路绕墙）
         if (dst > engage) return;
 
         float speed = unit.speed();
         float angleToEnemy = Mathf.angle(enemy.getX() - unit.x, enemy.getY() - unit.y);
 
         if (dst < retreat) {
-            // 太近：往反方向后退
             Tmp.v1.trns(angleToEnemy + 180f, speed);
             unit.movePref(Tmp.v1);
         } else {
-            // 范围内：横向移动，用 unit.id 决定左右，避免所有单位往同一侧挤
             float sideSign = (unit.id % 2 == 0) ? 1f : -1f;
-            // 加一点 id 相关的微偏移，让轨迹不完全同步
             float jitter = Mathf.sin(Time.time * 0.05f + unit.id * 0.37f) * 15f;
             Tmp.v1.trns(angleToEnemy + 90f * sideSign + jitter, speed * sideSpreadStrength);
             unit.movePref(Tmp.v1);
         }
 
-        // 非全向单位需要朝向敌人才能开火
         if (!unit.type.omniMovement) {
             unit.lookAt(enemy);
         }
     }
 
-    /** 卡住检测：想动但没动 → 累积计时 → 触发救援 */
     protected void antiStuck() {
         if (unit == null || !unit.isAdded()) return;
 
@@ -133,7 +114,6 @@ public class SmartAIWrapper extends AIController {
         }
     }
 
-    /** 救援：随机方向推一下，让原 AI 重新规划 */
     protected void rescue() {
         if (unit == null) return;
         Tmp.v1.trns(Mathf.random(360f), unit.speed() * rescueSpeedMul);
