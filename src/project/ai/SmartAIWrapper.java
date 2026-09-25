@@ -8,29 +8,25 @@ import mindustry.entities.units.AIController;
 import mindustry.gen.Teamc;
 import mindustry.gen.Unit;
 
-/**
- * 智能 AI 包装器：
- *  - 寻路 / 寻敌 / 目标选择：完全交给原版 AI（delegate）
- *  - 战斗层：进入射程后，控制距离（kiting）+ 横向分散
- *  - 兜底：卡死检测 + 救援推力
- */
 public class SmartAIWrapper extends AIController {
 
     public final AIController delegate;
 
-    // ============ 战斗层参数 ============
+    // 战斗层参数
     public static float engageFactor = 0.85f;
     public static float retreatFactor = 0.55f;
     public static float sideSpreadStrength = 0.6f;
 
-    // ============ 卡住检测参数 ============
+    // 卡住检测
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
 
-    // ============ 运行时状态 ============
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
+
+    /** 用于按 AITuning.targetInterval 强制 delegate 重索敌 */
+    protected float retargetTimer = 0f;
 
     public SmartAIWrapper(AIController delegate) {
         this.delegate = delegate;
@@ -38,22 +34,26 @@ public class SmartAIWrapper extends AIController {
 
     @Override
     public void updateUnit() {
-        // 1. 原 AI 完全决定：寻敌、寻路、接近、开火
         if (delegate != null) {
             if (delegate.unit() != unit) delegate.unit(unit);
+
+            // ★ 根据 AITuning.targetInterval 定时强制 delegate 重新索敌
+            retargetTimer += Time.delta;
+            if (retargetTimer >= AITuning.targetInterval) {
+                retargetTimer = 0f;
+                delegate.timer.reset(AIController.timerTarget, 1000f);
+            }
+
             delegate.updateUnit();
         }
 
-        // 2. 叠加战斗层
         applyCombatLayer();
-
-        // 3. 兜底：卡住检测
         antiStuck();
     }
 
     protected void applyCombatLayer() {
         if (unit == null || !unit.isAdded()) return;
-        if (unit.type.weapons.isEmpty()) return;   // ← 就是这里
+        if (unit.type.weapons.isEmpty()) return;
         if (unit.range() <= 0f) return;
 
         Teamc enemy = Units.closestTarget(unit.team, unit.x, unit.y,
@@ -110,21 +110,14 @@ public class SmartAIWrapper extends AIController {
 
         if (stuckTimer > 60f * stuckThreshold) {
             stuckTimer = 0f;
-            rescue();
+            Tmp.v1.trns(Mathf.random(360f), unit.speed() * rescueSpeedMul);
+            unit.movePref(Tmp.v1);
         }
-    }
-
-    protected void rescue() {
-        if (unit == null) return;
-        Tmp.v1.trns(Mathf.random(360f), unit.speed() * rescueSpeedMul);
-        unit.movePref(Tmp.v1);
     }
 
     @Override
     public void removed(Unit unit) {
         super.removed(unit);
-        if (delegate != null) {
-            delegate.removed(unit);
-        }
+        if (delegate != null) delegate.removed(unit);
     }
 }

@@ -9,6 +9,7 @@ import mindustry.entities.units.AIController;
 import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
+import project.ai.AITuning;
 import project.ai.HuntAI;
 import project.ai.ProtectAI;
 import project.ai.SmartAIWrapper;
@@ -21,7 +22,6 @@ public class ShatteredStarMod extends Mod {
 
     public static UnitCommand huntCommand;
     public static UnitCommand dogfightCommand;
-    /** 保护：点一下再点友方目标 → 单位去保护它 */
     public static UnitCommand protectCommand;
 
     public static UnitCommand globalFactoryCommand = null;
@@ -43,6 +43,9 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
+        // ★ 启动全局 AI 调优（每帧根据 FPS 决定索敌间隔，应用到炮塔）
+        AITuning.init();
+
         // ============ 1. 指令 ============
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
         huntCommand.drawTarget = false;
@@ -60,13 +63,12 @@ public class ShatteredStarMod extends Mod {
         dogfightCommand.resetTarget = false;
         dogfightCommand.exactArrival = false;
 
-        // 保护：snapToBuilding = true 会自动吸附到建筑；drawTarget 让你看到选中的目标
         protectCommand = new UnitCommand("ss-protect", "effect", u -> new ProtectAI());
         protectCommand.drawTarget = true;
         protectCommand.switchToMove = false;
         protectCommand.resetTarget = false;
         protectCommand.exactArrival = false;
-        protectCommand.snapToBuilding = true;   // 点建筑时自动吸附
+        protectCommand.snapToBuilding = true;
 
         // ============ 2. 注册到 content ============
         try {
@@ -105,7 +107,7 @@ public class ShatteredStarMod extends Mod {
             e.unit.command().command(globalFactoryCommand);
         });
 
-        // ============ 5. 智能包装层：给所有原版 AI 单位加防卡死 ============
+        // ============ 5. 智能包装层 ============
         Events.on(UnitCreateEvent.class, e -> {
             if (!smartAIEnabled) return;
             if (e.unit == null) return;
