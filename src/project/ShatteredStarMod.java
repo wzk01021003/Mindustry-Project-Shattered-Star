@@ -2,11 +2,15 @@ package project;
 
 import arc.Events;
 import arc.util.Log;
+import arc.util.Time;
 import mindustry.ai.UnitCommand;
+import mindustry.ai.types.CommandAI;
+import mindustry.entities.units.AIController;
 import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.HuntAI;
+import project.ai.SmartAIWrapper;
 import project.blocks.MultiAssembler;
 
 import static mindustry.Vars.content;
@@ -16,10 +20,11 @@ public class ShatteredStarMod extends Mod {
     public static UnitCommand huntCommand;
     public static UnitCommand dogfightCommand;
 
-    /** 全局出厂指令（预设值） */
     public static UnitCommand globalFactoryCommand = null;
-    /** 全局出厂指令开关。默认关闭 */
     public static boolean globalFactoryCommandEnabled = false;
+
+    /** 是否启用全局智能包装层（防卡死）。默认开启。 */
+    public static boolean smartAIEnabled = true;
 
     public ShatteredStarMod() {
         Log.info("Loaded ShatteredStarMod constructor.");
@@ -35,7 +40,7 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
-        // ============ 1. 创建指令 ============
+        // ============ 1. 指令 ============
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
         huntCommand.drawTarget = false;
         huntCommand.switchToMove = false;
@@ -52,7 +57,7 @@ public class ShatteredStarMod extends Mod {
         dogfightCommand.resetTarget = false;
         dogfightCommand.exactArrival = false;
 
-        // ============ 2. 注册到 content.unitCommands() ============
+        // ============ 2. 注册到 content ============
         try {
             if (content.unitCommands().indexOf(huntCommand, true) == -1) {
                 content.unitCommands().add(huntCommand);
@@ -82,7 +87,7 @@ public class ShatteredStarMod extends Mod {
         }
         Log.info("Registered ss-hunt / ss-dogfight to " + count + " unit types.");
 
-        // ============ 4. 全局：原版工厂产出的单位应用出厂指令 ============
+        // ============ 4. 全局出厂指令 ============
         Events.on(UnitCreateEvent.class, e -> {
             if (!globalFactoryCommandEnabled) return;
             if (globalFactoryCommand == null) return;
@@ -92,6 +97,24 @@ public class ShatteredStarMod extends Mod {
             if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
 
             e.unit.command().command(globalFactoryCommand);
+        });
+
+        // ============ 5. 智能包装层：给所有原版 AI 单位加防卡死 ============
+        Events.on(UnitCreateEvent.class, e -> {
+            if (!smartAIEnabled) return;
+            if (e.unit == null) return;
+
+            Time.run(1f, () -> {
+                if (e.unit == null || !e.unit.isValid()) return;
+
+                var c = e.unit.controller();
+                if (!(c instanceof AIController)) return;        // 不是 AI
+                if (c instanceof SmartAIWrapper) return;         // 已包装
+                if (c instanceof CommandAI) return;              // 玩家指挥中
+                if (c instanceof HuntAI) return;                 // 已有狩猎 AI
+
+                e.unit.controller(new SmartAIWrapper((AIController) c));
+            });
         });
     }
 }

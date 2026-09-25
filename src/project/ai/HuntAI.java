@@ -6,25 +6,26 @@ import mindustry.entities.units.AIController;
 import mindustry.gen.Unit;
 
 /**
- * 狩猎 AI：完全委托给原版 AI。
- * 飞行单位 → FlyingAI（原版飞行单位 AI）
- * 其他单位 → GroundAI（原版地面单位 AI，自动寻路绕开墙 / 建筑）
+ * 狩猎 AI：给 ss-hunt / ss-dogfight 指令用的控制器。
  *
- * 不添加任何自定义逻辑。
+ * 内部 = SmartAIWrapper 包着原版 AI：
+ *   - 飞行 → SmartAIWrapper(FlyingAI)
+ *   - 其他 → SmartAIWrapper(GroundAI)
+ *
+ * 效果：单位用原版 AI 的行为（自动找核心 / 打敌人 / 绕墙），
+ * 并且带防卡死救援。
  */
 public class HuntAI extends AIController {
 
     protected AIController delegate;
 
-    /**
-     * 兼容字段：ss-dogfight 指令会设置它。
-     * 目前不影响行为（原版 GroundAI 本身就是"接近并打"）。
-     */
+    /** 兼容字段：ss-dogfight 指令会设置它（目前不影响行为） */
     public boolean forceDogfighter = false;
 
     protected AIController getDelegate() {
         if (delegate == null) {
-            delegate = unit.type.flying ? new FlyingAI() : new GroundAI();
+            AIController inner = unit.type.flying ? new FlyingAI() : new GroundAI();
+            delegate = new SmartAIWrapper(inner);
             delegate.unit(unit);
         }
         return delegate;
