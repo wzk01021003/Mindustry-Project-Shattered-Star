@@ -16,12 +16,13 @@ import mindustry.world.Tile;
 import static mindustry.Vars.*;
 
 /**
- * 定点防御 AI（简化版）：
+ * 定点防御 AI：
  *  - 玩家点位置 → 单位以该点为圆心随机巡逻
  *  - 巡逻半径 = 单位最大武器射程 × 0.5
  *  - 索敌半径 = 单位最大武器射程
- *  - 用 moveTo 直接走，不走 pathfinder（简单直接）
- *  - 到达/超时 → 换新点
+ *  - 用 ControlPathfinder 拿下一跳，绕墙前进
+ *  - 地面单位 moveTo range = 0（原版 CommandAI 参数，最快）
+ *  - 距离目标 < directApproachDist 时直接 moveTo 目标，省一次寻路
  */
 public class GuardAI extends AIController {
 
@@ -31,21 +32,22 @@ public class GuardAI extends AIController {
     public static float minSearchRadius = 80f;
     public static float maxSearchRadius = 500f;
 
-    /** 到达一个点后停留多久（帧） */
-    public static float idleDuration = 90f;
-    /** 移动时间下限（帧） */
-    public static float minMoveDuration = 60f * 3f;
-    /** 移动时间上限（帧） */
-    public static float maxMoveDuration = 60f * 15f;
-    /** 移动时间倍率 */
+    public static float idleDuration = 60f;
+    public static float minMoveDuration = 60f * 4f;
+    public static float maxMoveDuration = 60f * 20f;
     public static float moveTimeMultiplier = 3f;
-    /** 到达判定距离 */
     public static float arrivalDist = 10f;
 
     // ============ 寻路参数 ============
+    /** 地面单位 moveTo 的 smoothing（原版 CommandAI 用 100f） */
     public static float groundSmoothing = 100f;
+    /** 飞行单位 moveTo 的 smoothing */
     public static float flySmoothing = 40f;
+    /** 距离目标小于此值 → 直接 moveTo 目标，不走寻路 */
+    public static float directApproachDist = 50f;
     public static int roamPickAttempts = 8;
+    /** 连续寻路失败多少次才放弃 */
+    public static int pathWaitTolerance = 30;
 
     // ============ 卡死检测 ============
     public static float stuckThreshold = 2f;
@@ -61,7 +63,7 @@ public class GuardAI extends AIController {
 
     public float targetX, targetY;
     public float stateTimer = 0f;
-    public float currentMoveLimit = 60f * 4f;
+    public float currentMoveLimit = 60f * 6f;
 
     public boolean hasWeapons = false;
     public float searchRadius = 220f;
@@ -69,7 +71,9 @@ public class GuardAI extends AIController {
     public float leashRange = 286f;
 
     protected boolean requestedMove = false;
+    protected int pathFailCount = 0;
     protected boolean initialized = false;
+
     protected final Vec2 tmpVec = new Vec2();
 
     protected float lastX = Float.NaN, lastY = Float.NaN;
@@ -142,7 +146,6 @@ public class GuardAI extends AIController {
             return;
         }
 
-        // 索敌
         if (hasWeapons) {
             if (retarget() || target == null
                 || Units.invalidateTarget(target, unit.team, unit.x, unit.y, Float.MAX_VALUE)) {
@@ -171,7 +174,7 @@ public class GuardAI extends AIController {
             targetX = anchorX;
             targetY = anchorY;
             stateTimer += Time.delta;
-            doMoveSimple();
+            doMove(targetX, targetY);
         } else {
             if (state == State.COMBAT) {
                 state = State.IDLE;
@@ -179,22 +182,17 @@ public class GuardAI extends AIController {
             }
             stateTimer += Time.delta;
             if (state == State.IDLE) doIdle();
-            else doMoveSimple();
+            else doMove(targetX, targetY);
         }
 
-        // 朝向
         if (enemy != null && hasWeapons) {
             unit.aim(enemy.getX(), enemy.getY());
             unit.controlWeapons(true);
             if (!requestedMove) unit.lookAt(enemy);
         } else {
             if (hasWeapons) unit.controlWeapons(false);
-            if (state == State.MOVING) {
-                unit.lookAt(targetX, targetY);
-            }
         }
 
-        // 落地
         if (!isFlying() && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
             unit.elevation = Mathf.approachDelta(unit.elevation, 0f, unit.type.descentSpeed);
         }
@@ -203,36 +201,87 @@ public class GuardAI extends AIController {
     }
 
     // ================================================================
-    //  简单移动：直接 moveTo，不走 pathfinder
+    //  寻路 + 移动
     // ================================================================
 
-    /** 直接朝目标点走。用 moveTo 的直线移动（含轻微平滑避障） */
-    protected void doMoveSimple() {
-        float dist = Mathf.dst(unit.x, unit.y, targetX, targetY);
+    /**
+     * 走向目标。
+     * - 距离 < directApproachDist：直接 moveTo 目标
+     * - 距离远：调 controlPath 拿下一跳，moveTo 下一跳
+     * - range 参数用 0（地面）或 attack range（战斗），避免减速
+     */
+    protected boolean pathTowards(float x, float y) {
+        float dist = Mathf.dst(unit.x, unit.y, x, y);
 
-        // 到达
+        // 快到了：直接 moveTo 目标
+        if (dist <= directApproachDist) {
+            tmpVec.set(x, y);
+            if (!isOmni()) unit.lookAt(x, y);
+
+            // ★ range = 0 → 不减到目标就停，冲刺到终点
+            moveTo(tmpVec, 0f, isFlying() ? flySmoothing : groundSmoothing);
+            return true;
+        }
+
+        // 远距离：走寻路
+        Tmp.v2.set(x, y);
+        var result = controlPath.getPathPosition(unit, Tmp.v2);
+
+        if (result.move) {
+            // 下一跳方向先 lookAt（non-omni 单位必须先对准才能 movePref）
+            if (!isOmni()) {
+                unit.lookAt(result.dest.x, result.dest.y);
+            }
+            // ★ range = 0 → 冲向下一个 waypoint
+            moveTo(result.dest, 0f, isFlying() ? flySmoothing : groundSmoothing);
+            return true;
+        }
+
+        // 首次异步请求返回 false 是正常的，等几帧
+        return false;
+    }
+
+    protected void doMove(float tx, float ty) {
+        float dist = Mathf.dst(unit.x, unit.y, tx, ty);
+
         if (dist <= arrivalDist) {
             state = State.IDLE;
             stateTimer = 0f;
+            pathFailCount = 0;
             return;
         }
 
-        // 超时
         if (stateTimer >= currentMoveLimit) {
             state = State.IDLE;
             stateTimer = 0f;
+            pathFailCount = 0;
             return;
         }
 
-        // non-omni 单位：先转向目标
-        if (!isOmni()) {
-            unit.lookAt(targetX, targetY);
+        boolean moved = pathTowards(tx, ty);
+        if (moved) {
+            requestedMove = true;
+            pathFailCount = 0;
+        } else {
+            pathFailCount++;
+            if (pathFailCount >= pathWaitTolerance) {
+                // 寻路真的失败：立即切换状态
+                state = State.IDLE;
+                stateTimer = 0f;
+                pathFailCount = 0;
+            }
         }
+    }
 
-        // ★ 核心：直接 moveTo
-        tmpVec.set(targetX, targetY);
-        moveTo(tmpVec, arrivalDist, isFlying() ? flySmoothing : groundSmoothing);
-        requestedMove = true;
+    protected void doCombat(Teamc enemy) {
+        float dst = unit.dst(enemy);
+        float range = Math.max(unit.range(), 40f);
+        float engage = range * 0.85f;
+
+        if (dst > engage) {
+            boolean moved = pathTowards(enemy.getX(), enemy.getY());
+            if (moved) requestedMove = true;
+        }
     }
 
     // ================================================================
@@ -244,6 +293,7 @@ public class GuardAI extends AIController {
             pickNewRoamTarget();
             state = State.MOVING;
             stateTimer = 0f;
+            pathFailCount = 0;
             computeMoveLimit();
         }
     }
@@ -251,18 +301,15 @@ public class GuardAI extends AIController {
     protected void computeMoveLimit() {
         float dist = Mathf.dst(unit.x, unit.y, targetX, targetY);
         float speed = Math.max(unit.speed(), 0.05f);
-        float expectedFrames = dist / speed;
         currentMoveLimit = Mathf.clamp(
-            expectedFrames * moveTimeMultiplier,
+            dist / speed * moveTimeMultiplier,
             minMoveDuration,
             maxMoveDuration);
     }
 
-    /** ★ 直接在锚点周围随机抽一个坐标 */
     protected void pickNewRoamTarget() {
         for (int attempt = 0; attempt < roamPickAttempts; attempt++) {
             float ang = Mathf.random(360f);
-            // 距离：从 40% 到 100% roamRadius 之间随取
             float r = Mathf.random(roamRadius * 0.4f, roamRadius);
             float tx = anchorX + Angles.trnsx(ang, r);
             float ty = anchorY + Angles.trnsy(ang, r);
@@ -284,19 +331,6 @@ public class GuardAI extends AIController {
         if (t.solid()) return false;
         if (!isFlying() && t.floor().isDeep()) return false;
         return true;
-    }
-
-    protected void doCombat(Teamc enemy) {
-        float dst = unit.dst(enemy);
-        float range = Math.max(unit.range(), 40f);
-        float engage = range * 0.9f;
-
-        if (dst > engage) {
-            if (!isOmni()) unit.lookAt(enemy);
-            tmpVec.set(enemy.getX(), enemy.getY());
-            moveTo(tmpVec, engage, isFlying() ? flySmoothing : groundSmoothing);
-            requestedMove = true;
-        }
     }
 
     // ================================================================
@@ -336,11 +370,8 @@ public class GuardAI extends AIController {
 
         if (stuckTimer > 60f * stuckThreshold) {
             stuckTimer = 0f;
-
-            // 卡住：放弃当前目标，换新点
             state = State.IDLE;
             stateTimer = 0f;
-
             Tmp.v1.trns(Mathf.random(360f), unit.speed() * rescueSpeedMul);
             unit.movePref(Tmp.v1);
         }
