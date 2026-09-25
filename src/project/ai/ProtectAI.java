@@ -1,5 +1,6 @@
 package project.ai;
 
+import arc.math.Angles;
 import arc.math.Mathf;
 import arc.math.geom.Vec2;
 import arc.util.Time;
@@ -17,36 +18,50 @@ import static mindustry.Vars.*;
 /**
  * 保护 AI：
  *  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
+ *  - 锚点可以从 CommandAI.targetPos 或 attackTarget 读取
  *  - 行为按 ProtectModes 分四种：ATTACK / PUSH / SHIELD / PASSIVE
- *  - 非飞行单位用 ControlPathfinder 显式寻路（会绕开墙 / 建筑）
+ *  - 非飞行单位用 ControlPathfinder 显式寻路
+ *  - 编队：每个单位按 id 分配环绕锚点的槽位 + 分离力，避免互相挤压
  */
 public class ProtectAI extends AIController {
 
-    // ============ 静态参数 ============
-    public static float followDist = 60f;
+    // ============ 通用参数 ============
     public static float engageRange = 220f;
+    public static float followDist = 60f;
     public static float pushContact = 20f;
     public static float shieldOffset = 45f;
+    public static float retargetInterval = 15f;
 
-    /** 非飞行 moveTo 的 smoothing，100f 与原版 CommandAI 一致 */
     public static float groundSmoothing = 100f;
-    /** 飞行 moveTo 的 smoothing */
     public static float flySmoothing = 40f;
-    /** 距离终点小于这个值直接 moveTo，不走寻路 */
     public static float directApproachDist = 40f;
 
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
 
+    // ============ 编队参数 ============
+    /** 环绕锚点的槽位半径 */
+    public static float slotRadius = 70f;
+    /** 槽位角度偏移（度），每个单位按黄金角分布 */
+    public static float slotAngleOffset = 137.508f;
+    /** 攻击目标时的额外偏移距离 */
+    public static float attackOffset = 18f;
+    /** 分离力检测半径倍率（相对于自身 hitSize） */
+    public static float separationMul = 2.8f;
+    /** 分离力强度（0~1） */
+    public static float separationStrength = 0.8f;
+
     // ============ 运行时状态 ============
     public float anchorX, anchorY;
     public boolean hasAnchor = false;
+    public Teamc anchorTarget = null;
 
     public ProtectModes mode;
     protected boolean initialized = false;
 
     protected final Vec2 targetVec = new Vec2();
+    protected final Vec2 sepAccum = new Vec2();
 
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
@@ -61,27 +76,90 @@ public class ProtectAI extends AIController {
         mode = ProtectModeRegistry.get(unit.type);
     }
 
-    /** 从外层 CommandAI 读取玩家点的目标坐标 */
+    // ================================================================
+    //  编队槽位
+    // ================================================================
+
+    /**
+     * 本单位的槽位角度。
+     * 用黄金角（137.508°）乘 id，保证任意数量的单位都能均匀散开，
+     * 且同一单位的槽位固定不变。
+     */
+    protected float slotAngle() {
+        return (unit.id * slotAngleOffset) % 360f;
+    }
+
+    /** 计算本单位的槽位世界坐标 */
+    protected void getSlotPos(float centerX, float centerY, Vec2 out) {
+        float ang = slotAngle();
+        out.set(centerX + Angles.trnsx(ang, slotRadius),
+                centerY + Angles.trnsy(ang, slotRadius));
+    }
+
+    // ================================================================
+    //  锚点
+    // ================================================================
+
     protected void refreshAnchor() {
         if (unit == null) return;
         var c = unit.controller();
-        if (c instanceof CommandAI cai && cai.targetPos != null) {
+        if (!(c instanceof CommandAI cai)) return;
+
+        // 1. 优先：attackTarget（点单位时存这里）
+        if (cai.attackTarget != null && !cai.attackTarget.equals(unit)) {
+            anchorX = cai.attackTarget.getX();
+            anchorY = cai.attackTarget.getY();
+            anchorTarget = cai.attackTarget;
+            hasAnchor = true;
+            return;
+        }
+
+        // 2. 其次：targetPos（点空地 / 建筑时存这里）
+        if (cai.targetPos != null) {
             anchorX = cai.targetPos.x;
             anchorY = cai.targetPos.y;
+            anchorTarget = null;
             hasAnchor = true;
         }
     }
+
+    // ================================================================
+    //  索敌
+    // ================================================================
+
+    @Override
+    public void updateTargeting() {
+        if (!hasAnchor) {
+            target = null;
+            return;
+        }
+        if (retarget()) {
+            target = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
+                u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
+                b -> unit.type.targetGround);
+        }
+    }
+
+    @Override
+    public boolean retarget() {
+        return timer.get(timerTarget, retargetInterval);
+    }
+
+    // ================================================================
+    //  主循环
+    // ================================================================
 
     @Override
     public void updateMovement() {
         ensureInit();
         refreshAnchor();
 
-        if (!hasAnchor) return;
+        if (!hasAnchor) {
+            faceMovement();
+            return;
+        }
 
-        Teamc enemy = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
-            u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
-            b -> unit.type.targetGround);
+        Teamc enemy = target;
 
         switch (mode) {
             case PUSH:    doPush(enemy);    break;
@@ -91,30 +169,69 @@ public class ProtectAI extends AIController {
             default:      doAttack(enemy);  break;
         }
 
+        // 分离力：叠加速度，避免和其他护卫重叠
+        applySeparation();
+
         if (!isFlying() && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
             unit.elevation = Mathf.approachDelta(unit.elevation, 0f, unit.type.descentSpeed);
+        }
+
+        // 朝向
+        if (enemy != null) {
+            unit.lookAt(enemy);
+        } else {
+            faceMovement();
         }
 
         antiStuck();
     }
 
+    protected void faceMovement() {
+        if (unit.vel.len2() > 0.01f) {
+            unit.lookAt(unit.vel.angle());
+        }
+    }
+
     // ================================================================
-    //  寻路核心：目标远就调 pathfinder，目标近才直接 moveTo
+    //  分离力：检测附近护卫，远离重叠
     // ================================================================
 
-    /**
-     * 走向 (x, y)。飞行单位直接 moveTo；地面单位远距离时显式寻路绕墙。
-     * @param range 保留的距离（离目标多远停下）
-     */
+    protected void applySeparation() {
+        float sepRadius = unit.hitSize * separationMul;
+        sepAccum.setZero();
+
+        Units.nearby(unit.team, unit.x, unit.y, sepRadius, other -> {
+            if (other == unit) return;
+            if (!(other.controller() instanceof ProtectAI)) return;
+
+            float dst = unit.dst(other);
+            float minDist = (unit.hitSize + other.hitSize) / 2f + 6f;
+            if (dst < minDist && dst > 0.01f) {
+                // 越近推力越大
+                float strength = (minDist - dst) / minDist;
+                sepAccum.add((unit.x - other.x) / dst * strength,
+                             (unit.y - other.y) / dst * strength);
+            }
+        });
+
+        if (sepAccum.len2() > 0.001f) {
+            sepAccum.setLength(unit.speed() * separationStrength);
+            // 直接加到速度上（不覆盖），movePref 会在最后统一截断
+            unit.vel.add(sepAccum);
+        }
+    }
+
+    // ================================================================
+    //  寻路核心
+    // ================================================================
+
     protected void pathTowards(float x, float y, float range) {
-        // 飞行：直线
         if (isFlying()) {
             targetVec.set(x, y);
             moveTo(targetVec, range, flySmoothing);
             return;
         }
 
-        // 距离目标近：直接冲
         float distToTarget = Mathf.dst(unit.x, unit.y, x, y);
         if (distToTarget <= directApproachDist) {
             targetVec.set(x, y);
@@ -122,80 +239,82 @@ public class ProtectAI extends AIController {
             return;
         }
 
-        // 远：请求寻路
         Tmp.v2.set(x, y);
         var result = controlPath.getPathPosition(unit, Tmp.v2);
 
         if (result.move) {
             moveTo(result.dest, range, groundSmoothing);
         }
-        // 找不到路径就什么都不做，下一帧再试
     }
 
     // ================================================================
     //  四种模式
     // ================================================================
 
-    /** 常规攻击：站在锚点旁边 + 打范围内敌人 */
+    /** 攻击：追敌人走自己的槽位偏移；无敌人时回到锚点附近的槽位 */
     protected void doAttack(Teamc enemy) {
         if (enemy != null) {
             float dst = unit.dst(enemy);
             float range = Math.max(unit.range(), 40f);
             float engage = range * 0.85f;
 
-            if (dst <= engage) {
-                unit.lookAt(enemy);
-            } else {
-                // 朝敌人走，也要寻路
-                pathTowards(enemy.getX(), enemy.getY(), engage);
+            if (dst > engage) {
+                // 追击时给每个单位一个角度偏移，避免全部挤向同一点
+                float ang = slotAngle();
+                float ox = Angles.trnsx(ang, attackOffset);
+                float oy = Angles.trnsy(ang, attackOffset);
+                pathTowards(enemy.getX() + ox, enemy.getY() + oy, engage);
             }
+            // 射程内不动
         } else {
-            pathTowards(anchorX, anchorY, followDist);
+            // 无敌人：走向自己的槽位
+            getSlotPos(anchorX, anchorY, targetVec);
+            pathTowards(targetVec.x, targetVec.y, 5f);
         }
     }
 
-    /** 推开：无武器单位冲向敌人，用物理碰撞推走 */
     protected void doPush(Teamc enemy) {
         if (enemy != null) {
             float dst = unit.dst(enemy);
 
-            // 推开需要贴脸，先寻路接近，最后 20 格直接冲
             if (dst > pushContact) {
-                pathTowards(enemy.getX(), enemy.getY(), pushContact);
+                float ang = slotAngle();
+                float ox = Angles.trnsx(ang, attackOffset);
+                float oy = Angles.trnsy(ang, attackOffset);
+                pathTowards(enemy.getX() + ox, enemy.getY() + oy, pushContact);
             } else {
-                // 已经贴上：用力推
                 Tmp.v1.set(enemy.getX(), enemy.getY()).sub(unit).setLength(unit.speed() * 1.5f);
                 unit.movePref(Tmp.v1);
             }
-            unit.lookAt(enemy);
         } else {
-            pathTowards(anchorX, anchorY, followDist);
+            getSlotPos(anchorX, anchorY, targetVec);
+            pathTowards(targetVec.x, targetVec.y, 5f);
         }
     }
 
-    /** 护盾：挡在锚点和敌人之间 */
     protected void doShield(Teamc enemy) {
         if (enemy != null) {
-            // 锚点 → 敌人方向，偏移 shieldOffset 的位置
+            // 锚点 → 敌人方向偏移 shieldOffset，再按槽位角度微调
             Tmp.v1.set(enemy.getX() - anchorX, enemy.getY() - anchorY).setLength(shieldOffset);
-            float tx = anchorX + Tmp.v1.x;
-            float ty = anchorY + Tmp.v1.y;
+            float ang = slotAngle();
+            float ox = Angles.trnsx(ang, 15f);
+            float oy = Angles.trnsy(ang, 15f);
+            float tx = anchorX + Tmp.v1.x + ox;
+            float ty = anchorY + Tmp.v1.y + oy;
 
             float dst = unit.dst(tx, ty);
-
             if (dst > 15f) {
                 pathTowards(tx, ty, 10f);
-            } else {
-                unit.lookAt(enemy);
             }
         } else {
-            pathTowards(anchorX, anchorY, followDist * 0.6f);
+            getSlotPos(anchorX, anchorY, targetVec);
+            pathTowards(targetVec.x, targetVec.y, 5f);
         }
     }
 
-    /** 被动：只跟随锚点 */
     protected void doPassive() {
-        pathTowards(anchorX, anchorY, followDist);
+        getSlotPos(anchorX, anchorY, targetVec);
+        pathTowards(targetVec.x, targetVec.y, 5f);
     }
 
     // ================================================================
