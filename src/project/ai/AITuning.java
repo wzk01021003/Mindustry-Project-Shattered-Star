@@ -17,9 +17,21 @@ public class AITuning {
     private static int sampleFrames = 0;
     private static boolean inited = false;
 
+    private static java.lang.reflect.Field targetIntervalField;
+    private static boolean reflectionFailed = false;
+
     public static void init() {
         if (inited) return;
         inited = true;
+
+        // 预先解析 Turret.targetInterval 字段（名字可能因版本而异）
+        try {
+            targetIntervalField = Turret.class.getField("targetInterval");
+        } catch (NoSuchFieldException e) {
+            reflectionFailed = true;
+            Log.err("[ss] Turret.targetInterval not found - turret tuning disabled");
+        }
+
         Events.run(Trigger.update, AITuning::tick);
         Log.info("[ss] AITuning initialized.");
     }
@@ -43,7 +55,7 @@ public class AITuning {
             Log.info("[ss] FPS=" + (int) fps + " -> targetInterval=" + newInterval);
         }
 
-        if (newInterval != lastAppliedInterval) {
+        if (!reflectionFailed && newInterval != lastAppliedInterval) {
             lastAppliedInterval = newInterval;
             applyToTurrets(newInterval);
         }
@@ -56,9 +68,10 @@ public class AITuning {
             if (b == null) continue;
             if (!(b instanceof Turret)) continue;
 
-            Turret t = (Turret) b;
-            t.targetInterval = interval;
-            count++;
+            try {
+                targetIntervalField.setFloat(b, interval);
+                count++;
+            } catch (Exception ignored) {}
         }
         Log.info("[ss] Applied targetInterval=" + interval + " to " + count + " turrets.");
     }

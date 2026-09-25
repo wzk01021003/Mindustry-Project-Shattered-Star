@@ -8,8 +8,8 @@ import mindustry.ai.types.CommandAI;
 import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.units.AIController;
+import mindustry.entities.units.UnitController;   // ← 正确的包
 import mindustry.game.EventType.UnitCreateEvent;
-import mindustry.gen.UnitController;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.AITuning;
