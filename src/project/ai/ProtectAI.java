@@ -15,8 +15,20 @@ import project.content.ProtectModes;
 
 import static mindustry.Vars.*;
 
+/**
+ * 保护 AI：
+ *  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
+ *  - 锚点：优先 attackTarget；否则从 targetPos 尝试跟随附近的友军单位
+ *  - 行为按 ProtectModes 分四种：ATTACK / PUSH / SHIELD / PASSIVE
+ *  - 每个模式根据"有没有武器"分流：
+ *      · 有武器 → 接近 + 开火
+ *      · 无武器 → 纯位置行为（推 / 挡 / 跟）
+ *  - 非飞行单位用 ControlPathfinder 显式寻路
+ *  - 编队：按 id 分配槽位 + 分离力
+ */
 public class ProtectAI extends AIController {
 
+    // ============ 通用参数 ============
     public static float engageRange = 220f;
     public static float followDist = 60f;
     public static float pushContact = 20f;
@@ -31,17 +43,23 @@ public class ProtectAI extends AIController {
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
 
+    // ============ 编队参数 ============
     public static float slotRadius = 70f;
     public static float slotAngleOffset = 137.508f;
     public static float attackOffset = 18f;
     public static float separationMul = 2.8f;
     public static float separationStrength = 0.8f;
 
+    public static float anchorFollowRange = 40f;
+
+    // ============ 运行时状态 ============
     public float anchorX, anchorY;
     public boolean hasAnchor = false;
     public Teamc anchorTarget = null;
 
     public ProtectModes mode;
+    /** 单位是否有武器。有武器才能开火 */
+    public boolean hasWeapons = false;
     protected boolean initialized = false;
 
     protected final Vec2 targetVec = new Vec2();
@@ -58,6 +76,7 @@ public class ProtectAI extends AIController {
         if (initialized) return;
         initialized = true;
         mode = ProtectModeRegistry.get(unit.type);
+        hasWeapons = !unit.type.weapons.isEmpty() && unit.range() > 0f;
     }
 
     protected float slotAngle() {
@@ -70,57 +89,67 @@ public class ProtectAI extends AIController {
                 centerY + Angles.trnsy(ang, slotRadius));
     }
 
+    // ================================================================
+    //  锚点
+    // ================================================================
+
     protected void refreshAnchor() {
         if (unit == null) return;
         var c = unit.controller();
         if (!(c instanceof CommandAI cai)) return;
 
         if (cai.attackTarget != null && !cai.attackTarget.equals(unit)) {
+            anchorTarget = cai.attackTarget;
             anchorX = cai.attackTarget.getX();
             anchorY = cai.attackTarget.getY();
-            anchorTarget = cai.attackTarget;
             hasAnchor = true;
             return;
         }
 
         if (cai.targetPos != null) {
-            anchorX = cai.targetPos.x;
-            anchorY = cai.targetPos.y;
-            anchorTarget = null;
-            hasAnchor = true;
+            if (!hasAnchor) {
+                anchorX = cai.targetPos.x;
+                anchorY = cai.targetPos.y;
+                hasAnchor = true;
+
+                Unit nearby = Units.closest(unit.team, anchorX, anchorY, anchorFollowRange,
+                    u -> u != unit && u.isValid());
+                if (nearby != null) {
+                    anchorTarget = nearby;
+                }
+            }
+
+            if (anchorTarget instanceof Unit u && u.isValid()) {
+                anchorX = u.x;
+                anchorY = u.y;
+            }
         }
     }
 
-    @Override
-    public void updateTargeting() {
-        if (!hasAnchor) {
-            target = null;
-            return;
-        }
-        if (retarget()) {
-            target = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
-                u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
-                b -> unit.type.targetGround);
-        }
-    }
-
-    @Override
-    public boolean retarget() {
-        return timer.get(timerTarget, retargetInterval);
-    }
+    // ================================================================
+    //  主循环
+    // ================================================================
 
     @Override
     public void updateMovement() {
         ensureInit();
         refreshAnchor();
 
-        if (!hasAnchor) {
-            faceMyMovement();
-            return;
+        // 索敌（只有有武器的单位才需要）
+        if (hasAnchor && hasWeapons) {
+            if (target == null || retarget()
+                || Units.invalidateTarget(target, unit.team, unit.x, unit.y, Float.MAX_VALUE)) {
+                target = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
+                    u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
+                    b -> unit.type.targetGround);
+            }
+        } else {
+            target = null;
         }
 
         Teamc enemy = target;
 
+        // 行为分流
         switch (mode) {
             case PUSH:    doPush(enemy);    break;
             case SHIELD:  doShield(enemy);  break;
@@ -135,21 +164,33 @@ public class ProtectAI extends AIController {
             unit.elevation = Mathf.approachDelta(unit.elevation, 0f, unit.type.descentSpeed);
         }
 
-        if (enemy != null) {
+        // 朝向 + 开火
+        if (enemy != null && hasWeapons) {
             unit.lookAt(enemy);
+            unit.aim(enemy.getX(), enemy.getY());
+            unit.controlWeapons(true);
         } else {
+            if (hasWeapons) unit.controlWeapons(false);
             faceMyMovement();
         }
 
         antiStuck();
     }
 
-    /** 没有敌人时，让单位转向移动方向（改名避免覆盖父类 faceMovement） */
+    @Override
+    public boolean retarget() {
+        return timer.get(timerTarget, retargetInterval);
+    }
+
     protected void faceMyMovement() {
         if (unit.vel.len2() > 0.01f) {
             unit.lookAt(unit.vel.angle());
         }
     }
+
+    // ================================================================
+    //  分离力
+    // ================================================================
 
     protected void applySeparation() {
         float sepRadius = unit.hitSize * separationMul;
@@ -174,6 +215,10 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  寻路
+    // ================================================================
+
     protected void pathTowards(float x, float y, float range) {
         if (isFlying()) {
             targetVec.set(x, y);
@@ -196,7 +241,19 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  ATTACK 模式
+    // ================================================================
+    //  有武器：追击敌人 + 开火，无敌时回槽位
+    //  无武器：只回槽位（退化成 PASSIVE）
+
     protected void doAttack(Teamc enemy) {
+        if (!hasWeapons) {
+            // 无武器 → 只跟随
+            doPassive();
+            return;
+        }
+
         if (enemy != null) {
             float dst = unit.dst(enemy);
             float range = Math.max(unit.range(), 40f);
@@ -208,13 +265,26 @@ public class ProtectAI extends AIController {
                 float oy = Angles.trnsy(ang, attackOffset);
                 pathTowards(enemy.getX() + ox, enemy.getY() + oy, engage);
             }
+            // 射程内不动，让 updateMovement 末尾的 lookAt + controlWeapons 处理
         } else {
             getSlotPos(anchorX, anchorY, targetVec);
             pathTowards(targetVec.x, targetVec.y, 5f);
         }
     }
 
+    // ================================================================
+    //  PUSH 模式
+    // ================================================================
+    //  无武器：冲向敌人推
+    //  有武器：优先开火（PUSH 对有武器的单位没意义）
+
     protected void doPush(Teamc enemy) {
+        // 有武器：不推，改成常规攻击
+        if (hasWeapons) {
+            doAttack(enemy);
+            return;
+        }
+
         if (enemy != null) {
             float dst = unit.dst(enemy);
 
@@ -233,8 +303,15 @@ public class ProtectAI extends AIController {
         }
     }
 
+    // ================================================================
+    //  SHIELD 模式
+    // ================================================================
+    //  有武器：挡在锚点和敌人之间 + 朝敌人开火
+    //  无武器：只挡（挡的同时不推回槽位）
+
     protected void doShield(Teamc enemy) {
         if (enemy != null) {
+            // 锚点 → 敌人方向偏移 shieldOffset，再按槽位角度微调
             Tmp.v1.set(enemy.getX() - anchorX, enemy.getY() - anchorY).setLength(shieldOffset);
             float ang = slotAngle();
             float ox = Angles.trnsx(ang, 15f);
@@ -246,16 +323,26 @@ public class ProtectAI extends AIController {
             if (dst > 15f) {
                 pathTowards(tx, ty, 10f);
             }
+            // 已在挡位：不动。开火由 updateMovement 末尾处理
         } else {
+            // 无敌人：回到锚点附近槽位
             getSlotPos(anchorX, anchorY, targetVec);
             pathTowards(targetVec.x, targetVec.y, 5f);
         }
     }
 
+    // ================================================================
+    //  PASSIVE 模式
+    // ================================================================
+
     protected void doPassive() {
         getSlotPos(anchorX, anchorY, targetVec);
         pathTowards(targetVec.x, targetVec.y, 5f);
     }
+
+    // ================================================================
+    //  卡死检测
+    // ================================================================
 
     protected void antiStuck() {
         if (unit == null || !unit.isAdded()) return;
