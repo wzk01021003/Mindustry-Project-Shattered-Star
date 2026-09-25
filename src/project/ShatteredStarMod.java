@@ -1,7 +1,9 @@
 package project;
 
+import arc.Events;
 import arc.util.Log;
 import mindustry.ai.UnitCommand;
+import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.HuntAI;
@@ -11,10 +13,17 @@ import static mindustry.Vars.content;
 
 public class ShatteredStarMod extends Mod {
 
-    /** 狩猎：远程 kiting，自动判断狗斗 */
     public static UnitCommand huntCommand;
-    /** 狗斗：强制贴脸 */
     public static UnitCommand dogfightCommand;
+
+    /**
+     * 全局出厂指令（预设值）。玩家在 MultiAssembler UI 里选择。
+     * 只有当 globalFactoryCommandEnabled 为 true 时才自动应用到新产出的单位。
+     */
+    public static UnitCommand globalFactoryCommand = null;
+
+    /** 全局出厂指令开关。默认 false，玩家需要在 UI 里手动打开。 */
+    public static boolean globalFactoryCommandEnabled = false;
 
     public ShatteredStarMod() {
         Log.info("Loaded ShatteredStarMod constructor.");
@@ -47,7 +56,7 @@ public class ShatteredStarMod extends Mod {
         dogfightCommand.resetTarget = false;
         dogfightCommand.exactArrival = false;
 
-        // ============ 2. 保险：注册到 content.unitCommands() ============
+        // ============ 2. 注册到 content.unitCommands() ============
         try {
             if (content.unitCommands().indexOf(huntCommand, true) == -1) {
                 content.unitCommands().add(huntCommand);
@@ -64,8 +73,8 @@ public class ShatteredStarMod extends Mod {
         for (UnitType type : content.units()) {
             if (type == null) continue;
             if (type.internal) continue;
-            if (type.weapons.isEmpty) continue;       // 无武器不狩猎
-            if (type.commands.isEmpty()) continue;    // 不支持指挥
+            if (type.weapons.isEmpty()) continue;
+            if (type.commands.isEmpty()) continue;
 
             if (!type.commands.contains(huntCommand)) {
                 type.commands.add(huntCommand);
@@ -76,5 +85,18 @@ public class ShatteredStarMod extends Mod {
             count++;
         }
         Log.info("Registered ss-hunt / ss-dogfight to " + count + " unit types.");
+
+        // ============ 4. 全局：原版工厂产出的单位应用出厂指令 ============
+        // 只在新产出的单位支持该指令 + 开关打开时才应用
+        Events.on(UnitCreateEvent.class, e -> {
+            if (!globalFactoryCommandEnabled) return;
+            if (globalFactoryCommand == null) return;
+            if (e.spawner == null) return;
+            if (e.unit == null) return;
+            if (!e.unit.isCommandable()) return;
+            if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
+
+            e.unit.command().command(globalFactoryCommand);
+        });
     }
 }
