@@ -1,5 +1,6 @@
 package project.blocks;
 
+import arc.util.Log;
 import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
@@ -41,16 +42,16 @@ public class MultiAssembler extends UnitAssembler {
 
         // 点击 UI 添加单位
         config(UnitType.class, (MultiAssemblerBuild build, UnitType type) -> {
-            build.addJob(type);
-        });
+                build.addJob(type);
+            });
 
         // 点击取消某个任务
         config(Integer.class, (MultiAssemblerBuild build, Integer index) -> {
-            if (index >= 0 && index < build.jobs.size) {
-                build.jobs.remove(index);
-                build.recalculateArea();
-            }
-        });
+                if (index >= 0 && index < build.jobs.size) {
+                    build.jobs.remove(index);
+                    build.recalculateArea();
+                }
+            });
     }
 
     /** 根据单位大小和数量计算区域边长 */
@@ -92,7 +93,10 @@ public class MultiAssembler extends UnitAssembler {
             if (jobs.size >= maxCount) return;
             AssemblerUnitPlan plan = null;
             for (AssemblerUnitPlan p : plans) {
-                if (p.unit == type) { plan = p; break; }
+                if (p.unit == type) {
+                    plan = p;
+                    break;
+                }
             }
             if (plan == null) return;
 
@@ -119,7 +123,8 @@ public class MultiAssembler extends UnitAssembler {
                             break;
                         }
                     }
-                    if (!conflict) return new int[]{gx, gy};
+                    if (!conflict) return new int[]{
+                        gx, gy};
                 }
             }
             return null;
@@ -139,31 +144,11 @@ public class MultiAssembler extends UnitAssembler {
         }
 
         @Override
+        @Override
         public void buildConfiguration(Table table) {
-            super.buildConfiguration(table);
-
-            // 可选单位列表
-            table.row();
-            table.label(() -> "可生产单位:").left().padTop(6f).row();
-            for (AssemblerUnitPlan plan : plans) {
-                table.button(plan.unit.localizedName, () -> configure(plan.unit))
-                    .size(110f, 45f).pad(3f).row();
-            }
-
-            // 当前任务列表
-            table.row();
-            table.label(() -> "生产队列 (" + jobs.size + "/" + maxCount + "):")
-                .left().padTop(6f).row();
-
-            for (int i = 0; i < jobs.size; i++) {
-                final int idx = i;
-                UnitJob job = jobs.get(i);
-                table.table(row -> {
-                    row.label(() -> job.unit.localizedName + "  "
-                        + (int)(job.progress / job.craftTime * 100) + "%").left().width(160f);
-                    row.button("取消", () -> configure(idx)).size(60f, 35f);
-                }).row();
-            }
+            table.button("HELLO", () -> {
+                    Log.info("Button clicked!");
+                }).size(200f, 50f);
         }
 
         /** 判断某个落点能不能放下单位 */
@@ -193,13 +178,15 @@ public class MultiAssembler extends UnitAssembler {
 
                 // 检查落点是否合法
                 if (!canPlaceAt(job.unit, job.offsetX, job.offsetY)) {
-                    job.progress = 0f; // 不能放就暂停
+                    job.progress = 0f;
+                    // 不能放就暂停
                     continue;
                 }
 
                 // 检查材料是否齐全（物品/液体/载荷）
                 if (!hasMaterials(job.plan)) {
-                    continue; // 材料不足就暂停
+                    continue;
+                    // 材料不足就暂停
                 }
 
                 // 推进进度
@@ -326,7 +313,10 @@ public class MultiAssembler extends UnitAssembler {
                 if (u != null) {
                     AssemblerUnitPlan plan = null;
                     for (AssemblerUnitPlan p : plans) {
-                        if (p.unit == u) { plan = p; break; }
+                        if (p.unit == u) {
+                            plan = p;
+                            break;
+                        }
                     }
                     if (plan != null) {
                         UnitJob job = new UnitJob(u, plan, ox, oy);
