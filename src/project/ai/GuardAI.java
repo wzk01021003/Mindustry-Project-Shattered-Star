@@ -18,17 +18,17 @@ import static mindustry.Vars.*;
 /**
  * 定点防御 AI：
  *  - 玩家点"定点防御" + 点位置 → 单位以该点为圆心巡逻
- *  - 巡逻半径 = 单位最大武器射程 × 0.75
+ *  - 巡逻半径 = 单位最大武器射程 × 0.5
  *  - 索敌半径 = 单位最大武器射程
- *  - 站立时大幅左右张望，间隔后随机选新点
- *  - 距离锚点超过 leash 范围 → 强制回来
+ *  - 站立时大幅环顾，间隔后随机选新点
+ *  - 距离锚点超过 leash → 强制回来
  *  - 巡逻选点会检查可达性，避免卡墙
  */
 public class GuardAI extends AIController {
 
     // ============ 行为参数 ============
     /** 巡逻半径 = 索敌半径 × 此系数 */
-    public static float roamMultiplier = 0.75f;
+    public static float roamMultiplier = 0.5f;
     /** 脱离锚点强制回来的距离 = 索敌半径 × 此系数 */
     public static float leashMultiplier = 1.3f;
     /** 索敌半径下限（短射程单位也有一定的巡逻范围） */
@@ -37,18 +37,22 @@ public class GuardAI extends AIController {
     public static float maxSearchRadius = 500f;
 
     public static float idleDuration = 90f;
-    public static float moveDuration = 90f;
-    /** ★ 张望幅度（度）—— 越大越明显 */
-    public static float idleLookAmp = 25f;
-    /** ★ 张望频率 */
-    public static float idleLookSpeed = 0.05f;
-    public static float arrivalDist = 15f;
+    /** 移动时间上限（帧）。60f = 1 秒 */
+    public static float moveDuration = 60f * 4f;
+    /** 摇头幅度（度） */
+    public static float idleLookAmp = 60f;
+    /** 摇头频率 */
+    public static float idleLookSpeed = 0.045f;
+    /** 到达判定距离 */
+    public static float arrivalDist = 8f;
 
     // ============ 寻路参数 ============
     public static float groundSmoothing = 100f;
     public static float flySmoothing = 40f;
     public static float directApproachDist = 40f;
     public static int roamPickAttempts = 8;
+    /** 寻路"还没准备好"的容忍帧数。异步 pathfinder 首次请求会返回 false */
+    public static int pathWaitTolerance = 15;
 
     // ============ 卡死检测 ============
     public static float stuckThreshold = 1.5f;
@@ -69,16 +73,19 @@ public class GuardAI extends AIController {
     public boolean hasWeapons = false;
     /** 索敌半径（= 武器最大射程） */
     public float searchRadius = 220f;
-    /** 巡逻半径（= searchRadius × 0.75） */
-    public float roamRadius = 165f;
+    /** 巡逻半径（= searchRadius × 0.5） */
+    public float roamRadius = 110f;
     /** leash 距离 */
     public float leashRange = 286f;
 
-    /** IDLE 时的基准朝向。张望围绕它摆动 */
+    /** IDLE 时摇摆的基准朝向 */
     protected float idleBaseRotation = 0f;
 
     /** 本帧是否已发出移动请求 */
     protected boolean requestedMove = false;
+
+    /** 寻路连续失败计数。首次异步请求返回 false 是正常的 */
+    protected int pathFailCount = 0;
 
     protected boolean initialized = false;
     protected final Vec2 tmpVec = new Vec2();
@@ -197,7 +204,7 @@ public class GuardAI extends AIController {
             else doMove(targetX, targetY);
         }
 
-        // ★ 刚进入 IDLE：记录基准朝向
+        // 刚进入 IDLE：记录基准朝向
         if (state == State.IDLE && prevState != State.IDLE) {
             idleBaseRotation = unit.rotation;
         }
@@ -206,13 +213,11 @@ public class GuardAI extends AIController {
         if (enemy != null && hasWeapons) {
             unit.aim(enemy.getX(), enemy.getY());
             unit.controlWeapons(true);
-
             if (!requestedMove) unit.lookAt(enemy);
         } else {
             if (hasWeapons) unit.controlWeapons(false);
 
             if (state == State.IDLE) {
-                // ★ 围绕基准朝向做大幅摆动（绝对值，不累积）
                 float phase = Time.time * idleLookSpeed + unit.id * 0.37f;
                 unit.rotation = idleBaseRotation + Mathf.sin(phase) * idleLookAmp;
             } else if (state == State.MOVING) {
@@ -237,21 +242,22 @@ public class GuardAI extends AIController {
             pickNewRoamTarget();
             state = State.MOVING;
             stateTimer = 0f;
+            pathFailCount = 0;
         }
     }
 
     /**
      * 选新巡逻点：以锚点为圆心，roamRadius 内随机取。
-     * 拒绝实体格子 / 不可达位置，最多尝试 roamPickAttempts 次。
+     * 拒绝实体格子，最多尝试 roamPickAttempts 次。
      */
     protected void pickNewRoamTarget() {
         for (int attempt = 0; attempt < roamPickAttempts; attempt++) {
             float ang = Mathf.random(360f);
-            float r = Mathf.random(roamRadius * 0.3f, roamRadius);
+            float r = Mathf.random(roamRadius * 0.6f, roamRadius);
             float tx = anchorX + Angles.trnsx(ang, r);
             float ty = anchorY + Angles.trnsy(ang, r);
 
-            if (isTilePassable(tx, ty) && isReachable(tx, ty)) {
+            if (isTilePassable(tx, ty)) {
                 targetX = tx;
                 targetY = ty;
                 return;
@@ -270,29 +276,36 @@ public class GuardAI extends AIController {
         return true;
     }
 
-    protected boolean isReachable(float wx, float wy) {
-        if (isFlying()) return true;
-        Tmp.v2.set(wx, wy);
-        var result = controlPath.getPathPosition(unit, Tmp.v2);
-        return result.move;
-    }
-
     protected void doMove(float tx, float ty) {
         float dist = Mathf.dst(unit.x, unit.y, tx, ty);
 
-        if (dist <= arrivalDist || stateTimer >= moveDuration) {
+        if (dist <= arrivalDist) {
             state = State.IDLE;
             stateTimer = 0f;
+            pathFailCount = 0;
+            return;
+        }
+
+        if (stateTimer >= moveDuration) {
+            state = State.IDLE;
+            stateTimer = 0f;
+            pathFailCount = 0;
             return;
         }
 
         boolean moved = pathTowards(tx, ty, 5f);
-        if (moved) requestedMove = true;
-
-        if (!moved) {
-            state = State.IDLE;
-            stateTimer = 0f;
-            rescueCount++;
+        if (moved) {
+            requestedMove = true;
+            pathFailCount = 0;
+        } else {
+            // 异步 pathfinder：首次请求会返回 false，不能立即放弃
+            pathFailCount++;
+            if (pathFailCount >= pathWaitTolerance) {
+                state = State.IDLE;
+                stateTimer = 0f;
+                pathFailCount = 0;
+                rescueCount++;
+            }
         }
     }
 
