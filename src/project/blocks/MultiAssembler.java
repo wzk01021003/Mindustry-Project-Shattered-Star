@@ -10,7 +10,11 @@ import arc.struct.Seq;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
 import mindustry.Vars;
+import mindustry.ctype.UnlockableContent;
 import mindustry.gen.Unit;
+import mindustry.type.Item;
+import mindustry.type.Liquid;
+import mindustry.type.PayloadStack;
 import mindustry.type.UnitType;
 import mindustry.world.Tile;
 import mindustry.world.blocks.units.UnitAssembler;
@@ -35,10 +39,12 @@ public class MultiAssembler extends UnitAssembler {
         hasLiquids = true;
         hasPower = true;
 
+        // 点击 UI 添加单位
         config(UnitType.class, (MultiAssemblerBuild build, UnitType type) -> {
             build.addJob(type);
         });
 
+        // 点击取消某个任务
         config(Integer.class, (MultiAssemblerBuild build, Integer index) -> {
             if (index >= 0 && index < build.jobs.size) {
                 build.jobs.remove(index);
@@ -62,7 +68,6 @@ public class MultiAssembler extends UnitAssembler {
         public float progress;
         public float craftTime;
         public int offsetX, offsetY;
-        public boolean ready;
 
         public UnitJob(UnitType unit, AssemblerUnitPlan plan, int offsetX, int offsetY) {
             this.unit = unit;
@@ -177,7 +182,7 @@ public class MultiAssembler extends UnitAssembler {
 
         @Override
         public void updateTile() {
-            // 不调用 super.updateTile()，因为我们要重写整个生产逻辑
+            // 不调用 super.updateTile()，因为我们重写了整个生产逻辑
             if (jobs.isEmpty()) return;
 
             float eff = efficiency * delta();
@@ -192,8 +197,8 @@ public class MultiAssembler extends UnitAssembler {
                     continue;
                 }
 
-                // 检查载荷材料是否齐全
-                if (!hasPayloads(job.plan)) {
+                // 检查材料是否齐全（物品/液体/载荷）
+                if (!hasMaterials(job.plan)) {
                     continue; // 材料不足就暂停
                 }
 
@@ -201,7 +206,7 @@ public class MultiAssembler extends UnitAssembler {
                 job.progress += eff;
                 if (job.progress >= job.craftTime) {
                     // 完成时消耗材料
-                    consumePayloads(job.plan);
+                    consumeMaterials(job.plan);
 
                     // 生成单位
                     Unit u = job.unit.create(team);
@@ -220,24 +225,36 @@ public class MultiAssembler extends UnitAssembler {
             recalculateArea();
         }
 
-        /** 检查载荷材料是否足够 */
-        public boolean hasPayloads(AssemblerUnitPlan plan) {
-            if (plan.requirements.length == 0) return true;
-            // 原版载荷存储在 hasPayloads / getPayloads 里
-            // 这里简化为检查是否足够（具体字段按你的版本适配）
-            for (var stack : plan.requirements) {
-                if (getPayloads() == null) return false;
-                int have = getPayloads().get(stack.item);
-                if (have < stack.amount) return false;
+        /** 检查材料是否足够（支持物品、液体、载荷） */
+        public boolean hasMaterials(AssemblerUnitPlan plan) {
+            if (plan.requirements.size == 0) return true;
+            for (PayloadStack stack : plan.requirements) {
+                UnlockableContent content = stack.item;
+                int amount = stack.amount;
+                if (content instanceof Item item) {
+                    if (items == null || items.get(item) < amount) return false;
+                } else if (content instanceof Liquid liquid) {
+                    if (liquids == null || liquids.get(liquid) < amount) return false;
+                } else {
+                    if (getPayloads() == null || getPayloads().get(content) < amount) return false;
+                }
             }
             return true;
         }
 
-        /** 消耗载荷材料 */
-        public void consumePayloads(AssemblerUnitPlan plan) {
-            if (plan.requirements.length == 0 || getPayloads() == null) return;
-            for (var stack : plan.requirements) {
-                getPayloads().remove(stack.item, stack.amount);
+        /** 消耗材料（支持物品、液体、载荷） */
+        public void consumeMaterials(AssemblerUnitPlan plan) {
+            if (plan.requirements.size == 0) return;
+            for (PayloadStack stack : plan.requirements) {
+                UnlockableContent content = stack.item;
+                int amount = stack.amount;
+                if (content instanceof Item item) {
+                    if (items != null) items.remove(item, amount);
+                } else if (content instanceof Liquid liquid) {
+                    if (liquids != null) liquids.remove(liquid, amount);
+                } else {
+                    if (getPayloads() != null) getPayloads().remove(content, amount);
+                }
             }
         }
 
