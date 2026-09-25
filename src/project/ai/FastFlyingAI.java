@@ -10,7 +10,11 @@ public class FastFlyingAI extends FlyingAI {
 
     public static float engageFactor = 0.85f;
     public static float retreatFactor = 0.55f;
-    public static float sideSpreadStrength = 0.6f;
+
+    /** 飞行单位默认开启横移（盘旋看起来更自然） */
+    public static boolean strafeInRange = true;
+    public static float sideSpreadStrength = 0.5f;
+    public static float jitterAmp = 10f;
 
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
@@ -52,9 +56,9 @@ public class FastFlyingAI extends FlyingAI {
         if (dst < retreat) {
             Tmp.v1.trns(angleToEnemy + 180f, speed);
             unit.movePref(Tmp.v1);
-        } else {
+        } else if (strafeInRange) {
             float sideSign = (unit.id % 2 == 0) ? 1f : -1f;
-            float jitter = Mathf.sin(Time.time * 0.05f + unit.id * 0.37f) * 15f;
+            float jitter = Mathf.sin(Time.time * 0.05f + unit.id * 0.37f) * jitterAmp;
             Tmp.v1.trns(angleToEnemy + 90f * sideSign + jitter, speed * sideSpreadStrength);
             unit.movePref(Tmp.v1);
         }
