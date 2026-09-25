@@ -1,9 +1,10 @@
 {
-  "type": "UnitAssembler",
+  "type": "MultiAssembler",
   "size": 5,
   "health": 3500,
   "maxCount": 8,
-  "areaSize": 9,
+  "padding": 3,
+  "maxAreaSize": 24,
   "requirements": [
     "thorium/500",
     "oxide/150",
@@ -12,9 +13,6 @@
   ],
   "consumePower": 5,
   "consumeLiquid": { "liquid": "cryofluid", "amount": 0.5 },
-  "consumeItems": [
-    "silicon/2"
-  ],
   "plans": [
     {
       "unit": "dagger",

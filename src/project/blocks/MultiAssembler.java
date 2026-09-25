@@ -2,6 +2,7 @@ package project.blocks;
 
 import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
+import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
 import arc.math.Mathf;
 import arc.scene.ui.layout.Table;
@@ -9,40 +10,22 @@ import arc.struct.Seq;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
 import mindustry.Vars;
-import mindustry.gen.Building;
 import mindustry.gen.Unit;
-import mindustry.type.ItemStack;
-import mindustry.type.LiquidStack;
 import mindustry.type.UnitType;
-import mindustry.world.blocks.units.UnitFactory;
-import mindustry.world.meta.BlockStatus;
+import mindustry.world.Tile;
+import mindustry.world.blocks.units.UnitAssembler;
+import mindustry.world.blocks.units.UnitAssembler.AssemblerUnitPlan;
 
-/** 每个单位的完整材料需求（物品 + 液体 + 载荷） */
-class UnitRecipe {
-    UnitType unit;
-    float time;
-    ItemStack[] items = {};
-    LiquidStack[] liquids = {};
-    /** 载荷需求：把载荷写进 items 数组即可，格式为 "单位名/数量" 或 "方块名/数量" */
-    ItemStack[] payloads = {};
+public class MultiAssembler extends UnitAssembler {
 
-    UnitRecipe(UnitType unit, float time, ItemStack[] items, LiquidStack[] liquids, ItemStack[] payloads) {
-        this.unit = unit;
-        this.time = time;
-        this.items = items;
-        this.liquids = liquids;
-        this.payloads = payloads;
-    }
-}
-
-public class AdvancedUnitFactory extends UnitFactory {
-
-    /** 允许选择的最大数量 */
+    /** 最多同时排队的单位数量 */
     public int maxCount = 8;
-    /** 每个单位的配方表 */
-    public Seq<UnitRecipe> recipes = new Seq<>();
+    /** 区域计算时额外留白（格） */
+    public float padding = 3f;
+    /** 区域边长上限 */
+    public int maxAreaSize = 24;
 
-    public AdvancedUnitFactory(String name) {
+    public MultiAssembler(String name) {
         super(name);
         update = true;
         solid = true;
@@ -51,159 +34,251 @@ public class AdvancedUnitFactory extends UnitFactory {
         hasItems = true;
         hasLiquids = true;
         hasPower = true;
+
+        config(UnitType.class, (MultiAssemblerBuild build, UnitType type) -> {
+            build.addJob(type);
+        });
+
+        config(Integer.class, (MultiAssemblerBuild build, Integer index) -> {
+            if (index >= 0 && index < build.jobs.size) {
+                build.jobs.remove(index);
+                build.recalculateArea();
+            }
+        });
     }
 
-    /** 便捷方法：往 recipes 里添加一个配方 */
-    public void addRecipe(UnitType unit, float time, ItemStack[] items, LiquidStack[] liquids, ItemStack[] payloads) {
-        recipes.add(new UnitRecipe(unit, time, items, liquids, payloads));
+    /** 根据单位大小和数量计算区域边长 */
+    public int computeAreaSize(UnitType unit, int count) {
+        if (unit == null) return 3;
+        int unitTiles = Mathf.ceil(unit.hitSize / Vars.tilesize);
+        int side = Mathf.ceil(Mathf.sqrt(Math.max(1, count)));
+        return Mathf.clamp(side * unitTiles + (int) padding, 3, maxAreaSize);
     }
 
-    public class AdvancedUnitFactoryBuild extends UnitFactoryBuild {
-        /** 已选的生产队列：单位 -> 数量 */
-        public arc.struct.OrderedMap<UnitType, Integer> queue = new arc.struct.OrderedMap<>();
-        /** 当前正在生产的单位 */
-        public UnitType currentUnit;
-        /** 当前生产进度 */
+    /** 单个生产任务：记录单位、配方、进度、落点 */
+    public static class UnitJob {
+        public UnitType unit;
+        public AssemblerUnitPlan plan;
         public float progress;
-        /** 当前配方的总时间 */
         public float craftTime;
+        public int offsetX, offsetY;
+        public boolean ready;
+
+        public UnitJob(UnitType unit, AssemblerUnitPlan plan, int offsetX, int offsetY) {
+            this.unit = unit;
+            this.plan = plan;
+            this.craftTime = plan.time;
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+        }
+    }
+
+    public class MultiAssemblerBuild extends UnitAssemblerBuild {
+        public Seq<UnitJob> jobs = new Seq<>();
 
         @Override
         public void created() {
             super.created();
+            recalculateArea();
         }
 
-        /** 找到某个单位的配方 */
-        public UnitRecipe recipeFor(UnitType unit) {
-            for (UnitRecipe r : recipes) {
-                if (r.unit == unit) return r;
+        /** 往队列里加一个单位，会自动分配落点 */
+        public void addJob(UnitType type) {
+            if (jobs.size >= maxCount) return;
+            AssemblerUnitPlan plan = null;
+            for (AssemblerUnitPlan p : plans) {
+                if (p.unit == type) { plan = p; break; }
+            }
+            if (plan == null) return;
+
+            // 计算一个空闲的落点
+            int unitTiles = Mathf.ceil(type.hitSize / Vars.tilesize);
+            int[] slot = findFreeSlot(unitTiles);
+            if (slot == null) return;
+
+            jobs.add(new UnitJob(type, plan, slot[0], slot[1]));
+            recalculateArea();
+        }
+
+        /** 找一个不跟其他 job 冲突的落点 */
+        public int[] findFreeSlot(int unitTiles) {
+            int half = areaSize / 2;
+            for (int gy = -half; gy < areaSize - half; gy++) {
+                for (int gx = -half; gx < areaSize - half; gx++) {
+                    boolean conflict = false;
+                    for (UnitJob j : jobs) {
+                        int otherTiles = Mathf.ceil(j.unit.hitSize / Vars.tilesize);
+                        if (Math.abs(j.offsetX - gx) < Math.max(unitTiles, otherTiles)
+                            && Math.abs(j.offsetY - gy) < Math.max(unitTiles, otherTiles)) {
+                            conflict = true;
+                            break;
+                        }
+                    }
+                    if (!conflict) return new int[]{gx, gy};
+                }
             }
             return null;
         }
 
-        /** 累计整个队列的材料需求 */
-        public void computeTotalCost(ItemStack[] outItems, LiquidStack[] outLiquids) {
-            // 具体累加逻辑看 UI 需要，这里只留接口
+        public void recalculateArea() {
+            int maxUnits = Math.max(1, jobs.size);
+            int maxSide = 3;
+            for (UnitJob j : jobs) {
+                int s = computeAreaSize(j.unit, 1);
+                maxSide = Math.max(maxSide, s);
+            }
+            // 同时考虑队列总规模
+            int totalSide = computeAreaSize(
+                jobs.size > 0 ? jobs.first().unit : null, maxUnits);
+            areaSize = Math.max(maxSide, totalSide);
         }
 
         @Override
         public void buildConfiguration(Table table) {
             super.buildConfiguration(table);
 
+            // 可选单位列表
             table.row();
-            table.label(() -> "生产队列:").left().padTop(6f).row();
-
-            // 每个单位一行：名称 + 加减按钮 + 显示已选数量
-            for (UnitRecipe r : recipes) {
-                UnitType u = r.unit;
-                int count = queue.get(u, 0);
-
-                table.table(row -> {
-                    row.label(() -> u.localizedName).left().width(120f);
-                    row.button("-", () -> {
-                        int c = queue.get(u, 0);
-                        if (c > 1) queue.put(u, c - 1);
-                        else queue.remove(u);
-                    }).size(40f, 40f);
-                    row.label(() -> "" + queue.get(u, 0)).width(40f);
-                    row.button("+", () -> {
-                        int c = queue.get(u, 0);
-                        if (c < maxCount) queue.put(u, c + 1);
-                    }).size(40f, 40f);
-                }).row();
+            table.label(() -> "可生产单位:").left().padTop(6f).row();
+            for (AssemblerUnitPlan plan : plans) {
+                table.button(plan.unit.localizedName, () -> configure(plan.unit))
+                    .size(110f, 45f).pad(3f).row();
             }
 
-            // 显示总材料需求
+            // 当前任务列表
             table.row();
-            table.label(() -> "总材料需求：").left().padTop(6f).row();
-            table.table(t -> {
-                for (UnitRecipe r : recipes) {
-                    int count = queue.get(r.unit, 0);
-                    if (count <= 0) continue;
+            table.label(() -> "生产队列 (" + jobs.size + "/" + maxCount + "):")
+                .left().padTop(6f).row();
 
-                    for (ItemStack s : r.items) {
-                        int total = s.amount * count;
-                        t.image(s.item.uiIcon).size(24f).padRight(4f);
-                        t.label(() -> "" + total).left().padRight(12f);
-                    }
-                    for (LiquidStack s : r.liquids) {
-                        float total = s.amount * count;
-                        t.image(s.liquid.uiIcon).size(24f).padRight(4f);
-                        t.label(() -> String.format("%.1f", total)).left().padRight(12f);
-                    }
-                    for (ItemStack s : r.payloads) {
-                        int total = s.amount * count;
-                        t.image(s.item.uiIcon).size(24f).padRight(4f);
-                        t.label(() -> "" + total).left().padRight(12f);
-                    }
+            for (int i = 0; i < jobs.size; i++) {
+                final int idx = i;
+                UnitJob job = jobs.get(i);
+                table.table(row -> {
+                    row.label(() -> job.unit.localizedName + "  "
+                        + (int)(job.progress / job.craftTime * 100) + "%").left().width(160f);
+                    row.button("取消", () -> configure(idx)).size(60f, 35f);
+                }).row();
+            }
+        }
+
+        /** 判断某个落点能不能放下单位 */
+        public boolean canPlaceAt(UnitType type, int gx, int gy) {
+            int unitTiles = Mathf.ceil(type.hitSize / Vars.tilesize);
+            for (int dy = 0; dy < unitTiles; dy++) {
+                for (int dx = 0; dx < unitTiles; dx++) {
+                    Tile t = Vars.world.tile(tile.x + gx + dx, tile.y + gy + dy);
+                    if (t == null) return false;
+                    if (!type.flying && (t.solid() || t.floor().isDeep())) return false;
+                    if (type.flying && t.solid()) return false;
                 }
-            }).row();
-
-            // 清空队列按钮
-            table.row();
-            table.button("清空队列", () -> queue.clear()).size(120f, 40f);
+            }
+            return true;
         }
 
         @Override
         public void updateTile() {
-            if (queue.isEmpty()) {
-                currentUnit = null;
-                return;
-            }
+            // 不调用 super.updateTile()，因为我们要重写整个生产逻辑
+            if (jobs.isEmpty()) return;
 
-            // 取队首单位作为当前生产目标
-            currentUnit = queue.orderedKeys().first();
-            UnitRecipe recipe = recipeFor(currentUnit);
-            if (recipe == null) {
-                queue.remove(currentUnit);
-                return;
-            }
-            craftTime = recipe.time;
+            float eff = efficiency * delta();
+            int half = areaSize / 2;
 
-            // 检查材料
-            boolean hasMaterials = true;
-            for (ItemStack s : recipe.items) {
-                if (items == null || items.get(s.item) < s.amount) { hasMaterials = false; break; }
-            }
-            if (hasMaterials) {
-                for (LiquidStack s : recipe.liquids) {
-                    if (liquids == null || liquids.get(s.liquid) < s.amount) { hasMaterials = false; break; }
+            for (int i = jobs.size - 1; i >= 0; i--) {
+                UnitJob job = jobs.get(i);
+
+                // 检查落点是否合法
+                if (!canPlaceAt(job.unit, job.offsetX, job.offsetY)) {
+                    job.progress = 0f; // 不能放就暂停
+                    continue;
                 }
-            }
 
-            if (hasMaterials && efficiency > 0f) {
-                progress += delta();
-                if (progress >= craftTime) {
-                    progress = 0f;
+                // 检查载荷材料是否齐全
+                if (!hasPayloads(job.plan)) {
+                    continue; // 材料不足就暂停
+                }
 
-                    // 消耗材料
-                    for (ItemStack s : recipe.items) items.remove(s.item, s.amount);
-                    for (LiquidStack s : recipe.liquids) liquids.remove(s.liquid, s.amount);
+                // 推进进度
+                job.progress += eff;
+                if (job.progress >= job.craftTime) {
+                    // 完成时消耗材料
+                    consumePayloads(job.plan);
 
-                    // 生产单位
-                    Unit u = currentUnit.create(team);
-                    u.set(x + Mathf.range(8f), y + Mathf.range(8f));
+                    // 生成单位
+                    Unit u = job.unit.create(team);
+                    u.set(
+                        tile.x * Vars.tilesize + (job.offsetX + 0.5f) * Vars.tilesize,
+                        tile.y * Vars.tilesize + (job.offsetY + 0.5f) * Vars.tilesize
+                    );
                     u.rotation = rotation * 90f;
                     u.add();
 
-                    // 数量减一
-                    int c = queue.get(currentUnit);
-                    if (c <= 1) queue.remove(currentUnit);
-                    else queue.put(currentUnit, c - 1);
+                    jobs.remove(i);
                 }
-            } else {
-                progress = 0f;
+            }
+
+            // 队列变化后重新计算区域
+            recalculateArea();
+        }
+
+        /** 检查载荷材料是否足够 */
+        public boolean hasPayloads(AssemblerUnitPlan plan) {
+            if (plan.requirements.length == 0) return true;
+            // 原版载荷存储在 hasPayloads / getPayloads 里
+            // 这里简化为检查是否足够（具体字段按你的版本适配）
+            for (var stack : plan.requirements) {
+                if (getPayloads() == null) return false;
+                int have = getPayloads().get(stack.item);
+                if (have < stack.amount) return false;
+            }
+            return true;
+        }
+
+        /** 消耗载荷材料 */
+        public void consumePayloads(AssemblerUnitPlan plan) {
+            if (plan.requirements.length == 0 || getPayloads() == null) return;
+            for (var stack : plan.requirements) {
+                getPayloads().remove(stack.item, stack.amount);
             }
         }
 
         @Override
         public void drawSelect() {
             super.drawSelect();
-            // 预览正在生产的单位
-            if (currentUnit != null) {
-                Draw.color(Color.green);
-                Lines.stroke(1.5f);
-                Lines.circle(x, y, currentUnit.hitSize);
+            if (jobs.isEmpty()) return;
+
+            int half = areaSize / 2;
+            for (UnitJob job : jobs) {
+                int unitTiles = Mathf.ceil(job.unit.hitSize / Vars.tilesize);
+                boolean ok = canPlaceAt(job.unit, job.offsetX, job.offsetY);
+                Color c = ok ? Color.green : Color.red;
+
+                Draw.color(c, 0.3f);
+                Fill.rect(
+                    tile.x * Vars.tilesize + (job.offsetX + unitTiles / 2f) * Vars.tilesize,
+                    tile.y * Vars.tilesize + (job.offsetY + unitTiles / 2f) * Vars.tilesize,
+                    unitTiles * Vars.tilesize, unitTiles * Vars.tilesize
+                );
+
+                Draw.color(c);
+                Lines.stroke(1.2f);
+                Lines.rect(
+                    tile.x * Vars.tilesize + job.offsetX * Vars.tilesize,
+                    tile.y * Vars.tilesize + job.offsetY * Vars.tilesize,
+                    unitTiles * Vars.tilesize, unitTiles * Vars.tilesize
+                );
+            }
+
+            // 未使用的格子用淡蓝框
+            Draw.color(Color.sky, 0.15f);
+            for (int gx = -half; gx < areaSize - half; gx++) {
+                for (int gy = -half; gy < areaSize - half; gy++) {
+                    Lines.stroke(0.8f);
+                    Lines.rect(
+                        (tile.x + gx - 0.5f) * Vars.tilesize,
+                        (tile.y + gy - 0.5f) * Vars.tilesize,
+                        Vars.tilesize, Vars.tilesize
+                    );
+                }
             }
             Draw.reset();
         }
@@ -211,10 +286,12 @@ public class AdvancedUnitFactory extends UnitFactory {
         @Override
         public void write(Writes write) {
             super.write(write);
-            write.i(queue.size);
-            for (var entry : queue) {
-                write.s(entry.key.id);
-                write.i(entry.value);
+            write.i(jobs.size);
+            for (UnitJob j : jobs) {
+                write.s(j.unit.id);
+                write.f(j.progress);
+                write.i(j.offsetX);
+                write.i(j.offsetY);
             }
         }
 
@@ -222,13 +299,26 @@ public class AdvancedUnitFactory extends UnitFactory {
         public void read(Reads read, byte revision) {
             super.read(read, revision);
             int n = read.i();
-            queue.clear();
+            jobs.clear();
             for (int i = 0; i < n; i++) {
                 short uid = read.s();
-                int count = read.i();
+                float prog = read.f();
+                int ox = read.i();
+                int oy = read.i();
                 UnitType u = Vars.content.unit(uid);
-                if (u != null) queue.put(u, count);
+                if (u != null) {
+                    AssemblerUnitPlan plan = null;
+                    for (AssemblerUnitPlan p : plans) {
+                        if (p.unit == u) { plan = p; break; }
+                    }
+                    if (plan != null) {
+                        UnitJob job = new UnitJob(u, plan, ox, oy);
+                        job.progress = prog;
+                        jobs.add(job);
+                    }
+                }
             }
+            recalculateArea();
         }
     }
 }
