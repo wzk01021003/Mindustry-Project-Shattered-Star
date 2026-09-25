@@ -5,7 +5,6 @@ import arc.util.Time;
 import arc.util.Tmp;
 import mindustry.entities.Units;
 import mindustry.entities.units.AIController;
-import mindustry.gen.Healthc;
 import mindustry.gen.Teamc;
 import mindustry.gen.Unit;
 import project.content.ProtectModeRegistry;
@@ -20,24 +19,17 @@ import project.content.ProtectModes;
 public class ProtectAI extends AIController {
 
     // ============ 静态参数 ============
-    /** 跟随被保护目标的距离 */
     public static float followDist = 60f;
-    /** 索敌范围（以被保护单位为中心） */
     public static float engageRange = 220f;
-    /** PUSH 模式下，接触敌人的判定距离 */
     public static float pushContact = 20f;
-    /** SHIELD 模式下，挡在目标前方多远 */
     public static float shieldOffset = 45f;
-    /** 索敌间隔（帧） */
     public static float retargetInterval = 15f;
 
-    /** 卡死检测参数 */
     public static float stuckThreshold = 1.5f;
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
 
     // ============ 运行时状态 ============
-    /** 保护目标坐标（由 configured 设置） */
     public float anchorX, anchorY;
     public boolean hasAnchor = false;
 
@@ -57,12 +49,8 @@ public class ProtectAI extends AIController {
     public void updateMovement() {
         ensureInit();
 
-        if (!hasAnchor) {
-            // 没有锚点：什么都不做
-            return;
-        }
+        if (!hasAnchor) return;
 
-        // 找最近的敌人（以保护目标为中心）
         Teamc enemy = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
             u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
             b -> unit.type.targetGround);
@@ -75,7 +63,6 @@ public class ProtectAI extends AIController {
             default:      doAttack(enemy);  break;
         }
 
-        // 落地（非飞行）
         if (!unit.type.flying && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
             unit.elevation = Mathf.approachDelta(unit.elevation, 0f, unit.type.descentSpeed);
         }
@@ -95,14 +82,13 @@ public class ProtectAI extends AIController {
             float engage = range * 0.85f;
 
             if (dst <= engage) {
-                // 在射程内：开火，不动
                 unit.lookAt(enemy);
             } else {
                 moveTo(enemy, engage, 100f);
             }
         } else {
-            // 无敌人：回到锚点附近
-            moveTo(anchorX, anchorY, followDist, 100f);
+            // moveTo(x, y, range, smooth, stopAtTarget)
+            moveTo(anchorX, anchorY, followDist, 100f, true);
         }
     }
 
@@ -112,45 +98,39 @@ public class ProtectAI extends AIController {
             float dst = unit.dst(enemy);
 
             if (dst > pushContact) {
-                // 冲过去
                 Tmp.v1.set(enemy.getX(), enemy.getY()).sub(unit).setLength(unit.speed());
                 unit.movePref(Tmp.v1);
             } else {
-                // 贴上了，用力推
                 Tmp.v1.set(enemy.getX(), enemy.getY()).sub(unit).setLength(unit.speed() * 1.5f);
                 unit.movePref(Tmp.v1);
             }
             unit.lookAt(enemy);
         } else {
-            // 无敌人：回锚点
-            moveTo(anchorX, anchorY, followDist, 100f);
+            moveTo(anchorX, anchorY, followDist, 100f, true);
         }
     }
 
     /** 护盾：挡在锚点和敌人之间 */
     protected void doShield(Teamc enemy) {
         if (enemy != null) {
-            // 锚点 → 敌人方向，偏移 shieldOffset 的位置
             Tmp.v1.set(enemy.getX() - anchorX, enemy.getY() - anchorY).setLength(shieldOffset);
             Tmp.v2.set(anchorX + Tmp.v1.x, anchorY + Tmp.v1.y);
 
             float dst = unit.dst(Tmp.v2.x, Tmp.v2.y);
 
             if (dst > 15f) {
-                moveTo(Tmp.v2.x, Tmp.v2.y, 10f, 100f);
+                moveTo(Tmp.v2.x, Tmp.v2.y, 10f, 100f, true);
             } else {
-                // 已经就位：面朝敌人
                 unit.lookAt(enemy);
             }
         } else {
-            // 无敌人：回到锚点旁边
-            moveTo(anchorX, anchorY, followDist * 0.6f, 100f);
+            moveTo(anchorX, anchorY, followDist * 0.6f, 100f, true);
         }
     }
 
     /** 被动：只跟随锚点 */
     protected void doPassive() {
-        moveTo(anchorX, anchorY, followDist, 100f);
+        moveTo(anchorX, anchorY, followDist, 100f, true);
     }
 
     // ================================================================
