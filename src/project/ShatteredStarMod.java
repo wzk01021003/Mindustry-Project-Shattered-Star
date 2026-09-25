@@ -16,13 +16,9 @@ public class ShatteredStarMod extends Mod {
     public static UnitCommand huntCommand;
     public static UnitCommand dogfightCommand;
 
-    /**
-     * 全局出厂指令（预设值）。玩家在 MultiAssembler UI 里选择。
-     * 只有当 globalFactoryCommandEnabled 为 true 时才自动应用到新产出的单位。
-     */
+    /** 全局出厂指令（预设值） */
     public static UnitCommand globalFactoryCommand = null;
-
-    /** 全局出厂指令开关。默认 false，玩家需要在 UI 里手动打开。 */
+    /** 全局出厂指令开关。默认关闭 */
     public static boolean globalFactoryCommandEnabled = false;
 
     public ShatteredStarMod() {
@@ -87,7 +83,6 @@ public class ShatteredStarMod extends Mod {
         Log.info("Registered ss-hunt / ss-dogfight to " + count + " unit types.");
 
         // ============ 4. 全局：原版工厂产出的单位应用出厂指令 ============
-        // 只在新产出的单位支持该指令 + 开关打开时才应用
         Events.on(UnitCreateEvent.class, e -> {
             if (!globalFactoryCommandEnabled) return;
             if (globalFactoryCommand == null) return;
