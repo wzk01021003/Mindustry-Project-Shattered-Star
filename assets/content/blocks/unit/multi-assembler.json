@@ -1,29 +1,31 @@
 {
-    "requirements": ["thorium/500", "oxide/150", "carbide/80", "silicon/650"],
-    "category": "units",
-    "size": 5,
-    "health": 3500,
-    "armor": 8,
-    "maxCount": 8,
-    "areaRadius": 5,
-    "payloadCapacity": 30,
-    "powerUse": 5,
-    "recipe": [
-        {
-            "unit": "dagger",
-            "craftTime": 900,
-            "inputItems": ["silicon/10", "lead/10"]
-        },
-        {
-            "unit": "flare",
-            "craftTime": 900,
-            "inputItems": ["silicon/15"]
-        },
-        {
-            "unit": "conquer",
-            "craftTime": 3000,
-            "inputItems": ["silicon/50"],
-            "inputPayloads": ["locus/6", "carbide-wall-large/20"]
-        }
-    ]
+  "requirements": ["thorium/500", "oxide/150", "carbide/80", "silicon/650"],
+  "category": "units",
+  "size": 5,
+  "health": 3500,
+  "armor": 8,
+  "maxCount": 8,
+  "areaRadius": 5,
+  "payloadCapacity": 30,
+  "powerUse": 5,
+  "itemCapacity": 200,
+  "liquidCapacity": 120,
+  "recipe": [
+    {
+      "unit": "dagger",
+      "craftTime": 900,
+      "inputItems": ["silicon/10", "lead/10"]
+    },
+    {
+      "unit": "flare",
+      "craftTime": 900,
+      "inputItems": ["silicon/15"]
+    },
+    {
+      "unit": "conquer",
+      "craftTime": 3000,
+      "inputItems": ["silicon/50"],
+      "inputPayloads": ["locus/6", "carbide-wall-large/20"]
+    }
+  ]
 }
