@@ -1,6 +1,7 @@
 package project.ai;
 
 import arc.math.Mathf;
+import arc.math.geom.Vec2;
 import arc.util.Time;
 import arc.util.Tmp;
 import mindustry.entities.Units;
@@ -14,7 +15,7 @@ import project.content.ProtectModes;
  * 保护 AI：
  *  - 玩家点"保护"命令 + 点一个友方建筑/单位 → 单位去保护它
  *  - 行为按 ProtectModes 分四种：ATTACK / PUSH / SHIELD / PASSIVE
- *  - 完全不动原版寻路：只在距离内做行为覆盖
+ *  - 完全不动原版寻路
  */
 public class ProtectAI extends AIController {
 
@@ -36,6 +37,9 @@ public class ProtectAI extends AIController {
     public ProtectModes mode;
     protected boolean initialized = false;
 
+    /** 复用这个向量传 moveTo 的目标坐标，避免每帧分配 */
+    protected final Vec2 targetVec = new Vec2();
+
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
 
@@ -48,7 +52,6 @@ public class ProtectAI extends AIController {
     @Override
     public void updateMovement() {
         ensureInit();
-
         if (!hasAnchor) return;
 
         Teamc enemy = Units.closestTarget(unit.team, anchorX, anchorY, engageRange,
@@ -87,8 +90,8 @@ public class ProtectAI extends AIController {
                 moveTo(enemy, engage, 100f);
             }
         } else {
-            // moveTo(x, y, range, smooth, stopAtTarget)
-            moveTo(anchorX, anchorY, followDist, 100f, true);
+            targetVec.set(anchorX, anchorY);
+            moveTo(targetVec, followDist, 100f);
         }
     }
 
@@ -106,7 +109,8 @@ public class ProtectAI extends AIController {
             }
             unit.lookAt(enemy);
         } else {
-            moveTo(anchorX, anchorY, followDist, 100f, true);
+            targetVec.set(anchorX, anchorY);
+            moveTo(targetVec, followDist, 100f);
         }
     }
 
@@ -119,18 +123,21 @@ public class ProtectAI extends AIController {
             float dst = unit.dst(Tmp.v2.x, Tmp.v2.y);
 
             if (dst > 15f) {
-                moveTo(Tmp.v2.x, Tmp.v2.y, 10f, 100f, true);
+                targetVec.set(Tmp.v2.x, Tmp.v2.y);
+                moveTo(targetVec, 10f, 100f);
             } else {
                 unit.lookAt(enemy);
             }
         } else {
-            moveTo(anchorX, anchorY, followDist * 0.6f, 100f, true);
+            targetVec.set(anchorX, anchorY);
+            moveTo(targetVec, followDist * 0.6f, 100f);
         }
     }
 
     /** 被动：只跟随锚点 */
     protected void doPassive() {
-        moveTo(anchorX, anchorY, followDist, 100f, true);
+        targetVec.set(anchorX, anchorY);
+        moveTo(targetVec, followDist, 100f);
     }
 
     // ================================================================
