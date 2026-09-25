@@ -3,6 +3,7 @@ package project.ai;
 import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.units.AIController;
+import mindustry.gen.Unit;
 
 /**
  * 狩猎 AI：完全委托给原版 AI。
