@@ -144,7 +144,6 @@ public class MultiAssembler extends UnitAssembler {
         }
 
         @Override
-        @Override
         public void buildConfiguration(Table table) {
             table.button("HELLO", () -> {
                     Log.info("Button clicked!");
