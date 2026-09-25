@@ -12,9 +12,7 @@ import arc.util.io.Writes;
 import mindustry.Vars;
 import mindustry.ctype.UnlockableContent;
 import mindustry.gen.Unit;
-import mindustry.type.Item;
 import mindustry.type.ItemStack;
-import mindustry.type.Liquid;
 import mindustry.type.LiquidStack;
 import mindustry.type.PayloadStack;
 import mindustry.type.UnitType;
@@ -80,9 +78,10 @@ public class MultiAssembler extends GenericCrafter {
                             t.add("[lightgray]时间: " + (r.craftTime / 60f) + "s[]").padRight(8);
                             t.row();
                             t.add("[lightgray]需求: []");
-                            for (ItemStack s : r.inputItems) t.add(s.item.uiIcon).size(24f).padRight(2);
-                            for (LiquidStack s : r.inputLiquids) t.add(s.liquid.uiIcon).size(24f).padRight(2);
-                            for (PayloadStack s : r.cachedInputPayloads) t.add(s.item.uiIcon).size(24f).padRight(2);
+                            // 这里修复了报错：使用 t.image 代替 t.add
+                            for (ItemStack s : r.inputItems) t.image(s.item.uiIcon).size(24f).padRight(2);
+                            for (LiquidStack s : r.inputLiquids) t.image(s.liquid.uiIcon).size(24f).padRight(2);
+                            for (PayloadStack s : r.cachedInputPayloads) t.image(s.item.uiIcon).size(24f).padRight(2);
                         }).left().row();
                 }
             });
@@ -205,7 +204,6 @@ public class MultiAssembler extends GenericCrafter {
 
         @Override
         public void updateTile() {
-            // 注意：这里没有 super.updateTile()，完全重写生产逻辑
             if (jobs.isEmpty()) return;
 
             float eff = efficiency * delta();
