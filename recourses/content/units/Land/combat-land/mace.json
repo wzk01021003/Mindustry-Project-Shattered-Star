@@ -1,0 +1,35 @@
+{
+    "weapons": [
+        {
+            "name": "flamethrower",
+            "top": false,
+            "shootSound": "shootFlame",
+            "shootY": 6,
+            "reload": 11,
+            "recoil": 1,
+            "ejectEffect": "none",
+            "cooldownTime": 30,
+            "heatColor": "FF624D",
+            "bullet": {
+                "speed": 4.2,
+                "damage": 37,
+                "ammoMultiplier": 3,
+                "hitSize": 7,
+                "lifetime": 13,
+                "pierce": true,
+                "pierceBuilding": true,
+                "pierceCap": 2,
+                "statusDuration": 300,
+                "shootEffect": "shootSmallFlame",
+                "hitEffect": "hitFlameSmall",
+                "despawnEffect": "none",
+                "status": "burning",
+                "keepVelocity": false,
+                "hittable": false，
+                "frontColor": "00000000",
+                "backColor": "00000000",
+                "smokeEffect": "shootBigSmoke"
+            }
+        }
+    ]
+}

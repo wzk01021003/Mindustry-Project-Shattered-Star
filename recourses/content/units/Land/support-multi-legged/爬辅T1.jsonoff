@@ -1,0 +1,85 @@
+{
+    "name": "爬辅",
+    "details": "T1多足类辅助型陆军，其实就是个绿绿的爬虫，没啥特点，就是爆炸回血。",
+    "description": "自杀式修复单位，从爬虫那里改装的。",
+    "type": "legs",
+    "researchCostMultiplier": 0.5,
+    "Controller": "RepairAI",
+    "shownPlanets": [ "serpulo" ],
+    "stepSound": "walkerStepTiny",
+    "stepSoundVolume": 0.4,
+    "stepSoundPitch": 0.8,
+    "speed": 2,
+    "hitSize": 8,
+    "targetAir": false,
+    "itemCapacity": 30,
+    "health": 120,
+    "armor": 1,
+    "range": 40,
+    "ammoType": {
+      "type": "ItemAmmoType",
+      "item": "coal"
+    },
+    "research": {
+      "parent": "dagger",
+      "requirements": [
+        "coal/10",
+        "silicon/12",
+        "graphite/8"
+      ]
+    },
+    "targetFlags": [
+      "reactor",
+      "battery",
+      "storage",
+      "core"
+    ],
+    "legStraightness": 1,
+    "stepShake": 0,
+    "legCount": 4,
+    "legLength": 9,
+    "lockLegBase": true,
+    "legContinuousMove": true,
+    "legExtension": 2,
+    "legBaseOffset": 2,
+    "legMaxLength": 1.1,
+    "legMinLength": 0.2,
+    "legLengthScl": 0.96,
+    "legForwardScl": 1.1,
+    "legGroupSize": 2,
+    "rippleScale": 0.2,
+    "legMoveSpace": 1,
+    "allowLegStep": true,
+    "hovering": true,
+    "legPhysicsLayer": false,
+    "weapons": [
+      {
+        "shootOnDeath": true,
+        "targetUnderBlocks": false,
+        "reload": 24,
+        "shootCone": 180,
+        "ejectEffect": "none",
+        "shootSound": "explosion",
+        "x": 0,
+        "shootY": 0,
+        "mirror": false,
+        "bullet": {
+          "type": "BulletType",
+          "collidesTiles": false,
+          "collides": false,
+          "hitSound": "explosion",
+          "rangeOverride": 25,
+          "hitEffect": "pulverize",
+          "speed": 0,
+          "splashDamageRadius": 44,
+          "instantDisappear": true,
+          "splashDamage": 80,
+          "killShooter": true,
+          "hittable": false,
+          "collidesAir": true,
+          "healPercent": 100,
+          "collidesTeam": true
+        }
+      }
+    ]
+}

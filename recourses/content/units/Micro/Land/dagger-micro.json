@@ -1,0 +1,11 @@
+{
+    "type": "mech",
+    "health": 75,
+    "armor": 0,
+    "hitSize": 4,
+    "speed": 0.8,
+    "stepSoundVolume": 0.4,
+    "weapons": {
+        "name": "micro-weapon",
+    }
+}

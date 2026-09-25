@@ -1,0 +1,53 @@
+{
+	"health": 250,
+    "ammoTypes": {
+		"copper": {
+			"type": "BasicBulletType",
+			"ammoMultiplier": 2,
+			"speed": 5,
+			"lifetime": 30,
+			"width": 7,
+			"height": 9,
+			"damage": 9,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor":"EAC1A8",
+			"backColor":"D39169",
+			"hitColor":"D39169"
+		},
+		"graphite": {
+			"speed": 7,
+			"damage": 18,
+			"rangeChange": 16,
+			"lifetime": 30,
+			"width": 9,
+			"height": 12,
+			"ammoMultiplier": 4,
+			"reloadMultiplier": 0.8,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor":"DAE1EE",
+			"backColor":"7D89D8",
+			"hitColor":"7D89D8"
+		},
+		"silicon": {
+			"speed": 6,
+			"damage": 12,
+			"reloadMultiplier": 1.6,
+			"lifetime": 30,
+			"width": 7,
+			"height": 9,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"homingRange": 50,
+			"homingPower": 0.2,
+			"ammoMultiplier": 5,
+			"trailLength": 5,
+			"trailWidth": 1.5,
+			"frontColor":"999BA0",
+			"backColor":"707594",
+			"trailColor":"707594",
+			"hitColor":"707594"
+		}
+	}
+}

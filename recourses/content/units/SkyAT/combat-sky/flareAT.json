@@ -1,0 +1,69 @@
+{
+    "type": "flying",
+    "flying": true,
+    "health": 150,
+    "rotateSpeed": 5,
+    "omniMovement": true,
+    "speed": 5,
+    "accel": 0.08,
+    "drag": 0.04,
+    "engineOffset": 5.75,
+    "engineSize": 2,
+    "hitSize": 9,
+    "itemCapacity": 20,
+    "circleTarget": true,
+    "circleTargetRadius": 60,
+    "wreckSoundVolume": 0.7,
+    "moveSound": "loopThruster",
+    "moveSoundPitchMin": 0.3,
+    "moveSoundPitchMax": 1.5,
+    "moveSoundVolume": 0.2,
+	"faceTarget": false,
+	"trailLength":3,
+	"outlineColor": "202026",
+	"parts": [
+	    {
+            "type": "RegionPart",
+            "x": 0,
+            "y": 0,
+            "suffix": "-glow",
+            "color": "FFA665AA",
+            "mixColor": "FFA665AA",
+            "outline": false,
+            "blending": "additive",
+            "layerOffset": 0.001
+        }
+    ],
+    "weapons": [
+        {
+            "y": 0,
+            "x": 0,
+            "shootY": 1,
+            "layerOffset": -0.001,
+            "shootCone": 360,
+            "reload": 20,
+            "rotate": false,
+            "rotateSpeed": 25,
+            "mirror": false,
+            "ejectEffect": "casing1",
+            "shootSound": "shootSalvo",
+            "shootCone": 20,
+            "shoot": {
+                "type": "ShootSpread",
+                "shots": 3,
+                "shotDelay": 5,
+            },
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 20,
+                "damage": 5,
+                "buildingDamageMultiplier": 0.5,
+                "width": 3,
+                "height": 30,
+                "lifetime": 7,
+                "shootEffect": "shootSmall",
+                "smokeEffect": "shootSmallSmoke"
+            }
+        }
+    ]
+}

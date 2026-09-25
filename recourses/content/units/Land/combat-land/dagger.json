@@ -1,0 +1,25 @@
+{
+    "health": 150,
+	"weapons": [
+		{
+			"name": "large-weapon",
+			"reload": 10,
+			"x": 4,
+			"y": 2,
+			"rotate": false,
+			"shootY": 4.5,
+			"top": false,
+			"ejectEffect": "casing1",
+			"cooldownTime": 20,
+			"heatColor": "FFA665",
+			"bullet": {
+				"type": "BasicBulletType",
+				"damage": 9,
+				"speed": 5,
+				"lifetime": 30,
+				"width": 7,
+				"height": 9
+			}
+		}
+	]
+}

@@ -1,0 +1,58 @@
+{
+    "weapons": [
+        {
+            "name": "mount-weapon",
+            "reload": 13,
+            "x": 4,
+            "y": 1.5,
+            "shootY": 4,
+            "rotate": true,
+            "ejectEffect": "casing1",
+            "cooldownTime": 20,
+		    "heatColor": "FFA665",
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 5,
+                "damage": 9,
+                "width": 7,
+                "height": 9,
+                "lifetime": 30,
+                "ammoMultiplier": 2
+            }
+        },
+        {
+            "name": "missiles-mount",
+            "mirror": false,
+            "reload": 25,
+            "x": 0,
+            "y": -5,
+            "rotate": true,
+            "ejectEffect": "casing1",
+            "shootSound": "shootMissileShort",
+            "cooldownTime": 40,
+		    "heatColor": "FFA665",
+            "bullet": {
+                "type": "MissileBulletType",
+                "speed": 5.4,
+                "damage": 12,
+                "sprite": "missile",
+                "keepVelocity": true,
+                "width": 8,
+                "height": 8,
+                "shrinkY": 0,
+                "drag": -0.003,
+                "homingRange": 60,
+                "splashDamageRadius": 25,
+                "splashDamage": 10,
+                "lifetime": 32.5,
+                "trailColor": "808080",
+                "backColor": "f9c27a",
+                "frontColor": "fff8e8",
+                "hitEffect": "blastExplosion",
+                "despawnEffect": "blastExplosion",
+                "weaveScale": 8,
+                "weaveMag": 2
+            }
+        }
+    ]
+}

@@ -1,0 +1,120 @@
+{
+    "health": 24000,
+    "mineTier": 4,
+    "mineSpeed": 10,
+    "abilities": [
+        {
+            "type": "ShieldRegenFieldAbility",
+            "amount": 100,
+            "max": 1250,
+            "reload": 240,
+            "range": 140,
+            "applyEffect": "shieldApply",
+            "activeEffect": "shieldWave"
+        },
+        {
+            "type": "RepairFieldAbility",
+            "amount": 150,
+            "reload": 60,
+            "range": 140,
+            "healEffect": "heal",
+            "activeEffect": "healWaveDynamic"
+        },
+        {
+            "type": "ForceFieldAbility",
+            "radius": 140,
+            "regen": 4,
+            "max": 7000,
+            "cooldown": 480,
+            "sides": 8,
+            "rotation": 0,
+            "breakSound": "shieldBreak"
+        }
+	],
+	"weapons": [
+	    {
+			"name": "point-defense-mount",
+			"type": "PointDefenseWeapon",
+			"x": 25,
+			"y": 16,
+			"rotate": true,
+			"mirror": false,
+			"recoil": 0,
+			"rotateSpeed": 24,
+			"reload": 4,
+			"targetInterval": 0,
+			"targetSwitchInterval": 0,
+			"bullet": {
+				"speed": 24,
+				"lifetime": 6.6,
+				"shootEffect": "sparkShoot",
+				"hitEffect": "pointHit",
+				"maxRange": 140,
+				"damage": 60
+			}
+		},
+		{
+			"name": "point-defense-mount",
+			"type": "PointDefenseWeapon",
+			"x": -25,
+			"y": 16,
+			"rotate": true,
+			"mirror": false,
+			"recoil": 0,
+			"rotateSpeed": 24,
+			"reload": 4,
+			"targetInterval": 0,
+			"targetSwitchInterval": 0,
+			"bullet": {
+				"speed": 24,
+				"lifetime": 6.6,
+				"shootEffect": "sparkShoot",
+				"hitEffect": "pointHit",
+				"maxRange": 140,
+				"damage": 60
+			}
+		},
+		{
+			"name": "point-defense-mount",
+			"type": "PointDefenseWeapon",
+			"x": 25,
+			"y": -32,
+			"rotate": true,
+			"mirror": false,
+			"recoil": 0,
+			"rotateSpeed": 24,
+			"reload": 4,
+			"targetInterval": 0,
+			"targetSwitchInterval": 0,
+			"bullet": {
+				"speed": 24,
+				"lifetime": 6.6,
+				"shootEffect": "sparkShoot",
+				"hitEffect": "pointHit",
+				"maxRange": 140,
+				"damage": 60
+			}
+		},
+		{
+			"name": "point-defense-mount",
+			"type": "PointDefenseWeapon",
+			"x": -25,
+			"y": -32,
+			"rotate": true,
+			"mirror": false,
+			"recoil": 0,
+			"rotateSpeed": 24,
+			"reload": 4,
+			"targetInterval": 0,
+			"targetSwitchInterval": 0,
+			"bullet": {
+				"speed": 24,
+				"lifetime": 6.6,
+				"shootEffect": "sparkShoot",
+				"hitEffect": "pointHit",
+				"maxRange": 140,
+				"damage": 60
+			}
+		}
+	]
+}

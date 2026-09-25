@@ -1,0 +1,13 @@
+{
+    "type": "DuctJunction",
+    "requirements": [ "malachite/2" ],
+    "category": "distribution",
+    "speed": 4,
+    "buildCostMultiplier": 6,
+    "research": {
+        "parent": "primitive-conveyor"
+    },
+    "researchCostMultiplier": 0.1,
+    "squareSprite": false,
+    "shownPlanets": [ "serpulos" ]
+}

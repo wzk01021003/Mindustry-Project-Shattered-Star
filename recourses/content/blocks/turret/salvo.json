@@ -1,0 +1,100 @@
+{
+	"health": 1000,
+	"ammoTypes": {
+		"copper": {
+			"type": "BasicBulletType",
+			"damage": 15,
+			"speed": 5,
+			"lifetime": 30,
+			"width": 7,
+			"height": 9,
+			"ammoMultiplier": 5,
+			"armorMultiplier": 1.5,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor": "eac1a8",
+			"backColor": "d39169",
+			"hitColor": "d39169"
+		},
+		"graphite": {
+			"type": "BasicBulletType",
+			"damage": 31,
+			"speed": 7,
+			"lifetime": 30,
+			"width": 9,
+			"height": 12,
+			"ammoMultiplier": 4,
+			"reloadMultiplier": 0.8,
+			"rangeChange": 32,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor": "dae1ee",
+			"backColor": "7d89d8",
+			"hitColor": "7d89d8"
+		},
+		"pyratite": {
+			"type": "BasicBulletType",
+			"damage": 25,
+			"speed": 6.4,
+			"lifetime": 30,
+			"width": 10,
+			"height": 12,
+			"ammoMultiplier": 5,
+			"splashDamage": 15,
+			"splashDamageRadius": 22,
+			"status": "burning",
+			"statusDuration": 720,
+			"makeFire": true,
+			"hitEffect": {
+				"type": "MultiEffect",
+				"effects": [
+					"hitBulletColor",
+					"fireHit"
+				]
+			},
+			"frontColor": "f8ad42",
+			"backColor": "f68021",
+			"hitColor": "f8ad42"
+		},
+		"silicon": {
+			"type": "BasicBulletType",
+			"damage": 23,
+			"speed": 6,
+			"lifetime": 30,
+			"width": 8,
+			"height": 10,
+			"ammoMultiplier": 5,
+			"homingPower": 0.2,
+			"reloadMultiplier": 1.5,
+			"trailLength": 5,
+			"trailWidth": 1.5,
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor": "999ba0",
+			"backColor": "707594",
+			"hitColor": "707594",
+			"trailColor": "999ba0"
+		},
+		"thorium": {
+			"type": "BasicBulletType",
+			"damage": 28,
+			"speed": 20,
+			"lifetime": 12,
+			"width": 3,
+			"height": 45,
+			"ammoMultiplier": 4,
+			"armorMultiplier": 0.8,
+			"reloadMultiplier": 0.5,
+			"pierce": true,
+            "pierceBuilding": false,
+            "pierceCap": 3,
+			"shootEffect": "shootBig",
+			"smokeEffect": "shootBigSmoke",
+			"hitEffect": "hitBulletColor",
+			"despawnEffect": "hitBulletColor",
+			"frontColor": "ffffff",
+			"backColor": "f595be",
+			"hitColor": "f595be"
+		}
+	}
+}

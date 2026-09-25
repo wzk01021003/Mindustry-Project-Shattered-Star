@@ -1,0 +1,45 @@
+{
+    "health": 170,
+    "faceTarget": true,
+	"weapons": [
+		{
+	        "name": "small-mount-weapon",
+		    "top": false,
+            "reload": 15,
+            "x": 3,
+            "y": 1,
+            "recoil": 1,
+            "rotate": false,
+            "shoot": {
+                "shots": 2,
+                "shotDelay": 4
+            },
+            "shootSound": "shootAlpha",
+            "cooldownTime": 20,
+		"heatColor": "FFA665",
+            "bullet": {
+                "type": "LaserBoltBulletType",
+                "speed": 7,
+                "damage": 11,
+                "width": 1.5,
+                "height": 4.5,
+                "lifetime": 30,
+                "hitEffect": "hitBulletColor",
+                "despawnEffect": "hitBulletColor",
+                "trailWidth": 1.2,
+                "trailLength": 3,
+                "shootEffect": "shootSmallColor",
+                "smokeEffect": "hitLaserColor",
+                "backColor": "ffd27e",
+                "trailColor": "ffd27e",
+                "hitColor": "ffd27e",
+                "frontColor": "ffffff",
+                "lightColor": "ffd27e",
+                "buildingDamageMultiplier": 0.01,
+                "homingPower": 0.03,
+				"healPercent": 1,
+				"collidesTeam": true
+			}
+		}
+	]
+}

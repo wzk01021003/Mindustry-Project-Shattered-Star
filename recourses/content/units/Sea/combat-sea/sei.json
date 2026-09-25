@@ -1,0 +1,80 @@
+{
+    "weapons": [
+        {
+            "name": "sei-launcher",
+            "x": 0,
+            "y": 0,
+            "rotate": true,
+            "rotateSpeed": 4,
+            "mirror": false,
+            "shadow": 20,
+            "shootY": 4.5,
+            "recoil": 4,
+            "reload": 45,
+            "velocityRnd": 0.4,
+            "inaccuracy": 7,
+            "ejectEffect": "none",
+            "shake": 1,
+            "shootSound": "shootMissileLong",
+            "shoot": {
+                "type": "ShootAlternate",
+                "shots": 6,
+                "shotDelay": 1.5,
+                "spread": 4,
+                "barrels": 3
+            },
+            "bullet": {
+                "type": "MissileBulletType",
+                "speed": 8.4,
+                "damage": 42,
+                "homingPower": 0.12,
+                "width": 8,
+                "height": 8,
+                "shrinkX": 0,
+                "shrinkY": 0,
+                "drag": -0.003,
+                "homingRange": 80,
+                "keepVelocity": false,
+                "splashDamageRadius": 35,
+                "splashDamage": 45,
+                "lifetime": 31,
+                "trailColor": "f9c27a",
+                "backColor": "f9c27a",
+                "frontColor": "fff8e8",
+                "hitEffect": "blastExplosion",
+                "despawnEffect": "blastExplosion",
+                "weaveScale": 8,
+                "weaveMag": 2
+            }
+        },
+        {
+            "name": "large-bullet-mount",
+            "reload": 60,
+            "cooldownTime": 90,
+            "x": 17.5,
+            "y": -16.5,
+            "rotateSpeed": 4,
+            "rotate": true,
+            "shootY": 7,
+            "shake": 2,
+            "recoil": 3,
+            "shadow": 12,
+            "ejectEffect": "casing3",
+            "shootSound": "shootSpectre",
+            "shoot": {
+                "shots": 3,
+                "shotDelay": 4
+            },
+            "inaccuracy": 1,
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 14,
+                "damage": 57,
+                "width": 13,
+                "height": 19,
+                "shootEffect": "shootBig",
+                "lifetime": 17.5
+            }
+        }
+    ]
+}

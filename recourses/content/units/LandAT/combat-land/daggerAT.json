@@ -1,0 +1,48 @@
+{
+    "type": "mech"
+    "health": 220,
+    "armor": 1,
+    "speed": 0.8,
+    "hitSize": 8,
+    "stepSoundVolume": 0.4,
+    "outlineColor": "202026",
+    "parts": [
+        {
+            "type": "RegionPart",
+            "x": 0,
+            "y": 0,
+            "suffix": "-glow",
+            "color": "FFA665AA",
+            "mixColor": "FFA665AA",
+            "outline": false,
+            "blending": "additive",
+            "layerOffset": 0.001
+        }
+    ],
+	"weapons": [
+		{
+			"name": "large-weapon-allotropes",
+			"reload": 10,
+			"shoot": {
+                "shots": 2,
+                "shotDelay": 5,
+            },
+			"x": 4,
+			"y": 2,
+			"rotate": false,
+			"shootY": 4.5,
+			"top": false,
+			"ejectEffect": "casing1",
+			"cooldownTime": 20,
+			"heatColor": "FFA665",
+			"bullet": {
+				"type": "BasicBulletType",
+				"damage": 9,
+				"speed": 5,
+				"lifetime": 30,
+				"width": 7,
+				"height": 9
+			}
+		}
+	]
+}

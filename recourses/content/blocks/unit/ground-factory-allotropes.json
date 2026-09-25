@@ -1,0 +1,42 @@
+{
+    "type": "UnitFactory",
+    "category": "units",
+    "requirements": [ "malachite/50","raw-lead/120","silicon/80" ],
+    "size": 3,
+    "research": {
+        "parent": "core-nucleus-root",
+        /*"objectives": [ 
+            {
+                "type": "OnSector",
+                "preset": "none"
+            }
+        ]*/
+    },
+    "plans": [
+        {
+            "unit": "dagger",
+            "time": 700,
+            "requirements": [ "silicon/10","lead/10" ]
+        },
+        {
+            "unit": "nova",
+            "time": 1600,
+            "requirements": [ "silicon/30","lead/20","titanium/20" ]
+        },
+        {
+            "unit": "crawler",
+            "time": 500,
+            "requirements": [ "silicon/8","coal/10" ]
+        },
+        {
+            "unit": "daggerAT",
+            "time": 1200,
+            "requirements": [ "silicon/25","lead/20" ]
+        }
+    ],
+    "consumes": {
+        "power": 1.6
+    },
+    "researchCostMultiplier": 0.1,
+    "shownPlanets": [ "serpulos" ]
+}

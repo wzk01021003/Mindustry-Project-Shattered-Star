@@ -1,0 +1,23 @@
+{
+    "type": "Drill",
+    "category": "production",
+    "requirements": [ "malachite/15" ],
+    "researchCost": [ "malachite/30" ],
+    "research": {
+        "parent": "core-nucleus-root",
+        "objectives": [ "mechanical-drill" ]
+    },
+    "drillTime": 750,
+    "itemCapacity": 10,
+    "size": 2,
+    "tier": 2,
+    "consumes": {
+        "liquid": {
+        "liquid": "water",
+        "amount": 0.1,
+        "booster": true,
+        "optional": true
+        }
+    },
+    "shownPlanets": [ "serpulos" ]
+}

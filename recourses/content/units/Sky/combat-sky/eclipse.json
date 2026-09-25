@@ -1,0 +1,93 @@
+{
+    "speed": 0.6,
+    "weapons": [
+        {
+            "name": "large-laser-mount",
+            "reload": 45,
+            "x": 18,
+            "y": 5,
+            "shootY": 9,
+            "shake": 4,
+            "recoil": 4,
+            "rotate": true,
+            "rotateSpeed": 2,
+            "shadow": 20,
+            "shootSound": "shootEclipse",
+            "cooldownTime": 60,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "LaserBulletType",
+                "damage": 150,
+                "length": 230,
+                "width": 25,
+                "sideAngle": 20,
+                "sideWidth": 1.5,
+                "sideLength": 80,
+                "shootEffect": "shockwave",
+                "colors": [
+                    "ec7458aa",
+                    "ec7458",
+                    "ff9c5a",
+                    "ffffff"
+                ]
+            }
+        },
+        {
+            "name": "large-artillery",
+            "reload": 4,
+            "x": 11,
+            "y": 27,
+            "shootY": 7.25,
+            "rotate": true,
+            "rotateSpeed": 2,
+            "shadow": 7,
+            "recoil": 0.5,
+            "shootSound": "shootCyclone",
+            "cooldownTime": 15,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "FlakBulletType",
+                "speed": 8,
+                "damage": 30,
+                "lifetime": 23.5,
+                "ammoMultiplier": 4,
+                "splashDamage": 45,
+                "splashDamageRadius": 25,
+                "collidesGround": true,
+                "status": "blasted",
+                "statusDuration": 60,
+                "shootEffect": "shootBig",
+                "hitEffect": "flakExplosion"
+            }
+        },
+        {
+            "name": "large-artillery",
+            "reload": 6,
+            "x": 20,
+            "y": -13,
+            "shootY": 7.25,
+            "rotate": true,
+            "rotateSpeed": 7,
+            "shadow": 12,
+            "shake": 1,
+            "recoil": 0.5,
+            "shootSound": "shootCyclone",
+            "cooldownTime": 20,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "FlakBulletType",
+                "speed": 8,
+                "damage": 30,
+                "lifetime": 23.5,
+                "ammoMultiplier": 4,
+                "splashDamage": 65,
+                "splashDamageRadius": 25,
+                "collidesGround": true,
+                "status": "blasted",
+                "statusDuration": 60,
+                "shootEffect": "shootBig",
+                "hitEffect": "flakExplosion"
+            }
+        }
+    ]
+}

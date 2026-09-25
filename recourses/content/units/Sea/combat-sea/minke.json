@@ -1,0 +1,59 @@
+{
+	"weapons": [
+		{
+			"name": "mount-weapon",
+			"reload": 10,
+			"x": 5,
+			"y": 3.5,
+			"rotate": true,
+			"rotateSpeed": 5,
+			"inaccuracy": 8,
+			"ejectEffect": "casing1",
+			"shootSound": "shootDuo",
+			"cooldownTime": 10,
+		    "heatColor": "FFA665",
+			"bullet": {
+				"type": "FlakBulletType",
+				"collidesGround": true,
+				"ammoMultiplier": 4,
+				"speed": 8.4,
+				"lifetime": 26.1,
+				"width": 6,
+				"height": 8,
+				"damage": 3,
+				"splashDamage": 20.5,
+				"splashDamageRadius": 15,
+				"hitEffect": "flakExplosion",
+				"shootEffect": "shootSmall",
+			}
+		},
+		{
+			"name": "artillery-mount",
+			"reload": 30,
+			"x": 5,
+			"y": -5,
+			"rotate": true,
+			"rotateSpeed": 2,
+			"inaccuracy": 2,
+			"shake": 1.5,
+			"ejectEffect": "casing2",
+			"shootSound": "shootArtillerySmall",
+			"cooldownTime": 25,
+		    "heatColor": "FFA665",
+			"bullet": {
+				"type": "ArtilleryBulletType",
+				"sprite": "shell",
+				"damage": 20,
+				"speed": 6,
+				"lifetime": 36.75,
+				"collidesTiles": false,
+				"knockback": 0.8,
+				"hitEffect": "flakExplosion",
+				"splashDamage": 40,
+				"splashDamageRadius": 22.5,
+				"width": 11,
+				"height": 11
+			}
+		}
+	]
+}

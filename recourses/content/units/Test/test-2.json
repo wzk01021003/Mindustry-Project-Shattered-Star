@@ -1,0 +1,52 @@
+{
+    "type": "flying",
+    "health": 10000,
+    "speed": 1.8,
+    "armor": 1,
+    "weapons": [
+        {
+            "name": "none",
+            "reload": 600,
+			"x": 0,
+			"y": 0,
+			"mirror":false,
+			"ejectEffect": "casing1",
+			"shootSound": "shoot",
+			"shoot": {
+			    "type": "ShootSpread",
+			    "shots": 2,
+			    "shotDelay": 6,
+			    "spread": "15" 
+			},
+			"bullet": {
+				"keepVelocity": false,
+				"speed": 0,
+				"shootEffect": "none",
+				"smokeEffect": "shootSmallFlame",
+				"spawnUnit": "test-1"
+			}
+        },
+        {
+            "name": "none",
+            "reload": 600,
+			"x": 0,
+			"y": 0,
+			"mirror":false,
+			"ejectEffect": "casing1",
+			"shootSound": "shoot",
+			"shoot": {
+			    "type": "ShootSpread",
+			    "shots": 3,
+			    "shotDelay": 30,
+			    "spread": 4 
+			},
+			"bullet": {
+				"keepVelocity": false,
+				"speed": 0,
+				"shootEffect": "none",
+				"smokeEffect": "shootSmallFlame",
+				"spawnUnit": "test-3"
+			}
+        }
+    ]
+}

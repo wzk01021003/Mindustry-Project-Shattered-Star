@@ -1,0 +1,23 @@
+{
+    "planet": "serpulos",
+    "sector": 60,
+    "difficulty": 5,
+    "research": {
+        "parent": "core-nucleus-root",
+        "objectives": [
+            "interplanetary-accelerator",
+            "core-nucleus",
+            {
+                "type": "SectorComplete",
+                "preset": "planetaryTerminal"
+            }
+        ]
+    },
+    "overrideLaunchDefaults": true,
+    "captureWave": 15,
+    "addStartingItems": true,
+    "isLastSector": false,
+    "allowLaunchSchematics": false,
+    "allowLaunchLoadout": false,
+    "generateIcons": false，
+}

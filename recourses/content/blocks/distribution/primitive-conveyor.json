@@ -1,0 +1,24 @@
+{
+    "type": "Conveyor",
+    "requirements": [ "malachite/1" ],
+    "health": 25,
+    "category": "distribution",
+    "speed": 0.04,
+    "researchCost": [ "malachite/10" ],
+    "research": {
+        "parent": "core-nucleus-root",
+        "objectives": [
+            {
+                "type": "OnSector",
+                "preset": "crash-site"
+            }
+        ]
+    },
+    "ambientSound": "none",
+    "hasShadow": true,
+    "junctionReplacement": "primitive-junction",
+    "bridgeReplacement": "primitive-bridge-conveyor",
+    "drawTeamOverlay": false,
+    "drawCracks": false,
+    "shownPlanets": [ "serpulos" ]
+}

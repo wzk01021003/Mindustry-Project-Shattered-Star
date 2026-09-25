@@ -1,0 +1,7 @@
+{
+    "type": "OreBlock",
+    "itemDrop": "raw-lead",
+    "variants": 2,
+    "oreDefault": false,
+    "useColor": true
+}

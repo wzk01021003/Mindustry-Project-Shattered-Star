@@ -1,0 +1,19 @@
+{
+    "type": "LogicBlock",
+    "category": "logic",
+    "requirements": [ "tungsten/25","silicon/50","graphite/25" ],
+    "instructionsPerTick": 2,
+    "size": 1,
+    "research": {
+        "parent": "reinforced-message",
+        "objectives": [ 
+            {
+                "type": "OnSector",
+                "preset": "aegis"
+            }
+        ]
+    },
+    "health": 150,
+    "underBullets": true,
+    "shownPlanets": [ "erekir" ]
+}

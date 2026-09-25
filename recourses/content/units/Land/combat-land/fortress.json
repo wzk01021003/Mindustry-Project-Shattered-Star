@@ -1,0 +1,36 @@
+{
+    "speed": 0.5,
+    "weapons": [
+        {
+            "name": "artillery",
+            "top": false,
+            "y": 1,
+            "x": 9,
+            "reload": 60,
+            "recoil": 4,
+            "shake": 2,
+            "ejectEffect": "casing2",
+            "shootSound": "shootArtillery",
+            "cooldownTime": 60,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "ArtilleryBulletType",
+                "speed": 4,
+                "damage": 20,
+                "sprite": "shell",
+                "hitEffect": "blastExplosion",
+                "knockback": 0.8,
+                "lifetime": 53.25,
+                "maxRange": 240,
+                "width": 14,
+                "height": 14,
+                "collides": true,
+                "collidesTiles": true,
+                "splashDamageRadius": 35,
+                "splashDamage": 80,
+                "backColor": "f9c27a",
+                "frontColor": "fff8e8"
+            }
+        }
+    ]
+}

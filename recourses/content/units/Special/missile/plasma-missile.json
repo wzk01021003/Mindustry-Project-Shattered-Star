@@ -1,0 +1,106 @@
+{
+    "type": "missile",
+    "template": "MissileUnitType",
+    "allowedInPayloads": true,
+    "logicControllable": true,
+    "flying": true,
+    "lowAltitude": true,
+    "speed": 5,
+    "lifetime": 210,
+    "health": 240,
+    "armor": 4,
+    "hitSize": 10,
+    "rotateSpeed": 4,
+    "maxRange": 440,
+    "missileAccelTime": 50,
+    "engineSize": 3.1,
+    "engineOffset": 10,
+    "engineColor": "98ffa9",
+    "engineLayer": 100,
+    "trailLength": 18,
+    "trailColor": "98ffa9",
+    "outlineColor": "565666",
+    "fogRadius": 6,
+    "deathExplosionEffect": "none",
+    "deathSound": "explosionMissile",
+    "loopSound": "loopMissileTrail",
+    "loopSoundVolume": 0.6,
+    "targetAir": false,
+    "targetUnderBlocks": false,
+    "hidden": true,
+    "weapons": [
+        {
+            "shootOnDeath": true,
+            "reload": 1,
+            "shootCone": 360,
+            "shootSound": "explosion",
+            "bullet": {
+                "type": "ExplosionBulletType",
+                "splashDamage": 100,
+                "splashDamageRadius": 44,
+                "damage": 30,
+                "lifetime": 12,
+                "hitShake": 4,
+                "lightRadius": 50,
+                "suppressionRange": 80,
+                "suppressionDuration": 120,
+                "suppressionEffectChance": 1,
+                "lightColor": "98ffa9",
+                "status": "electrified",
+                "statusDuration": 360,
+                "makeFire": false,
+                "scaledSplashDamage": false,
+                "shootEffect": {
+                    "type": "MultiEffect",
+                    "effects": [
+                        {
+                            "type": "ExplosionEffect",
+                            "waveColor": "98ffa9",
+                            "waveStroke": 3,
+                            "waveRad": 44,
+                            "smokeColor": "98ffa988",
+                            "smokeRad": 50,
+                            "smokes": 6,
+                            "sparkColor": "ffffff",
+                            "sparks": 8,
+                            "sparkLen": 6,
+                            "lifetime": 30
+                        },
+                        {
+                            "type": "WaveEffect",
+                            "colorFrom": "98ffa9",
+                            "colorTo": "ffffff",
+                            "sizeFrom": 2,
+                            "sizeTo": 50,
+                            "strokeFrom": 3,
+                            "strokeTo": 0,
+                            "lifetime": 20
+                        },
+                        {
+                            "type": "ParticleEffect",
+                            "particles": 20,
+                            "colorFrom": "98ffa9",
+                            "colorTo": "ffffff",
+                            "sizeFrom": 4,
+                            "sizeTo": 0,
+                            "lifetime": 25,
+                            "length": 15,
+                            "cone": 360
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "abilities": [
+        {
+            "type": "MoveEffectAbility",
+            "effect": "missileTrailSmoke",
+            "interval": 7,
+            "minVelocity": 0.5,
+            "color": "ffd37f",
+            "rotation": 180,
+            "y": -9
+        }
+    ]
+}

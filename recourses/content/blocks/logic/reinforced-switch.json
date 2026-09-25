@@ -1,0 +1,18 @@
+{
+    "type": "SwitchBlock",
+    "category": "logic",
+    "requirements": [ "tungsten/10","graphite/20" ],
+    "size": 1,
+    "research": {
+        "parent": "reinforced-memory-cell",
+        "objectives": [ 
+            {
+                "type": "OnSector",
+                "preset": "aegis"
+            }
+        ]
+    },
+    "health": 120,
+    "underBullets": true,
+    "shownPlanets": [ "erekir" ]
+}

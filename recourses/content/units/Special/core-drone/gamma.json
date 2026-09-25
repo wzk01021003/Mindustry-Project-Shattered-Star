@@ -1,0 +1,79 @@
+{
+    "health": 220,
+	"weapons": [
+		{
+			"name": "gamma-weapon",
+			"top": false,
+            "reload": 6,
+            "x": -3.5,
+            "y": 3.5,
+            "inaccuracy": 3,
+            "shootSound": "shootAlpha",
+            "cooldownTime": 10,
+		    "heatColor": "FFA665",
+            "bullet": {
+                "type": "LaserBoltBulletType",
+                "speed": 7,
+                "damage": 11,
+                "width": 1.5,
+                "height": 5,
+                "lifetime": 35,
+                "hitEffect": "hitBulletColor"
+                "despawnEffect": "hitBulletColor",
+                "trailWidth": 1.2,
+                "trailLength": 4,
+                "shootEffect": "shootSmallColor",
+                "smokeEffect": "hitBulletColor",
+                "backColor": "ffd27e",
+                "hitColor": "ffd27e",
+                "trailColor": "ffd27e",
+                "frontColor": "ffffff",
+                "lightColor": "ffd27e",
+                "buildingDamageMultiplier": 0.01,
+                "homingPower": 0.04,
+				"healPercent": 1,
+				"collidesTeam": true
+			}
+		},
+		{
+			"name": "small-mount-weapon",
+			"top": false,
+			"reload": 15,
+			"x": 1,
+			"y": 2,
+			"shoot": {
+			    "type": "ShootSpread",
+			    "shots": 2,
+			    "shotDelay": 2,
+			    "spread": 2
+			},
+			"inaccuracy": 3,
+			"shootSound": "shootAlpha",
+			"cooldownTime": 20,
+		    "heatColor": "FFA665",
+			"bullet": {
+			    "type": "LaserBoltBulletType",
+			    "speed": 6,
+			    "damage": 11,
+			    "width": 1.5,
+			    "height": 5,
+			    "hitEffect": "hitBulletColor",
+			    "despawnEffect": "hitBulletColor",
+			    "trailWidth": 1.2,
+			    "trailLength": 4,
+			    "shootEffect": "shootSmallColor",
+                "smokeEffect": "hitLaserColor",
+                "backColor": "ffd27e",
+                "trailColor": "ffd27e",
+                "hitColor": "ffd27e",
+                "frontColor": "ffffff",
+                "lightColor": "ffd27e",
+                "lifetime": 70,
+                "buildingDamageMultiplier": 0.01,
+                "homingPower": 0.04,
+                "healPercent": 1,
+				"collidesTeam": true
+			}
+		}
+	]
+}

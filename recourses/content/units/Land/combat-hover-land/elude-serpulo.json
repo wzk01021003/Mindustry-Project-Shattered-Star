@@ -1,0 +1,108 @@
+{
+    "type": "hover",
+    "hovering": true,
+    "canDrown": false,
+    "shadowElevation": 0.1,
+    "drag": 0.07,
+    "speed": 1.8,
+    "rotateSpeed": 5,
+    "accel": 0.09,
+    "health": 125,
+    "armor": 0,
+    "hitSize": 11,
+    "engineOffset": 7,
+    "engineSize": 2,
+    "itemCapacity": 30,
+    "useEngineElevation": false,
+    "research": {
+        "parent": "flare",
+        "objectives": [ 
+            {
+                "type": "OnSector",
+                "preset": "windsweptIslands"
+            }
+        ],
+        "requirements": [ "silicon/80","graphite/30", "titanium/30"]
+    },
+    "moveSound": "loopExtract",
+    "moveSoundVolume": 0.25,
+    "moveSoundPitchMin": 0.7,
+    "moveSoundPitchMax": 1.5,
+    "abilities": [
+        {
+            "type": "MoveEffectAbility",
+            "interval": 4,
+            "minVelocity": 0.5,
+            "effect": "missileTrail",
+            "color": "ffbb64",
+            "x": 0,
+            "y": -7,
+            "teamColor": true
+        }
+    ],
+    "parts": [
+        {
+            "type": "HoverPart",
+            "x": 3.9,
+            "y": -3,
+            "mirror": true,
+            "radius": 6,
+            "phase": 90,
+            "stroke": 2,
+            "layerOffset": -0.001,
+            "color": "bf92f9"
+        },
+        {
+            "type": "HoverPart",
+            "x": 3.9,
+            "y": 3,
+            "mirror": true,
+            "radius": 6,
+            "phase": 90,
+            "stroke": 2,
+            "layerOffset": -0.001,
+            "color": "bf92f9"
+        }
+    ],
+    "shownPlanets": [ "serpulo" ],
+    "weapons": [
+        {
+            "name": "elude-serpulo-weapon",
+            "shootSound": "shootElude",
+            "y": -2,
+            "x": 4,
+            "top": true,
+            "mirror": true,
+            "reload": 40,
+            "baseRotation": -35,
+            "shootCone": 360,
+            "shoot": {
+                "type": "shootSpread",
+                "shots": 2,
+                "spread": 11
+            },
+            "cooldownTime": 30,
+            "heatColor": "bf92f9"
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 5,
+                "damage": 4,
+                "homingPower": 0.19,
+                "homingDelay": 4,
+                "width": 7,
+                "height": 12,
+                "lifetime": 30,
+                "shootEffect": "sparkShoot",
+                "smokeEffect": "shootBigSmoke",
+                "hitColor": "a47aff",
+                "backColor": "a47aff",
+                "trailColor": "a47aff",
+                "frontColor": "ffffff",
+                "trailWidth": 1.5,
+                "trailLength": 5,
+                "hitEffect": "hitBulletColor",
+                "despawnEffect": "hitBulletColor"
+            }
+        }
+    ]
+}

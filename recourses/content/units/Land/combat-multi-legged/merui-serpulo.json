@@ -1,0 +1,120 @@
+{
+    "type": "legs",
+    "speed": 0.72,
+    "drag": 0.11,
+    "hitSize": 9,
+    "rotateSpeed": 3,
+    "health": 240,
+    "armor": 2,
+    "legStraightness": 0.3,
+    "stepShake": 0,
+    "stepSound": "walkerStepTiny",
+    "stepSoundVolume": 0.4,
+    "legCount": 6,
+    "legLength": 8,
+    "lockLegBase": true,
+    "legContinuousMove": true,
+    "legExtension": -2,
+    "legBaseOffset": 3,
+    "legMaxLength": 1.1,
+    "legMinLength": 0.2,
+    "legLengthScl": 0.96,
+    "legForwardScl": 1.1,
+    "legGroupSize": 3,
+    "rippleScale": 0.2,
+    "legMoveSpace": 1,
+    "groundLayer": 75,
+    "allowLegStep": true,
+    "hovering": true,
+    "legPhysicsLayer": false,
+    "shadowElevation": 0.1,
+    "targetAir": false,
+    "research": {
+        "parent": "crawler",
+        "objectives": [ 
+            {
+                "type": "OnSector",
+                "preset": "frontier"
+            }
+        ],
+        "requirements": [ "silicon/60","graphite/40"]
+    },
+    "shownPlanets": [ "serpulo" ],
+    "weapons": [
+        {
+            "name": "merui-serpulo-weapon",
+            "shootSound": "shootMerui",
+            "mirror": false,
+            "showStatSprite": false,
+            "x": 0,
+            "y": 0,
+            "shootY": 5,
+            "reload": 63,
+            "recoil": 0,
+            "cooldownTime": 42,
+            "heatColor": "d1efff",
+            "bullet": {
+                "type": "ArtilleryBulletType",
+                "speed": 6,
+                "damage": 15,
+                "shootEffect": {
+                    "type": "MultiEffect",
+                    "effects": [
+                        "shootSmallColor",
+                        {
+                            "type": "ParticleEffect",
+                            "particles": 5,
+                            "colorFrom": "8ca9e8",
+                            "colorTo": "ffffff",
+                            "sizeFrom": 3,
+                            "sizeTo": 0,
+                            "lifetime": 15,
+                            "length": 8
+                        },
+                        {
+                            "type": "WaveEffect",
+                            "colorFrom": "ffffff",
+                            "colorTo": "8ca9e8",
+                            "sizeFrom": 2,
+                            "sizeTo": 10,
+                            "strokeFrom": 2,
+                            "strokeTo": 0,
+                            "lifetime": 9
+                        }
+                    ]
+                },
+                "collidesTiles": true,
+                "backColor": "8ca9e8",
+                "hitColor": "8ca9e8",
+                "frontColor": "ffffff",
+                "knockback": 0.8,
+                "lifetime": 23,
+                "width": 9,
+                "height": 9,
+                "splashDamageRadius": 19,
+                "splashDamage": 25,
+                "trailLength": 27,
+                "trailWidth": 2.5,
+                "trailEffect": "none",
+                "trailColor": "8ca9e8",
+                "trailInterp": "slope",
+                "shrinkX": 0.6,
+                "shrinkY": 0.2,
+                "hitEffect": {
+                    "type": "MultiEffect",
+                    "effects": [
+                        "hitSquaresColor",
+                        {
+                            "type": "WaveEffect",
+                            "colorFrom": "8ca9e8",
+                            "colorTo": "8ca9e8",
+                            "sizeTo": 21,
+                            "lifetime": 9,
+                            "strokeFrom": 2
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

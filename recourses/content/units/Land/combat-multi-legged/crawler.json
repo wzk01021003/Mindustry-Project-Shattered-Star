@@ -1,0 +1,52 @@
+{
+    "faceTarget": false,
+    "weapons": [
+        {
+            "name": "crawler-weapon",
+            "shootOnDeath": true,
+            "reload": 24,
+            "shootCone": 180,
+            "ejectEffect": "none",
+            "shootSound": "explosionCrawler",
+            "shootSoundVolume": 0.4,
+            "x": 0,
+            "shootY": 0,
+            "mirror": false,
+            "minWarmup": 0.5,
+            "shootWarmupSpeed": 0.05,
+            "parts": [
+                {
+                    "type": "RegionPart",
+                    "suffix": "-glow-heat",
+                    "mirror": false,
+                    "outline": false,
+                    "color": "BF92F900",
+                    "colorTo": "BF92F9",
+                    "blending": "additive"
+                },
+                {
+                    "type": "RegionPart",
+                    "suffix": "-glow",
+                    "mirror": false,
+                    "outline": false,
+                    "color": "BF92F980",
+                    "blending": "additive"
+                }
+            ],
+            "bullet": {
+                "collidesTiles": false,
+                "collides": false,
+                "rangeOverride": 25,
+                "hitEffect": "pulverize",
+                "speed": 0,
+                "splashDamageRadius": 44,
+                "instantDisappear": true,
+                "splashDamage": 80,
+                "buildingDamageMultiplier": 0.68,
+                "killShooter": true,
+                "hittable": false,
+                "collidesAir": true
+            }
+        }
+    ]
+}

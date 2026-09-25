@@ -1,0 +1,102 @@
+{
+    "speed": 0.6,
+    "weapons": [
+        {
+            "name": "scepter-weapon",
+            "top": false,
+            "y": 1,
+            "x": 16,
+            "shootY": 8,
+            "reload": 9,
+            "recoil": 5,
+            "shake": 2,
+            "ejectEffect": "casing3",
+            "shootSound": "shootScepter",
+            "shootSoundVolume": 0.95,
+            "inaccuracy": 3,
+            "cooldownTime": 20,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "BasicBulletType",
+                "damage": 70,
+                "speed": 8,
+                "width": 11,
+                "height": 20,
+                "lifetime": 27,
+                "shrinkX": 0.4,
+                "shrinkY": 0,
+                "shootEffect": "shootBig",
+                "hitEffect": "blastExplosion",
+                "trailParam": 0.5,
+                "lightning": 2,
+                "lightningLength": 6,
+                "lightningColor": "f3e979",
+                "lightningDamage": 20,
+                "despawnSound": "shockBullet",
+                "bulletInterval": 4,
+                "intervalBullet": {
+                    "type": "LightningBulletType",
+                    "damage": 5,
+                    "lightningLength": 3,
+                    "lightningLengthRand": 4,
+                    "lightningColor": "f3e979",
+                    "hitEffect": "hitLancerLow"
+                }
+            }
+        },
+        {
+            "name": "scepter-mount",
+            "rotateSpeed": 6,
+            "reload": 12,
+            "x": 8.5,
+            "y": 6,
+            "rotate": true,
+            "ejectEffect": "casing1",
+            "cooldownTime": 20,
+            "heatColor": "FFA665",
+            "bullet": {
+                "damage": 20,
+                "speed": 12,
+                "width": 4.5,
+                "height": 35,
+                "lifetime": 25,
+                "shrinkX": 0.6,
+                "shrinkY": 0,
+                "shrinkInterp": "slope",
+                "trailColor": "f9c27a",
+                "trailEffect": "bulletSparkSmokeTrailSmall",
+                "trailSpread": 12,
+                "shootEffect": "shootScepterSecondary",
+                "hitEffect": "hitScepterSecondary"
+            },
+            "shootSound": "shootScepterSecondary",
+            "rotateSpeed": 3
+        },
+        {
+            "name": "scepter-mount",
+            "rotateSpeed": 6,
+            "reload": 15,
+            "x": 8.5,
+            "y": -7,
+            "rotate": true,
+            "ejectEffect": "casing1",
+            "bullet": {
+                "damage": 20,
+                "speed": 12,
+                "width": 4.5,
+                "height": 35,
+                "lifetime": 25,
+                "shrinkX": 0.6,
+                "shrinkY": 0,
+                "shrinkInterp": "slope",
+                "trailColor": "f9c27a",
+                "trailEffect": "bulletSparkSmokeTrailSmall",
+                "trailSpread": 12,
+                "shootEffect": "shootScepterSecondary",
+                "hitEffect": "hitScepterSecondary"
+            },
+            "shootSound": "shootScepterSecondary",
+            "rotateSpeed": 3
+        }
+    ]
+}

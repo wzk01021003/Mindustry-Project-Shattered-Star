@@ -1,0 +1,36 @@
+{
+    "health": 150,
+	"weapons": [
+	{
+	    "name": "small-basic-weapon",
+	    "reload": 8,
+		"top": false,
+		"x": 2.75,
+		"y": 1,
+		"shootSound": "shootAlpha",
+		"cooldownTime": 15,
+		"heatColor": "FFA665",
+		"bullet": {
+			"type": "LaserBoltBulletType",
+            "speed": 7,
+            "damage": 11,
+            "width": 1.5,
+            "height": 4.5,
+            "lifetime": 30,
+            "trailWidth": 1.2,
+            "trailLength": 3,
+            "trailColor": "ffd27e",
+            "shootEffect": "shootSmallColor",
+            "smokeEffect": "hitLaserColor",
+            "backColor": "ffd27e",
+            "hitColor": "ffd27e",
+            "frontColor": "ffffff",
+            "lightColor": "ffd27e",
+            "buildingDamageMultiplier": 0.01,
+            "homingPower": 0.02,
+		    "healPercent": 1,
+		    "collidesTeam": true
+			}
+		}
+	]
+}

@@ -1,0 +1,119 @@
+{
+    "health": 6500,
+    "speed": 1,
+    "abilities": [
+        {
+            "type": "ShieldArcAbility",
+            "radius": 45,
+            "angle": 80,
+            "regen": 0.75,
+            "cooldown": 480,
+            "max": 1000,
+            "y": -10,
+            "width": 8,
+            "whenShooting": true
+        }
+    ],
+    "weapons": [
+        {
+            "name": "large-bullet-mount",
+            "x": 10,
+            "y": 2,
+            "shootY": 10,
+            "reload": 12,
+            "shake": 1,
+            "rotateSpeed": 2,
+            "ejectEffect": "casing1",
+            "shootSound": "shootSpectre",
+            "rotate": true,
+            "shadow": 8,
+            "cooldownTime": 20,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 14,
+                "damage": 55,
+                "width": 12,
+                "height": 18,
+                "lifetime": 12.5,
+                "shootEffect": "shootBig"
+            }
+        },
+        {
+            "name": "zenith-missiles",
+            "x": 17,
+            "y": 8,
+            "reload": 20,
+            "ejectEffect": "casing1",
+            "rotateSpeed": 8,
+            "shootSound": "shootMissile",
+            "rotate": true,
+            "shadow": 6,
+            "shoot": {
+                "type": "ShootSpread",
+                "shots": 2,
+                "shotDelay": 0,
+                "spread": 8
+            },
+            "cooldownTime": 30,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "MissileBulletType",
+                "speed": 7,
+                "damage": 18,
+                "width": 8,
+                "height": 8,
+                "shrinkY": 0,
+                "drag": -0.01,
+                "homingRange": 60,
+                "splashDamageRadius": 20,
+                "splashDamage": 40,
+                "ammoMultiplier": 4,
+                "lifetime": 25,
+                "hitEffect": "blastExplosion",
+                "despawnEffect": "blastExplosion",
+                "status": "blasted",
+                "statusDuration": 60,
+                "weaveScale": 6,
+                "weaveMag": -1
+            }
+        },
+        {
+            "name": "zenith-missiles",
+            "x": 17,
+            "y": -8,
+            "reload": 40,
+            "ejectEffect": "casing1",
+            "rotateSpeed": 8,
+            "shootSound": "shootMissile",
+            "rotate": true,
+            "shadow": 6,
+            "shoot": {
+                "shots": 4,
+                "shotDelay": 5
+            },
+            "cooldownTime": 60,
+            "heatColor": "FFA665",
+            "bullet": {
+                "type": "MissileBulletType",
+                "speed": 7,
+                "damage": 18,
+                "width": 8,
+                "height": 8,
+                "shrinkY": 0,
+                "drag": -0.01,
+                "homingRange": 60,
+                "splashDamageRadius": 20,
+                "splashDamage": 30,
+                "ammoMultiplier": 4,
+                "lifetime": 25,
+                "hitEffect": "blastExplosion",
+                "despawnEffect": "blastExplosion",
+                "status": "blasted",
+                "statusDuration": 60,
+                "weaveScale": 6,
+                "weaveMag": -1
+            }
+        },
+    ]
+}

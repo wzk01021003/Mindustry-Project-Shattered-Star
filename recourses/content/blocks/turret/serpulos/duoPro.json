@@ -1,0 +1,81 @@
+{
+    "type": "ItemTurret",
+    "size": 1,
+    "health": 280,
+    "category": "turret",
+    "requirements": ["raw-lead/35","graphite/30","silicon/25"],
+    "reload": 15,
+    "range": 175,
+    "shootCone": 15,
+    "rotateSpeed": 12,
+    "shootSound": "shootSalvo",
+    "recoil": 1,
+    "recoilTime": 10,
+    "shootY": 3,
+    "ammoPerShot": 1,
+    "ammoUseEffect": "casing2",
+    "consumes": {
+        "coolant": {
+            "type": "ConsumeCoolant",
+            "amount": 0.1
+        }
+    },
+    "shoot": {
+        "type": "ShootBarrel",
+        "barrels": [-1, 0, 0,1, 0, 0]
+    },
+    "drawer": {
+        "type": "DrawTurret",
+        "parts": [
+            {
+                "type": "RegionPart",
+                "suffix": "-barrel-l",
+                "progress": "recoil",
+                "moveY": -1,
+                "recoilIndex": 0,
+                "layerOffset": -0.001,
+                "under": true
+            },
+            {
+                "type": "RegionPart",
+                "suffix": "-barrel-r",
+                "progress": "recoil",
+                "moveY": -1,
+                "recoilIndex": 1,
+                "layerOffset": -0.001,
+                "under": true
+            },
+            {
+                "type": "RegionPart",
+                "suffix": "-side",
+                "progress": "recoil",
+                "moveX": 0.6,
+                "moveY": 0.5,
+                "moveRot": -15,
+                "mirror": true,
+                "recoilIndex": 0,
+                "layerOffset": 0.001,
+                "under": true
+            },
+        ]
+    },
+    "recoils": 2,
+	"shoot": {
+		"type": "ShootAlternate",
+		"barrels": 2
+	},
+    "ammoTypes": {
+        "malachite": {
+            "type": "BasicBulletType",
+            "speed": 7,
+            "damage": 9,
+            "lifetime": 25,
+            "width": 3,
+            "height": 9,
+            "ammoMultiplier": 2
+        }
+    },
+    "research": {
+        "parent": "core-nucleus-root"
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "type": "ItemBridge",
+    "requirements": [ "malachite/5","raw-lead/5" ],
+    "category": "distribution",
+    "health": 80,
+    "range": 4,
+    "transportTime": 2,
+    "itemCapacity": 14,
+    "fadeIn": false,
+    "moveArrows": false,
+    "arrowSpacing": 6,
+    "researchCostMultiplier": 0.1,
+    "research": {
+        "parent": "primitive-router"
+    },
+    "bridgeWidth": 8,
+    "arrowPeriod": 1.6,
+    "arrowTimeScl": 3,
+    "hasPower": false,
+    "squareSprite": false,
+    "shownPlanets": [ "serpulos" ]
+}

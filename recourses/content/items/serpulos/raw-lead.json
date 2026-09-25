@@ -1,0 +1,9 @@
+{
+    "color": "6A6A78",
+    "hardness": 1,
+    "healthScaling": 0,
+    "cost": 0.2,
+    "shownPlanets": [ "serpulos" ],
+    "research": "malachite",
+    "databaseTag": "basic-item"
+}

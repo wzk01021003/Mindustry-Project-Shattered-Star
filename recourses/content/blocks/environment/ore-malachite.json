@@ -1,0 +1,7 @@
+{
+    "type": "OreBlock",
+    "itemDrop": "malachite",
+    "variants": 2,
+    "oreDefault": false,
+    "useColor": true
+}

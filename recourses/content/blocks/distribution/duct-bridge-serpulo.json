@@ -1,0 +1,20 @@
+{
+    "type": "DuctBridge",
+    "category": "distribution",
+    "requirements": [ "titanium/15", "silicon/5" ],
+    "health": 90,
+    "speed": 4,
+    "buildCostMultiplier": 2,
+    "researchCostMultiplier": 0.1,
+    "crushFragile": true,
+    "research": {
+        "parent": "duct-serpulo",
+        "objectives": [
+            {
+                "type": "SectorComplete",
+                "preset": "tarFields"
+            }
+        ]
+    },
+    "shownPlanets": [ "serpulo" ],
+}

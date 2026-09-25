@@ -1,0 +1,30 @@
+{
+    "type": "tank",
+    "hitSize": 18,
+    "treadPullOffset": 5,
+    "speed": 0.7,
+    "rotateSpeed": 2.6,
+    "health": 600,
+    "armor": 6,
+    "itemCapacity": 70,
+    "floorMultiplier": 0.8,
+    "treadRects": [
+        {
+            "x": -31,
+            "y": -38,
+            "width": 19,
+            "height": 76
+        }
+    ],
+    "crushFragile": true,
+    "research": {
+        "parent": "stell-serpulo",
+        "objectives": [ 
+            {
+                "type": "research",
+                "content": "tank-refabricator-serpulo"
+            }
+        ],
+        "requirements": [ "silicon/80","graphite/60" ]
+    },
+}

@@ -1,0 +1,21 @@
+{
+    "type": "Duct",
+    "requirements": [ "titanium/1","silicon/1" ],
+    "category": "distribution",
+    "health": 90,
+    "speed": 4,
+    "research": {
+        "parent": "titanium-conveyor",
+        "objectives": [
+            {
+                "type": "SectorComplete",
+                "preset": "tarFields"
+            }
+        ]
+    },
+    "researchCostMultiplier": 0.1,
+    "crushDamageMultiplier": 0.5,
+    "shownPlanets": [ "serpulo" ],
+    "bridgeReplacement": "duct-bridge-serpulo",
+    "junctionReplacement": "duct-junction-serpulo"
+}

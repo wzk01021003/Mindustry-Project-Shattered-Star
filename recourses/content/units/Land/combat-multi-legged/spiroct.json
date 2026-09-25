@@ -1,0 +1,50 @@
+{
+    "speed": 0.7,
+    "weapons": [
+        {
+            "name": "spiroct-weapon",
+            "reload": 14,
+            "x": 8.5,
+            "y": -1.5,
+            "shootY": 4,
+            "recoil": 2,
+            "rotate": true,
+            "shootSound": "shootSap",
+            "cooldownTime": 15,
+            "heatColor": "BF92F9",
+            "bullet": {
+                "type": "SapBulletType",
+                "sapStrength": 0.5,
+                "length": 75,
+                "damage": 23,
+                "lifetime": 35,
+                "width": 0.54,
+                "knockback": -1.24,
+                "hitColor": "bf92f9",
+                "color": "bf92f9",
+                "shootEffect": "shootSmall"
+            }
+        },
+        {
+            "name": "mount-purple-weapon",
+            "reload": 18,
+            "x": 4,
+            "y": 3,
+            "rotate": true,
+            "shootSound": "shootSap",
+            "cooldownTime": 20,
+            "heatColor": "BF92F9",
+            "bullet": {
+                "type": "SapBulletType",
+                "sapStrength": 0.8,
+                "length": 40,
+                "damage": 18,
+                "lifetime": 25,
+                "width": 0.4,
+                "knockback": -0.65,
+                "hitColor": "bf92f9",
+                "color": "bf92f9"
+            }
+        }
+    ]
+}

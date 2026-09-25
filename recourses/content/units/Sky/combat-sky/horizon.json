@@ -1,0 +1,26 @@
+{
+    "itemCapacity": 40,
+    "weapons": [
+        {
+            "reload": 12,
+            "x": 3,
+            "minShootVelocity": 1,
+            "shootCone": 360,
+            "inaccuracy": 15,
+            "ignoreRotation": true,
+            "shootSound": "shootHorizon",
+            "soundPitchMax": 1.2,
+            "bullet": {
+                "type": "BombBulletType",
+                "damage": 13.5,
+                "splashDamage": 25,
+                "splashDamageRadius": 25,
+                "width": 10,
+                "height": 14,
+                "status": "blasted",
+                "statusDuration": 60,
+                "hitEffect": "flakExplosion"
+            }
+        }
+    ]
+}

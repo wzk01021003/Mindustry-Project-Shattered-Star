@@ -1,0 +1,33 @@
+{
+    "health": 90,
+    "rotateSpeed": 4,
+    "omniMovement": true,
+    "speed": 4,
+	"faceTarget": false,
+    "weapons": [
+        {
+            "y": 0,
+            "x": 2,
+            "layerOffset": -0.001,
+            "shootCone": 360,
+            "reload": 2,
+            "alternate": true,
+            "rotate": true,
+            "rotateSpeed": 25,
+            "mirror": true,
+            "ejectEffect": "casing1",
+            "shootSound": "shootSalvo",
+            "bullet": {
+                "type": "BasicBulletType",
+                "speed": 20,
+                "damage": 1,
+                "buildingDamageMultiplier": 0.5,
+                "width": 3,
+                "height": 30,
+                "lifetime": 7,
+                "shootEffect": "shootSmall",
+                "smokeEffect": "shootSmallSmoke"
+            }
+        }
+    ]
+}

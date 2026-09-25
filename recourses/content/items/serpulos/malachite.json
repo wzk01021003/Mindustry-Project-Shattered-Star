@@ -1,0 +1,9 @@
+{
+    "color": "4A9A8A",
+    "hardness": 1,
+    "healthScaling": 0,
+    "cost": 0.2,
+    "shownPlanets": [ "serpulos" ],
+    "research": "core-nucleus-root",
+    "databaseTag": "basic-item"
+}

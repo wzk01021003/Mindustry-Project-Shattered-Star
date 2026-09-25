@@ -1,0 +1,19 @@
+{
+    "type": "DuctJunction",
+    "requirements": [ "titanium/2", "silicon/2" ],
+    "category": "distribution",
+    "speed": 4,
+    "buildCostMultiplier": 4,
+    "research": {
+        "parent": "duct-serpulo",
+        "objectives": [
+            {
+                "type": "SectorComplete",
+                "preset": "tarFields"
+            }
+        ]
+    },
+    "researchCostMultiplier": 0.1,
+    "squareSprite": false,
+    "shownPlanets": [ "serpulo" ]
+}

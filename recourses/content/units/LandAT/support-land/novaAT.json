@@ -1,0 +1,74 @@
+{
+    "type": "mech",
+    "canBoost": true,
+    "boostMultiplier": 2,
+    "speed": 0.55,
+    "hitSize": 8,
+    "health": 200,
+    "buildSpeed": 0.3,
+    "armor": 2,
+    "abilities": [
+        {
+            "type": "RepairFieldAbility",
+            "amount": 30,
+            "reload": 120,
+            "range": 60
+        }
+    ],
+    "outlineColor": "202026",
+    "parts": [
+        {
+            "type": "RegionPart",
+            "x": 0,
+            "y": 0,
+            "suffix": "-glow",
+            "color": "84F491FF",
+            "mixColor": "84F491FF",
+            "outline": false,
+            "blending": "additive",
+            "layerOffset": 0.001
+        }
+    ],
+    "weapons": [
+		{
+			"name": "heal-weapon-allotropes",
+			"reload": 7,
+			"x": 4.5,
+			"shootY": 2,
+			"top": false,
+			"inaccuracy": 0,
+			"alternate": true,
+			"ejectEffect": "none",
+            "recoil": 2.0,
+            "shootSound": "shootLaser",
+            "cooldownTime": 20,
+            "heatColor": "84F491",
+            "parts": [
+                {
+                    "type": "RegionPart",
+                    "x": 0,
+                    "y": 0,
+                    "suffix": "-glow",
+                    "color": "84F491AA",
+                    "colorTo": "84F49133",
+                    "outline": false,
+                    "blending": "additive",
+                    "progress": "reload",
+                    "layerOffset": 0.001
+                }
+            ],
+			"bullet": {
+				"type": "LaserBoltBulletType",
+                "frontColor": "ffffff",
+				"backColor": "98ffa9",
+				"healPercent": 5,
+				"damage": 7,
+				"collidesTeam": true,
+				"speed": 10.4,
+				"lifetime": 15,
+				"status": "electrified",
+                "statusDuration": 15
+			}
+		}
+	]
+}

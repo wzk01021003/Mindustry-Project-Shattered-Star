@@ -1,0 +1,45 @@
+{
+    "mineSpeed": 4.5,
+    "weapons": [
+        {
+            "name": "heal-weapon-mount",
+            "shootSound": "shootLaser",
+            "reload": 24,
+            "x": 8,
+            "y": -6,
+            "rotate": true,
+            "cooldownTime": 35,
+            "heatColor": "84F491",
+            "bullet": {
+                "type": "LaserBoltBulletType",
+                "speed": 10.4,
+                "damage": 10,
+                "lifetime": 17.5,
+                "healPercent": 5.5,
+                "collidesTeam": true,
+                "backColor": "98ffa9",
+                "frontColor": "ffffff"
+            }
+        },
+        {
+            "name": "heal-weapon-mount",
+            "shootSound": "shootLaser",
+            "reload": 15,
+            "x": 4,
+            "y": 5,
+            "rotate": true,
+            "cooldownTime": 25,
+            "heatColor": "84F491",
+            "bullet": {
+                "type": "LaserBoltBulletType",
+                "speed": 10.4,
+                "damage": 8,
+                "lifetime": 17.5,
+                "healPercent": 3,
+                "collidesTeam": true,
+                "backColor": "98ffa9",
+                "frontColor": "ffffff"
+            }
+        }
+    ]
+}

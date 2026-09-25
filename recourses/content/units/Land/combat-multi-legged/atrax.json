@@ -1,0 +1,27 @@
+{
+    "weapons": [
+        {
+            "name": "atrax-weapon",
+            "reload": 9,
+            "x": 7,
+            "shootY": 3,
+            "recoil": 1,
+            "shootSound": "shootAtrax",
+            "cooldownTime": 20,
+            "heatColor": "BF92F9",
+            "top": false,
+            "bullet": {
+                "type": "LiquidBulletType",
+                "liquid": "slag",
+                "speed": 5,
+                "damage": 13,
+                "lifetime": 28.5,
+                "drag": 0.009,
+                "collidesAir": false,
+                "shootEffect": "shootSmall",
+                "statusDuration": 240,
+                "puddleSize": 6
+            }
+        }
+    ]
+}

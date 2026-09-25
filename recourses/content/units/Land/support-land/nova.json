@@ -1,0 +1,28 @@
+{
+	"weapons": [
+		{
+			"name": "heal-weapon",
+			"reload": 15,
+			"x": 4.5,
+			"shootY": 2,
+			"top": false,
+			"inaccuracy": 0,
+			"alternate": true,
+			"ejectEffect": "none",
+            "recoil": 2.0,
+            "shootSound": "shootLaser",
+            "cooldownTime": 20,
+            "heatColor": "84F491",
+			"bullet": {
+				"type": "LaserBoltBulletType",
+                "frontColor": "ffffff",
+				"backColor": "98ffa9",
+				"healPercent": 5,
+				"damage": 13,
+				"collidesTeam": true,
+				"speed": 10.4,
+				"lifetime": 15
+			}
+		}
+	]
+}

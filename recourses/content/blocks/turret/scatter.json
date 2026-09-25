@@ -1,0 +1,65 @@
+{
+    "ammoTypes": {
+        "scrap": {
+			"type": "FlakBulletType",
+			"ammoMultiplier": 5,
+			"speed": 8,
+			"lifetime": 30,
+			"width": 6,
+			"height": 8,
+			"damage": 3,
+			"splashDamage": 33,
+			"splashDamageRadius": 24,
+			"reloadMultiplier": 0.5,
+			"hitEffect": "flakExplosion",
+			"despawnEffect": "hitBulletColor",
+			"frontColor":"F5E0CC",
+			"backColor":"D8887E",
+			"hitColor":"D8887E"
+		},
+		"lead": {
+			"type": "FlakBulletType",
+			"ammoMultiplier": 4,
+			"speed": 8.4,
+			"lifetime": 30,
+			"width": 6,
+			"height": 8,
+			"damage": 3,
+			"splashDamage": 40.5,
+			"splashDamageRadius": 15,
+			"hitEffect": "flakExplosion"
+		},
+		"metaglass": {
+			"type": "FlakBulletType",
+			"ammoMultiplier": 5,
+			"reloadMultiplier": 0.8,
+			"speed": 8,
+			"lifetime": 30,
+			"width": 6,
+			"height": 8,
+			"damage": 3,
+			"splashDamage": 45,
+			"splashDamageRadius": 20,
+			"hitEffect": "flakExplosion",
+			"despawnEffect": "hitBulletColor",
+			"fragBullets": 6,
+			"frontColor":"FFFFFF",
+			"backColor":"B9C9DF",
+			"hitColor":"FFFFFF",
+			"fragBullet": {
+				"type": "BasicBulletType",
+				"collidesGround": false,
+				"despawnEffect": "none",
+				"width": 5,
+				"height": 12,
+				"shrinkY": 1,
+				"damage": 5,
+				"lifetime": 20,
+				"speed": 5,
+				"frontColor":"FFFFFF",
+				"backColor":"B9C9DF",
+				"hitColor":"FFFFFF"
+			}
+		}
+    }
+}

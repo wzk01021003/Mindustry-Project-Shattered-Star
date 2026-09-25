@@ -1,0 +1,44 @@
+{
+    "type": "GenericCrafter",
+    "name": "metaglass-smelter",
+    "health": 480,
+    "craftEffect": "smeltsmoke",
+    "itemCapacity": 30,
+    "requirements": [
+        "copper/160",
+        "graphite/80",
+        "lead/75",
+        "silicon/45"
+    ],
+    "outputItems": [
+        "metaglass/3"
+    ],
+    "craftTime": 30,
+    "size": 3,
+    "hasPower": true,
+    "hasItems": true,
+    "drawer": {
+        "type": "DrawMulti",
+        "drawers": [
+            "DrawDefault",
+            {
+                "type": "DrawFlame",
+                "flameColor": "ffc099"
+            }
+        ]
+    },
+    "ambientSound": "loopSmelter",
+    "ambientSoundVolume": 0.07,
+    "consumes": {
+        "items":[
+            "lead/3",
+            "sand/3"
+        ],
+        "power": 2.4
+    },
+    "research": "pulverizer",
+    "category": "crafting",
+    "shownPlanets": [
+        "serpulo"
+    ]
+}
