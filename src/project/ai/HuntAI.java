@@ -11,6 +11,7 @@ public class HuntAI extends AIController {
     protected AIController delegate;
     public boolean forceDogfighter = false;
 
+    // ============ 编队参数 ============
     public static float separationMul = 2.8f;
     public static float separationStrength = 0.8f;
     public static float separationMargin = 8f;
@@ -39,7 +40,7 @@ public class HuntAI extends AIController {
 
         Units.nearby(unit.team, unit.x, unit.y, sepRadius, other -> {
             if (other == unit) return;
-            if (!(other.controller() instanceof CommandAI)) return;
+            if (!AIUtils.sameMovementClass(unit, other)) return;  // ← 只对同类分散
             if (!(other.controller() instanceof CommandAI)) return;
 
             float dst = unit.dst(other);

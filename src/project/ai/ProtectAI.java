@@ -31,6 +31,7 @@ public class ProtectAI extends AIController {
     public static float minMovePerFrame = 0.5f;
     public static float rescueSpeedMul = 1.5f;
 
+    // ============ 编队参数 ============
     public static float slotRadius = 70f;
     public static float slotAngleOffset = 137.508f;
     public static float attackOffset = 18f;
@@ -77,7 +78,8 @@ public class ProtectAI extends AIController {
     protected void refreshAnchor() {
         if (unit == null) return;
         var c = unit.controller();
-        if (!(c instanceof CommandAI cai)) return;
+        if (!(c instanceof CommandAI)) return;
+        CommandAI cai = (CommandAI) c;
 
         if (cai.attackTarget != null && !cai.attackTarget.equals(unit)) {
             anchorTarget = cai.attackTarget;
@@ -98,9 +100,12 @@ public class ProtectAI extends AIController {
                 if (nearby != null) anchorTarget = nearby;
             }
 
-            if (anchorTarget instanceof Unit u && u.isValid()) {
-                anchorX = u.x;
-                anchorY = u.y;
+            if (anchorTarget instanceof Unit) {
+                Unit u = (Unit) anchorTarget;
+                if (u.isValid()) {
+                    anchorX = u.x;
+                    anchorY = u.y;
+                }
             }
         }
     }
@@ -110,7 +115,6 @@ public class ProtectAI extends AIController {
         ensureInit();
         refreshAnchor();
 
-        // ★ 索敌间隔由 AITuning 全局控制
         if (hasAnchor && hasWeapons) {
             if (retarget() || target == null
                 || Units.invalidateTarget(target, unit.team, unit.x, unit.y, Float.MAX_VALUE)) {
@@ -150,7 +154,6 @@ public class ProtectAI extends AIController {
         antiStuck();
     }
 
-    /** ★ 用全局动态间隔 */
     @Override
     public boolean retarget() {
         return timer.get(timerTarget, AITuning.targetInterval);
@@ -168,6 +171,7 @@ public class ProtectAI extends AIController {
 
         Units.nearby(unit.team, unit.x, unit.y, sepRadius, other -> {
             if (other == unit) return;
+            if (!AIUtils.sameMovementClass(unit, other)) return;  // ← 只对同类分散
             if (!(other.controller() instanceof ProtectAI)) return;
 
             float dst = unit.dst(other);
