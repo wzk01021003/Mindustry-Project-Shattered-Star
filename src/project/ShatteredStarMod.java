@@ -10,8 +10,10 @@ import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.mod.Mod;
 import mindustry.type.UnitType;
 import project.ai.HuntAI;
+import project.ai.ProtectAI;
 import project.ai.SmartAIWrapper;
 import project.blocks.MultiAssembler;
+import project.content.ProtectModeRegistry;
 
 import static mindustry.Vars.content;
 
@@ -19,11 +21,11 @@ public class ShatteredStarMod extends Mod {
 
     public static UnitCommand huntCommand;
     public static UnitCommand dogfightCommand;
+    /** 保护：点一下再点友方目标 → 单位去保护它 */
+    public static UnitCommand protectCommand;
 
     public static UnitCommand globalFactoryCommand = null;
     public static boolean globalFactoryCommandEnabled = false;
-
-    /** 是否启用全局智能包装层（防卡死）。默认开启。 */
     public static boolean smartAIEnabled = true;
 
     public ShatteredStarMod() {
@@ -33,6 +35,7 @@ public class ShatteredStarMod extends Mod {
     @Override
     public void loadContent() {
         Log.info("Loading content.");
+        ProtectModeRegistry.load();
         new MultiAssembler("multi-assembler");
     }
 
@@ -57,35 +60,38 @@ public class ShatteredStarMod extends Mod {
         dogfightCommand.resetTarget = false;
         dogfightCommand.exactArrival = false;
 
+        // 保护：snapToBuilding = true 会自动吸附到建筑；drawTarget 让你看到选中的目标
+        protectCommand = new UnitCommand("ss-protect", "effect", u -> new ProtectAI());
+        protectCommand.drawTarget = true;
+        protectCommand.switchToMove = false;
+        protectCommand.resetTarget = false;
+        protectCommand.exactArrival = false;
+        protectCommand.snapToBuilding = true;   // 点建筑时自动吸附
+
         // ============ 2. 注册到 content ============
         try {
-            if (content.unitCommands().indexOf(huntCommand, true) == -1) {
-                content.unitCommands().add(huntCommand);
-            }
-            if (content.unitCommands().indexOf(dogfightCommand, true) == -1) {
-                content.unitCommands().add(dogfightCommand);
-            }
+            register(huntCommand);
+            register(dogfightCommand);
+            register(protectCommand);
         } catch (Throwable t) {
             Log.err("Failed to register commands to content list", t);
         }
 
-        // ============ 3. 给所有支持指挥的单位加上这两个指令 ============
+        // ============ 3. 给所有支持指挥的单位加上指令 ============
         int count = 0;
         for (UnitType type : content.units()) {
             if (type == null) continue;
             if (type.internal) continue;
-            if (type.weapons.isEmpty()) continue;
             if (type.commands.isEmpty()) continue;
 
-            if (!type.commands.contains(huntCommand)) {
-                type.commands.add(huntCommand);
+            if (!type.weapons.isEmpty()) {
+                if (!type.commands.contains(huntCommand)) type.commands.add(huntCommand);
+                if (!type.commands.contains(dogfightCommand)) type.commands.add(dogfightCommand);
             }
-            if (!type.commands.contains(dogfightCommand)) {
-                type.commands.add(dogfightCommand);
-            }
+            if (!type.commands.contains(protectCommand)) type.commands.add(protectCommand);
             count++;
         }
-        Log.info("Registered ss-hunt / ss-dogfight to " + count + " unit types.");
+        Log.info("Registered commands to " + count + " unit types.");
 
         // ============ 4. 全局出厂指令 ============
         Events.on(UnitCreateEvent.class, e -> {
@@ -108,13 +114,20 @@ public class ShatteredStarMod extends Mod {
                 if (e.unit == null || !e.unit.isValid()) return;
 
                 var c = e.unit.controller();
-                if (!(c instanceof AIController)) return;        // 不是 AI
-                if (c instanceof SmartAIWrapper) return;         // 已包装
-                if (c instanceof CommandAI) return;              // 玩家指挥中
-                if (c instanceof HuntAI) return;                 // 已有狩猎 AI
+                if (!(c instanceof AIController)) return;
+                if (c instanceof SmartAIWrapper) return;
+                if (c instanceof CommandAI) return;
+                if (c instanceof HuntAI) return;
+                if (c instanceof ProtectAI) return;
 
                 e.unit.controller(new SmartAIWrapper((AIController) c));
             });
         });
+    }
+
+    private static void register(UnitCommand cmd) {
+        if (content.unitCommands().indexOf(cmd, true) == -1) {
+            content.unitCommands().add(cmd);
+        }
     }
 }
