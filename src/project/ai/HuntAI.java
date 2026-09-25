@@ -1,37 +1,45 @@
 package project.ai;
 
 import arc.math.Mathf;
+import arc.util.Time;
 import arc.util.Tmp;
 import mindustry.ai.Pathfinder;
 import mindustry.entities.Units;
 import mindustry.entities.units.AIController;
+import mindustry.entities.units.WeaponMount;
 import mindustry.gen.Building;
 import mindustry.gen.Teamc;
 import mindustry.gen.WaterMovec;
-import mindustry.gen.WeaponMount;
 import mindustry.world.Tile;
 import mindustry.world.meta.BlockFlag;
+
+import static mindustry.Vars.*;
 
 /**
  * 狩猎 AI：
  *  - 自动适配单位（飞行 / 海军 / 地面 / 全向）
  *  - 远程单位控制距离（kiting）：太近退，太远追，范围内停下射击
- *  - 狗斗 / 自爆单位（crawler 类）直接冲脸
+ *  - 狗斗 / 自爆单位直接冲脸
  *  - 非全向单位用 A* 寻路绕开建筑 / 墙
  *  - 没目标时按优先级：敌方核心 → spawner → 敌方建筑 → 回防自家核心
+ *  - 静止 / 慢速时微微摆动，增加生命感
  */
 public class HuntAI extends AIController {
 
-    // ============ 可调参数 ============
+    // ============ 行为参数 ============
     public static float engageFactor = 0.85f;
     public static float retreatFactor = 0.55f;
     public static float retargetInterval = 20f;
     public static float searchRangeMultiplier = 1.5f;
     public static float minRange = 40f;
-    /** 回防距离：自家核心被打了，跑到这个距离内 */
     public static float defendRadius = 80f;
-    /** 判定自家核心"被攻击"的范围 */
     public static float coreDangerRadius = 300f;
+
+    // ============ 摆动参数 ============
+    /** 摆动频率（弧度/秒） */
+    public static float idleSpeed = 0.8f;
+    /** 最大摆角（度） */
+    public static float idleAmp = 3.5f;
 
     // ============ 运行时状态 ============
     protected boolean isFlying;
@@ -88,6 +96,17 @@ public class HuntAI extends AIController {
         }
 
         faceTarget();
+
+        // 待命 / 慢速时微微摆动
+        if (unit.vel.len2() < Mathf.sqr(unit.speed() * 0.2f)) {
+            applyIdleSway();
+        }
+    }
+
+    /** 正弦摆动，让单位看起来有生命感 */
+    protected void applyIdleSway() {
+        float seconds = Time.time / 60f;
+        unit.rotation += Mathf.sin(seconds * idleSpeed + unit.id * 0.37f) * idleAmp;
     }
 
     protected void updateCombat() {
@@ -131,9 +150,7 @@ public class HuntAI extends AIController {
         }
     }
 
-    /** 没目标：按优先级找地方去 */
     protected void updateSearch() {
-        // ---- 1. 飞行单位优先直飞敌方核心 ----
         if (isFlying) {
             Teamc core = targetFlag(unit.x, unit.y, BlockFlag.core, true);
             if (core != null) {
@@ -142,13 +159,11 @@ public class HuntAI extends AIController {
             }
         }
 
-        // ---- 2. 有敌方核心：用 flowfield 高效寻路 ----
         if (!indexer.getEnemy(unit.team, BlockFlag.core).isEmpty()) {
             pathfind(Pathfinder.fieldCore);
             return;
         }
 
-        // ---- 3. 无核心：尝试敌方出生点（wave 模式） ----
         Tile spawnTile = getClosestSpawner();
         if (spawnTile != null) {
             if (isOmni) {
@@ -160,21 +175,16 @@ public class HuntAI extends AIController {
             return;
         }
 
-        // ---- 4. 无核心无出生点：去最近敌方建筑 ----
         Building enemyBuilding = findClosestEnemyBuilding();
         if (enemyBuilding != null) {
             moveTo(enemyBuilding, Math.max(unit.range(), minRange) * 0.7f, 30f);
             return;
         }
 
-        // ---- 5. 全都没：检查自家核心是否被打，是则回防 ----
         Building allyCore = unit.closestCore();
         if (allyCore != null && isCoreUnderAttack(allyCore)) {
             moveTo(allyCore, defendRadius, 30f);
-            return;
         }
-
-        // ---- 6. 彻底没目标：原地待命 ----
     }
 
     protected Building findClosestEnemyBuilding() {
