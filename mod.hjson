@@ -4,5 +4,5 @@ author: "A4PAPER"
 main: "example.ExampleJavaMod"
 description: "A Mindustry Java mod template."
 version: 1.0
-minGameVersion: 158
+minGameVersion: 160
 java: true
