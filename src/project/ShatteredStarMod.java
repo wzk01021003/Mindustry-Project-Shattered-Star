@@ -1,4 +1,4 @@
-package projectt;
+package project;
 
 import arc.*;
 import arc.util.*;
