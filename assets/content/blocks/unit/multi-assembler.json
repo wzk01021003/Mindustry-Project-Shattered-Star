@@ -21,7 +21,6 @@
         {
             "unit": "conquer",
             "craftTime": 3000,
-            "inputItems": ["silicon/50"],
             "inputPayloads": ["locus/6", "carbide-wall-large/20"]
         }
     ]
