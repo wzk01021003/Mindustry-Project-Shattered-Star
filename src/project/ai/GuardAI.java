@@ -21,8 +21,7 @@ import static mindustry.Vars.*;
  *  - 巡逻半径 = 单位最大武器射程 × 0.5
  *  - 索敌半径 = 单位最大武器射程
  *  - 用 ControlPathfinder 拿下一跳，绕墙前进
- *  - 地面单位 moveTo range = 0（原版 CommandAI 参数，最快）
- *  - 距离目标 < directApproachDist 时直接 moveTo 目标，省一次寻路
+ *  - IDLE 时缓慢转向锚点方向（有生命感，但不摇头）
  */
 public class GuardAI extends AIController {
 
@@ -32,22 +31,25 @@ public class GuardAI extends AIController {
     public static float minSearchRadius = 80f;
     public static float maxSearchRadius = 500f;
 
-    public static float idleDuration = 60f;
+    /** ★ 待机时长（帧）。60f = 1 秒 */
+    public static float idleDuration = 60f * 4f;
     public static float minMoveDuration = 60f * 4f;
     public static float maxMoveDuration = 60f * 20f;
     public static float moveTimeMultiplier = 3f;
     public static float arrivalDist = 10f;
 
     // ============ 寻路参数 ============
-    /** 地面单位 moveTo 的 smoothing（原版 CommandAI 用 100f） */
     public static float groundSmoothing = 100f;
-    /** 飞行单位 moveTo 的 smoothing */
     public static float flySmoothing = 40f;
-    /** 距离目标小于此值 → 直接 moveTo 目标，不走寻路 */
     public static float directApproachDist = 50f;
     public static int roamPickAttempts = 8;
-    /** 连续寻路失败多少次才放弃 */
     public static int pathWaitTolerance = 30;
+
+    // ============ 朝向参数 ============
+    /** IDLE 时缓慢转回锚点方向的速度（0~1） */
+    public static float idleLookBackSpeed = 0.03f;
+    /** MOVING 时朝向目标的速度 */
+    public static float moveLookSpeed = 0.12f;
 
     // ============ 卡死检测 ============
     public static float stuckThreshold = 2f;
@@ -185,12 +187,24 @@ public class GuardAI extends AIController {
             else doMove(targetX, targetY);
         }
 
+        // ============ 朝向处理 ============
         if (enemy != null && hasWeapons) {
+            // 战斗：瞄准敌人
             unit.aim(enemy.getX(), enemy.getY());
             unit.controlWeapons(true);
-            if (!requestedMove) unit.lookAt(enemy);
+            if (!requestedMove) {
+                faceSmoothly(enemy.getX(), enemy.getY(), moveLookSpeed);
+            }
         } else {
             if (hasWeapons) unit.controlWeapons(false);
+
+            if (state == State.MOVING) {
+                // 移动中：转向目标点
+                faceSmoothly(targetX, targetY, moveLookSpeed);
+            } else if (state == State.IDLE) {
+                // ★ IDLE：缓慢转回锚点方向（看起来像在守卫）
+                faceSmoothly(anchorX, anchorY, idleLookBackSpeed);
+            }
         }
 
         if (!isFlying() && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
@@ -200,44 +214,33 @@ public class GuardAI extends AIController {
         antiStuck();
     }
 
+    /** 平滑转向目标方向。比 unit.lookAt 慢，有"转头"感 */
+    protected void faceSmoothly(float tx, float ty, float speed) {
+        float targetAng = Mathf.angle(tx - unit.x, ty - unit.y);
+        unit.rotation = Mathf.slerp(unit.rotation, targetAng, speed);
+    }
+
     // ================================================================
     //  寻路 + 移动
     // ================================================================
 
-    /**
-     * 走向目标。
-     * - 距离 < directApproachDist：直接 moveTo 目标
-     * - 距离远：调 controlPath 拿下一跳，moveTo 下一跳
-     * - range 参数用 0（地面）或 attack range（战斗），避免减速
-     */
     protected boolean pathTowards(float x, float y) {
         float dist = Mathf.dst(unit.x, unit.y, x, y);
 
-        // 快到了：直接 moveTo 目标
         if (dist <= directApproachDist) {
             tmpVec.set(x, y);
-            if (!isOmni()) unit.lookAt(x, y);
-
-            // ★ range = 0 → 不减到目标就停，冲刺到终点
             moveTo(tmpVec, 0f, isFlying() ? flySmoothing : groundSmoothing);
             return true;
         }
 
-        // 远距离：走寻路
         Tmp.v2.set(x, y);
         var result = controlPath.getPathPosition(unit, Tmp.v2);
 
         if (result.move) {
-            // 下一跳方向先 lookAt（non-omni 单位必须先对准才能 movePref）
-            if (!isOmni()) {
-                unit.lookAt(result.dest.x, result.dest.y);
-            }
-            // ★ range = 0 → 冲向下一个 waypoint
             moveTo(result.dest, 0f, isFlying() ? flySmoothing : groundSmoothing);
             return true;
         }
 
-        // 首次异步请求返回 false 是正常的，等几帧
         return false;
     }
 
@@ -265,7 +268,6 @@ public class GuardAI extends AIController {
         } else {
             pathFailCount++;
             if (pathFailCount >= pathWaitTolerance) {
-                // 寻路真的失败：立即切换状态
                 state = State.IDLE;
                 stateTimer = 0f;
                 pathFailCount = 0;
