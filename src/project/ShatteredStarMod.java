@@ -101,7 +101,7 @@ public class ShatteredStarMod extends Mod {
         }
         Log.info("Registered commands to " + count + " unit types.");
 
-        // ============ 4. 全局出厂指令 ============
+        // ============ 4. 全局出厂指令给予 ============
         Events.on(UnitCreateEvent.class, e -> {
             if (!globalFactoryCommandEnabled) return;
             if (globalFactoryCommand == null) return;
