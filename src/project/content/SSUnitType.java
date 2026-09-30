@@ -88,7 +88,7 @@ import project.content.units.GlowErekirLegsUnitType;
 import static mindustry.Vars.tilePayload;
 import static mindustry.Vars.tilesize;
 
-public class SSUnits {
+public class SSUnitType {
 
     // ============================================================
     //  声明区
