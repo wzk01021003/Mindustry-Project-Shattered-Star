@@ -45,16 +45,14 @@ public class SSSettings {
         table.checkPref(KEY_DEBUG, false);
 
         // 等级用按钮循环切换
-        table.pref(new arc.scene.ui.layout.Table() {
-                {
-                    add("[lightgray]" + Core.bundle.get("ss-settings.level") + "[]").padRight(8f);
-                    arc.scene.ui.TextButton b = button("", () -> {
-                            int l = (getLevel() + 1) % 4;
-                            Core.settings.put(KEY_LEVEL, l);
-                        }).get();
-                    b.update(() -> b.setText(levelName(getLevel())));
-                }
-            });
+        arc.scene.ui.layout.Table levelRow = new arc.scene.ui.layout.Table();
+        levelRow.add("[lightgray]" + Core.bundle.get("ss-settings.level") + "[]").padRight(8f);
+        arc.scene.ui.TextButton b = levelRow.button("", () -> {
+                int l = (getLevel() + 1) % 4;
+                Core.settings.put(KEY_LEVEL, l);
+            }).get();
+        b.update(() -> b.setText(levelName(getLevel())));
+        table.add(levelRow).left().padBottom(4);
     }
 
     private static String levelName(int l) {
@@ -68,13 +66,12 @@ public class SSSettings {
 
     private static void detectDevice() {
         try {
-            var v = Core.graphics.getGLVersion();
-            if (!v.atLeast(arc.graphics.GLVersion.GLES_30)) {
+            if (Core.graphics == null || Core.graphics.getGLVersion() == null) {
                 deviceSupported = false;
                 deviceReason = "ss-settings.device.gl";
             }
         } catch (Throwable t) {
-            // 不阻止运行
+            deviceSupported = true;
         }
     }
 

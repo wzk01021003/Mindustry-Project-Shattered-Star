@@ -12,7 +12,7 @@ import project.ai.ProtectAI;
 import project.blocks.MultiAssembler;
 import project.content.ProtectModeRegistry;
 import project.content.SSPlanets;
-import project.content.SSUnits;
+import project.content.SSUnitType;
 import project.graphics.DistortionRenderer;
 
 import static mindustry.Vars.content;
@@ -44,7 +44,7 @@ public class ShatteredStarMod extends Mod {
         new MultiAssembler("multi-assembler");
 
         // ============ 单位 ============
-        SSUnits.load();
+        SSUnitType.load();
     }
 
     @Override
@@ -103,15 +103,15 @@ public class ShatteredStarMod extends Mod {
 
         // ============ 4. 全局出厂指令 ============
         Events.on(UnitCreateEvent.class, e -> {
-                if (!globalFactoryCommandEnabled) return;
-                if (globalFactoryCommand == null) return;
-                if (e.spawner == null) return;
-                if (e.unit == null) return;
-                if (!e.unit.isCommandable()) return;
-                if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
+            if (!globalFactoryCommandEnabled) return;
+            if (globalFactoryCommand == null) return;
+            if (e.spawner == null) return;
+            if (e.unit == null) return;
+            if (!e.unit.isCommandable()) return;
+            if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
 
-                e.unit.command().command(globalFactoryCommand);
-            });
+            e.unit.command().command(globalFactoryCommand);
+        });
     }
 
     private static void register(UnitCommand cmd) {

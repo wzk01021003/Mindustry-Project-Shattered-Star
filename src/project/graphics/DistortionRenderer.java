@@ -70,7 +70,7 @@ public class DistortionRenderer {
 
         try {
             buffer = new FrameBuffer(w, h);
-            shader = createShader();
+            // shader = createShader();  // 渲染管线还没接，暂时不用
             initialized = true;
         } catch (Throwable t) {
             unsupported = true;
@@ -162,8 +162,7 @@ public class DistortionRenderer {
 
     // ============================================================
     //  渲染
-    //  注意：真正把 buffer 画回屏幕的那一步，需要你自己接。
-    //  参见文件末尾注释。
+    //  真正把 buffer 画回屏幕的那一步，需要你自己接。
     // ============================================================
     private static void renderPass() {
         // 生命周期推进
@@ -181,70 +180,11 @@ public class DistortionRenderer {
         int slots = effectiveSlots();
         if (slots == 0) return;
 
-        // TODO: 把 buffer 内容用 shader 处理并画回屏幕
-        // 参考实现方式：
-        //   1. 抓屏到 buffer（glCopyTexImage2D 或 renderer 提供的 hook）
-        //   2. shader.bind();
-        //      shader.setUniformi("u_texture", 0);
-        //      shader.setUniformf("u_resolution", w, h);
-        //      shader.setUniformi("u_count", slots);
-        //      for (int i = 0; i < slots; i++) {
-            //          Data d = active.get(i);
-            //          shader.setUniformf("u_centers[" + i + "]", d.position.x, d.position.y);
-            //          shader.setUniformf("u_radii[" + i + "]", d.radius);
-            //          shader.setUniformf("u_strengths[" + i + "]", d.strength * (1f - d.elapsed / d.lifetime));
-            //      }
-        //      buffer.getTexture().bind(0);
-        //      Draw.blit(buffer.getTexture(), shader);
-        //      Draw.flush();
-        //
-        // 建议直接参考 MEEPofFaith/MindustryBlackHoleRenderer 的接入方式。
+        // TODO: 接渲染管线，把 buffer 内容用 shader 处理并画回屏幕
 
         if (SSSettings.showDebug()) {
             Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
         }
-    }
-
-    private static Shader createShader() {
-        String v =
-        "attribute vec4 a_position;\n" +
-        "attribute vec2 a_texCoord0;\n" +
-        "uniform mat4 u_projTrans;\n" +
-        "varying vec2 v_texCoords;\n" +
-        "void main(){\n" +
-        "  v_texCoords = a_texCoord0;\n" +
-        "  gl_Position = u_projTrans * a_position;\n" +
-        "}\n";
-
-        StringBuilder f = new StringBuilder();
-        f.append("precision mediump float;\n");
-        f.append("uniform sampler2D u_texture;\n");
-        f.append("uniform vec2 u_resolution;\n");
-        f.append("uniform int u_count;\n");
-        f.append("uniform vec2 u_centers[").append(MAX_GPU_SLOTS).append("];\n");
-        f.append("uniform float u_radii[").append(MAX_GPU_SLOTS).append("];\n");
-        f.append("uniform float u_strengths[").append(MAX_GPU_SLOTS).append("];\n");
-        f.append("varying vec2 v_texCoords;\n");
-        f.append("void main(){\n");
-        f.append("  vec2 uv = v_texCoords;\n");
-        f.append("  vec2 offset = vec2(0.0);\n");
-        f.append("  for (int i = 0; i < ").append(MAX_GPU_SLOTS).append("; i++){\n");
-        f.append("    if (i >= u_count) break;\n");
-        f.append("    vec2 center = u_centers[i] / u_resolution;\n");
-        f.append("    float radiusN = u_radii[i] / u_resolution.x;\n");
-        f.append("    if (radiusN < 0.0001) continue;\n");
-        f.append("    float d = distance(uv, center);\n");
-        f.append("    if (d < radiusN){\n");
-        f.append("      float fall = 1.0 - (d / radiusN);\n");
-        f.append("      fall = fall * fall;\n");
-        f.append("      vec2 dir = normalize(uv - center + vec2(0.0001));\n");
-        f.append("      offset += dir * fall * u_strengths[i] * 0.05;\n");
-        f.append("    }\n");
-        f.append("  }\n");
-        f.append("  gl_FragColor = texture2D(u_texture, uv + offset);\n");
-        f.append("}\n");
-
-        return new Shader(v, f.toString());
     }
 
     public static void dispose() {
@@ -260,7 +200,7 @@ public class DistortionRenderer {
     }
 
     public static int activeCount() {
-        return active.size();
+        return active.size;
     }
     public static int currentFps()  {
         return lastFps;
