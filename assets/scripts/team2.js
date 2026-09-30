@@ -1,4 +1,3 @@
-//作者：CN方柠檬FNM
 //分端参考及扩展：DeepSeek
 
 var isDesktop = !Vars.mobile;

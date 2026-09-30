@@ -1,13 +1,17 @@
 // 地图尺寸限制
 MapResizeDialog.minSize = 5;
-MapResizeDialog.maxSize = 1000;
+MapResizeDialog.maxSize = 2000;
 Vars.maxSchematicSize = 600;
 
 // 加载各种脚本模块（注意：这些文件必须存在于 scripts 文件夹里）
 require("sectorSize");
+log("endsectorSize");
 require("items");
+log("enditems");
 require("sectors");
+log("endsectors");
 require("team2");
+log("endteam2");
 
 // 使 Tantros 星球可见
 Planets.tantros.visible = true;

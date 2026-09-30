@@ -11,6 +11,9 @@ import project.ai.HuntAI;
 import project.ai.ProtectAI;
 import project.blocks.MultiAssembler;
 import project.content.ProtectModeRegistry;
+import project.content.SSPlanets;
+import project.content.SSUnits;
+import project.graphics.DistortionRenderer;
 
 import static mindustry.Vars.content;
 
@@ -30,13 +33,27 @@ public class ShatteredStarMod extends Mod {
     @Override
     public void loadContent() {
         Log.info("Loading content.");
+
+        // ============ 星球 ============
+        SSPlanets.load();
+
+        // ============ 保护模式注册表 ============
         ProtectModeRegistry.load();
+
+        // ============ 多单位组装厂 ============
         new MultiAssembler("multi-assembler");
+
+        // ============ 单位 ============
+        SSUnits.load();
     }
 
     @Override
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
+
+        // ============ 0. 实验性渲染 ============
+        SSSettings.load();
+        DistortionRenderer.init();
 
         // ============ 1. 指令 ============
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
@@ -86,15 +103,15 @@ public class ShatteredStarMod extends Mod {
 
         // ============ 4. 全局出厂指令 ============
         Events.on(UnitCreateEvent.class, e -> {
-            if (!globalFactoryCommandEnabled) return;
-            if (globalFactoryCommand == null) return;
-            if (e.spawner == null) return;
-            if (e.unit == null) return;
-            if (!e.unit.isCommandable()) return;
-            if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
+                if (!globalFactoryCommandEnabled) return;
+                if (globalFactoryCommand == null) return;
+                if (e.spawner == null) return;
+                if (e.unit == null) return;
+                if (!e.unit.isCommandable()) return;
+                if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
 
-            e.unit.command().command(globalFactoryCommand);
-        });
+                e.unit.command().command(globalFactoryCommand);
+            });
     }
 
     private static void register(UnitCommand cmd) {

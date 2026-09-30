@@ -6,7 +6,7 @@ function newSector(name, planet, position) {
 	exports[name] = extend(SectorPreset, name, planet, position, {});
 }
 
-log("ser");
-newSector("crash-site", Planets.serpulos, 60);
+log("sers1");
+newSector("crash-site", Planets.tantros, 0);
 
 log("complete");
