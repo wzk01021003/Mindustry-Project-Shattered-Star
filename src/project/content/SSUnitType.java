@@ -22,7 +22,7 @@ import mindustry.ai.types.HugAI;
 import mindustry.ai.types.SuicideAI;
 import mindustry.content.Fx;
 import mindustry.content.Liquids;
-import mindustry.content.Sounds;
+import mindustry.gen.Sounds;
 import mindustry.content.StatusEffects;
 import mindustry.entities.Effect;
 import mindustry.entities.abilities.EnergyFieldAbility;
@@ -58,7 +58,7 @@ import mindustry.entities.effect.WrapEffect;
 import mindustry.entities.part.DrawPart.PartProgress;
 import mindustry.entities.part.FlarePart;
 import mindustry.entities.part.HoverPart;
-import mindustry.entities.part.PartMove;
+import mindustry.entities.part.DrawPart.PartMove;
 import mindustry.entities.part.RegionPart;
 import mindustry.entities.part.ShapePart;
 import mindustry.entities.pattern.ShootAlternate;
@@ -69,7 +69,7 @@ import mindustry.entities.pattern.ShootSpread;
 import mindustry.type.weapons.BuildWeapon;
 import mindustry.type.weapons.PointDefenseWeapon;
 import mindustry.type.weapons.RepairBeamWeapon;
-import mindustry.gen.UnitEngine;
+import mindustry.type.UnitType.UnitEngine;
 import mindustry.graphics.Drawf;
 import mindustry.graphics.Layer;
 import mindustry.graphics.Pal;
@@ -245,8 +245,6 @@ public class SSUnitType {
                                     status = StatusEffects.burning;
                                     keepVelocity = false;
                                     hittable = false;
-                                    frontColor = Color.valueOf("00000000");
-                                    backColor = Color.valueOf("00000000");
                                 }
                             };
                         }
@@ -1573,9 +1571,11 @@ public class SSUnitType {
                             heatColor = Color.valueOf("FFA665");
                             bullet = missiles;
 
-                            shoot.shots = 2;
-                            shoot.shotDelay = 0f;
-                            shoot.spread = 8f;
+                            shoot = new ShootSpread() {{
+                                shots = 2;
+                                shotDelay = 0f;
+                                spread = 8f;
+                            }};
                         }
                     },
                     new Weapon("zenith-missiles") {
