@@ -80,7 +80,9 @@ public class DistortionRenderer {
                 bufH = h;
             }
 
-            // 用不透明黑清屏，避免 alpha=0 被混合掉
+            // 关键 1：把上一帧的批次提交干净，避免遗留绘制混入本次 FBO
+            Draw.flush();
+
             buffer.begin(Color.black);
             capturing = true;
         } catch (Throwable t) {
@@ -96,6 +98,10 @@ public class DistortionRenderer {
         capturing = false;
 
         try {
+            // 关键 2：把本帧批次里累积的场景绘制真正提交到 FBO，
+            // 否则 buffer 里只有清屏色，blit 回屏幕就是一片黑。
+            Draw.flush();
+
             buffer.end();
 
             int slots = effectiveSlots();
@@ -116,7 +122,6 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
             }
 
-            Draw.flush();
             Draw.proj(0f, 0f, screenW, screenH);
             Draw.shader(shader);
 
