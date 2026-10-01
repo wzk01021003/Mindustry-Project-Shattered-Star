@@ -3,6 +3,7 @@ package project.graphics;
 import arc.Core;
 import arc.Events;
 import arc.graphics.Color;
+import arc.graphics.g2d.Draw;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
 import arc.math.geom.Vec2;
@@ -14,7 +15,6 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    // shader 里手写了 6 个独立 uniform，超过的丢弃
     public static final int MAX_GPU_SLOTS = 6;
 
     public static class Data {
@@ -122,7 +122,16 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            buffer.blit(shader);
+            // 用 Draw.shader + Draw.rect 替代 buffer.blit。
+            // Draw.shader 会通过 batch 自动填充 u_proj。
+            Draw.flush();
+            Draw.shader(shader);
+            Draw.color(Color.white);
+            Draw.rect(Draw.wrap(buffer.getTexture()),
+                Core.camera.position.x, Core.camera.position.y,
+                Core.camera.width, -Core.camera.height);
+            Draw.shader();
+            Draw.flush();
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
