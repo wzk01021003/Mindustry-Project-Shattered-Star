@@ -29,7 +29,7 @@
             "requirements": [ "silicon/8","coal/10" ]
         },
         {
-            "unit": "daggerAT",
+            "unit": "dagger-at",
             "time": 1200,
             "requirements": [ "silicon/25","lead/20" ]
         }
