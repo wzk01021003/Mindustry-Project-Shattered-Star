@@ -3,8 +3,11 @@ package project.graphics;
 import arc.Core;
 import arc.Events;
 import arc.graphics.Gl;
+import arc.graphics.Pixmap;
+import arc.graphics.Texture;
+import arc.graphics.Texture.TextureFilter;
+import arc.graphics.Texture.TextureWrap;
 import arc.graphics.g2d.Draw;
-import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
@@ -27,7 +30,8 @@ public class DistortionRenderer {
 
     private static final Seq<Data> active = new Seq<>();
 
-    private static FrameBuffer buffer;
+    // 独立的 texture，与任何 FBO 都无关
+    private static Texture screenTex;
     private static Shader shader;
     private static boolean unsupported = false;
     private static boolean eventsRegistered = false;
@@ -67,17 +71,24 @@ public class DistortionRenderer {
         try {
             ensureInit(w, h);
 
-            // 1. 绑定我们自己的 texture 到 unit 0
-            int texId = buffer.getTexture().getTextureObjectHandle();
+            // ---- 关键修复 1：显式绑定默认屏幕 framebuffer ----
+            // Mindustry 在 postDraw 前可能还绑着 bloom 等的 FBO。
+            // 不绑定到 0，拷贝的就是错误的 buffer。
+            Gl.bindFramebuffer(Gl.framebuffer, 0);
+
+            // ---- 关键修复 2：用独立 texture，不用 FrameBuffer 的 ----
+            int texId = screenTex.getTextureObjectHandle();
             Gl.activeTexture(Gl.texture0);
             Gl.bindTexture(Gl.texture2d, texId);
-
-            // 2. 从当前屏幕拷贝内容到我们的 texture。
-            //    只读 READ framebuffer（就是屏幕），不改绑定，因此不会
-            //    被 Mindustry 内部的 framebuffer 切换打断。
             Gl.copyTexImage2D(Gl.texture2d, 0, Gl.rgba, 0, 0, w, h, 0);
 
-            // 3. 设置 uniform
+            // 拷贝后重置 texture 参数（copyTexImage2D 可能改变默认值）
+            Gl.texParameteri(Gl.texture2d, Gl.textureMinFilter, Gl.linear);
+            Gl.texParameteri(Gl.texture2d, Gl.textureMagFilter, Gl.linear);
+            Gl.texParameteri(Gl.texture2d, Gl.textureWrapS, Gl.clampToEdge);
+            Gl.texParameteri(Gl.texture2d, Gl.textureWrapT, Gl.clampToEdge);
+
+            // 设置 uniform
             int slots = effectiveSlots();
 
             shader.bind();
@@ -105,9 +116,8 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            // 4. 用 ScreenQuad 把处理后的画面画满屏幕。
-            //    Draw.blit 内部走 batch 之外的路径，用 NDC 坐标直接绘制。
-            Draw.blit(buffer.getTexture(), shader);
+            // 用 ScreenQuad 把处理后的画面画满屏幕
+            Draw.blit(screenTex, shader);
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
@@ -120,16 +130,19 @@ public class DistortionRenderer {
     }
 
     private static void ensureInit(int w, int h) {
-        // 尺寸变了 → 重建
-        if (buffer != null && (texW != w || texH != h)) {
-            buffer.dispose();
-            buffer = null;
+        if (screenTex != null && (texW != w || texH != h)) {
+            screenTex.dispose();
+            screenTex = null;
         }
 
         try {
-            if (buffer == null) {
-                // 只用来承载一个 texture；不使用它的 begin/end。
-                buffer = new FrameBuffer(w, h);
+            if (screenTex == null) {
+                // 用一个空 Pixmap 创建 texture，与任何 FBO 无关
+                Pixmap pm = new Pixmap(w, h);
+                screenTex = new Texture(pm);
+                pm.dispose();
+                screenTex.setFilter(TextureFilter.linear, TextureFilter.linear);
+                screenTex.setWrap(TextureWrap.clampToEdge, TextureWrap.clampToEdge);
                 texW = w;
                 texH = h;
             }
@@ -144,7 +157,6 @@ public class DistortionRenderer {
     }
 
     private static Shader createShader() {
-        // 顶点：NDC 直通。ScreenQuad 传的 a_position 就是 NDC 坐标。
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
@@ -278,9 +290,9 @@ public class DistortionRenderer {
     }
 
     public static void dispose() {
-        if (buffer != null) {
-            buffer.dispose();
-            buffer = null;
+        if (screenTex != null) {
+            screenTex.dispose();
+            screenTex = null;
         }
         if (shader != null) {
             shader.dispose();
