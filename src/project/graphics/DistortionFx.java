@@ -4,6 +4,7 @@ import arc.func.Cons;
 import arc.math.Interp;
 import arc.util.Time;
 import mindustry.entities.Effect;
+import mindustry.entities.EffectContainer;
 
 public class DistortionFx extends Effect {
 
@@ -65,9 +66,9 @@ public class DistortionFx extends Effect {
 
     // ============================================================
     //  内部类：带冷却的渲染器
-    //  同一实例在 cooldown 帧内只会触发一次，防止一次攻击炸出 N 个环。
+    //  v8 的 Effect 构造函数要求 Cons<EffectContainer>，不是 Cons<Effect>。
     // ============================================================
-    private static class CooldownRenderer implements Cons<Effect> {
+    private static class CooldownRenderer implements Cons<EffectContainer> {
         final float radius, strength, life;
         final int type;
         final float radiusFrom, radiusTo, ringWidth;
@@ -90,7 +91,7 @@ public class DistortionFx extends Effect {
         }
 
         @Override
-        public void get(Effect e) {
+        public void get(EffectContainer e) {
             if (cooldown > 0f && Time.time - lastTrigger < cooldown) return;
             lastTrigger = Time.time;
             DistortionRenderer.addDistortion(e.x, e.y, radius, strength, life, type,
