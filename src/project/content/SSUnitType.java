@@ -5953,7 +5953,7 @@ public class SSUnitType {
         };
 
         // ============================================================
-        //  merui-serpulo  (塞普罗特供 T1 多足机甲)
+        //  merui-serpulo  (塞普罗特供 T1 多足蜘蛛)
         // ============================================================
         meruiSerpulo = new GlowErekirLegsUnitType("merui-serpulo") {
             {
