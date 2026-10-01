@@ -24,6 +24,7 @@ public class DistortionRenderer {
         public float strength;
         public float lifetime;
         public float elapsed;
+        public int type;
     }
 
     private static final Seq<Data> active = new Seq<>();
@@ -59,17 +60,10 @@ public class DistortionRenderer {
         updateActive();
     }
 
-    // ============================================================
-    //  Trigger.draw 里我们把 capture/render 插入到场景绘制的正确时机。
-    //  这是 Bloom.java 的做法，能避免与 Mindustry 内部的 framebuffer
-    //  切换冲突。
-    // ============================================================
     private static void onDrawEvent() {
         if (unsupported || !SSSettings.enabled() || active.size == 0) return;
 
-        // 在场景最前面开始捕获
         Draw.draw(Layer.background - 1f, DistortionRenderer::beginCapture);
-        // 在 UI 之前结束捕获并渲染
         Draw.draw(Layer.overlayUI - 1f, DistortionRenderer::endCaptureAndRender);
     }
 
@@ -108,17 +102,29 @@ public class DistortionRenderer {
             float camH = Core.camera.height;
 
             float[] d = new float[24];
+            float[] e = new float[24];
+
             for (int i = 0; i < slots; i++) {
                 Data data = active.get(i);
                 d[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
                 d[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
                 d[i * 4 + 2] = data.radius / camW * w;
                 d[i * 4 + 3] = data.strength;
+
+                float progress = data.lifetime > 0f
+                    ? Math.min(1f, data.elapsed / data.lifetime)
+                    : 1f;
+
+                e[i * 4]     = data.type;
+                e[i * 4 + 1] = progress;
+                e[i * 4 + 2] = 0f;
+                e[i * 4 + 3] = 0f;
             }
 
             shader.bind();
             shader.setUniformi("u_count", slots);
             shader.setUniformf("u_resolution", w, h);
+
             shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
             shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
             shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
@@ -126,7 +132,13 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            // buffer.blit 会用 ScreenQuad 直接渲染，不走 batch
+            shader.setUniformf("u_e0", e[0],  e[1],  e[2],  e[3]);
+            shader.setUniformf("u_e1", e[4],  e[5],  e[6],  e[7]);
+            shader.setUniformf("u_e2", e[8],  e[9],  e[10], e[11]);
+            shader.setUniformf("u_e3", e[12], e[13], e[14], e[15]);
+            shader.setUniformf("u_e4", e[16], e[17], e[18], e[19]);
+            shader.setUniformf("u_e5", e[20], e[21], e[22], e[23]);
+
             buffer.blit(shader);
 
             if (SSSettings.showDebug()) {
@@ -160,7 +172,6 @@ public class DistortionRenderer {
     }
 
     private static Shader createShader() {
-        // ScreenQuad 直接传 NDC 坐标，不需要 u_proj
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
@@ -181,28 +192,56 @@ public class DistortionRenderer {
             "uniform vec4 u_d3;\n" +
             "uniform vec4 u_d4;\n" +
             "uniform vec4 u_d5;\n" +
+            "uniform vec4 u_e0;\n" +
+            "uniform vec4 u_e1;\n" +
+            "uniform vec4 u_e2;\n" +
+            "uniform vec4 u_e3;\n" +
+            "uniform vec4 u_e4;\n" +
+            "uniform vec4 u_e5;\n" +
             "\n" +
-            "vec2 applyDistort(vec2 screenPos, vec4 d){\n" +
+            "#define PI 3.14159265\n" +
+            "\n" +
+            "vec2 applyDistort(vec2 screenPos, vec4 d, vec4 e){\n" +
             "    vec2 diff = screenPos - d.xy;\n" +
             "    float dist = length(diff);\n" +
-            "    if(dist < d.z && dist > 0.001){\n" +
-            "        float t = 1.0 - dist / d.z;\n" +
-            "        t = t * t;\n" +
-            "        return diff / dist * t * d.w * 20.0;\n" +
+            "    if(dist >= d.z || dist <= 0.001) return vec2(0.0);\n" +
+            "\n" +
+            "    float t = 1.0 - dist / d.z;\n" +
+            "    t = t * t;\n" +
+            "\n" +
+            "    int type = int(e.x + 0.5);\n" +
+            "    float progress = e.y;\n" +
+            "\n" +
+            "    float dir = 1.0;\n" +   // 正 = 内凹，负 = 外凸
+            "    float mag = 1.0;\n" +
+            "\n" +
+            "    if(type == 0){\n" +      // 内凹
+            "        dir = 1.0;\n" +
+            "    }else if(type == 1){\n" +  // 外凸
+            "        dir = -1.0;\n" +
+            "    }else if(type == 2){\n" +  // 先凹后凸
+            "        dir = cos(progress * PI);\n" +
+            "    }else if(type == 3){\n" +  // 先凸后凹
+            "        dir = -cos(progress * PI);\n" +
+            "    }else if(type == 4){\n" +  // 延迟外凸
+            "        float delay = 0.3;\n" +
+            "        mag = max(0.0, (progress - delay) / (1.0 - delay));\n" +
+            "        dir = -1.0;\n" +
             "    }\n" +
-            "    return vec2(0.0);\n" +
+            "\n" +
+            "    return diff / dist * t * d.w * mag * dir * 20.0;\n" +
             "}\n" +
             "\n" +
             "void main(){\n" +
             "    vec2 uv = v_texCoords;\n" +
             "    vec2 screenPos = uv * u_resolution;\n" +
             "    vec2 offset = vec2(0.0);\n" +
-            "    if(u_count > 0) offset += applyDistort(screenPos, u_d0);\n" +
-            "    if(u_count > 1) offset += applyDistort(screenPos, u_d1);\n" +
-            "    if(u_count > 2) offset += applyDistort(screenPos, u_d2);\n" +
-            "    if(u_count > 3) offset += applyDistort(screenPos, u_d3);\n" +
-            "    if(u_count > 4) offset += applyDistort(screenPos, u_d4);\n" +
-            "    if(u_count > 5) offset += applyDistort(screenPos, u_d5);\n" +
+            "    if(u_count > 0) offset += applyDistort(screenPos, u_d0, u_e0);\n" +
+            "    if(u_count > 1) offset += applyDistort(screenPos, u_d1, u_e1);\n" +
+            "    if(u_count > 2) offset += applyDistort(screenPos, u_d2, u_e2);\n" +
+            "    if(u_count > 3) offset += applyDistort(screenPos, u_d3, u_e3);\n" +
+            "    if(u_count > 4) offset += applyDistort(screenPos, u_d4, u_e4);\n" +
+            "    if(u_count > 5) offset += applyDistort(screenPos, u_d5, u_e5);\n" +
             "    vec2 distortedUv = uv + offset / u_resolution;\n" +
             "    vec4 c = texture2D(u_texture, distortedUv);\n" +
             "    gl_FragColor = vec4(c.rgb, 1.0);\n" +
@@ -224,7 +263,7 @@ public class DistortionRenderer {
         }
     }
 
-    public static void addDistortion(float x, float y, float radius, float strength, float lifetime) {
+    public static void addDistortion(float x, float y, float radius, float strength, float lifetime, int type) {
         if (!SSSettings.enabled() || unsupported) return;
 
         resetFrameCounter();
@@ -249,6 +288,7 @@ public class DistortionRenderer {
         data.strength = strength;
         data.lifetime = lifetime;
         data.elapsed = 0f;
+        data.type = type;
         active.add(data);
     }
 
