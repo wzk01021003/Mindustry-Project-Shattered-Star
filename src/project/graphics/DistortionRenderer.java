@@ -18,8 +18,7 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    /** 同时最多渲染几个扭曲。改这一个数字即可扩/缩容，shader 会自动适配。 */
-    public static final int MAX_GPU_SLOTS = 96;
+    public static final int MAX_GPU_SLOTS = 16;
 
     public static class Data {
         public final Vec2 position = new Vec2();
@@ -31,6 +30,9 @@ public class DistortionRenderer {
         public float radiusFrom, radiusTo;
         public float ringWidth;
         public Interp interp;
+        // 运行时 fade 值（随生命周期衰减）
+        public float currentStrength;
+        public float currentRingWidth;
     }
 
     private static final Seq<Data> active = new Seq<>();
@@ -50,7 +52,6 @@ public class DistortionRenderer {
     private static int lastFps = 60;
     private static int downgrade = 0;
 
-    /** 预生成的 uniform 名字，避免每帧拼字符串 */
     private static final String[] D_NAMES = new String[MAX_GPU_SLOTS];
     private static final String[] E_NAMES = new String[MAX_GPU_SLOTS];
     static {
@@ -125,13 +126,15 @@ public class DistortionRenderer {
                 d[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
                 d[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
                 d[i * 4 + 2] = data.radius / camW * w;
-                d[i * 4 + 3] = data.strength;
+                d[i * 4 + 3] = data.currentStrength;
+                // ← 用 fade 后的强度
 
                 float progress = data.lifetime > 0f
                 ? Math.min(1f, data.elapsed / data.lifetime)
                 : 1f;
 
-                float ringPx = data.ringWidth * data.maxRadius / camW * w;
+                float ringPx = data.currentRingWidth * data.maxRadius / camW * w;
+                // ← fade 后的环宽
 
                 e[i * 4]     = data.type;
                 e[i * 4 + 1] = progress;
@@ -191,7 +194,6 @@ public class DistortionRenderer {
         "    gl_Position = a_position;\n" +
         "}\n";
 
-        // 动态生成 uniform 声明
         StringBuilder uniformDecl = new StringBuilder();
         uniformDecl.append("varying vec2 v_texCoords;\n");
         uniformDecl.append("uniform sampler2D u_texture;\n");
@@ -204,7 +206,6 @@ public class DistortionRenderer {
             uniformDecl.append("uniform vec4 u_e").append(i).append(";\n");
         }
 
-        // 动态生成 main 里的累加分支
         StringBuilder mainBody = new StringBuilder();
         mainBody.append("void main(){\n");
         mainBody.append("    vec2 uv = v_texCoords;\n");
@@ -220,6 +221,8 @@ public class DistortionRenderer {
         mainBody.append("    gl_FragColor = vec4(c.rgb, 1.0);\n");
         mainBody.append("}\n");
 
+        // 关键改动：环厚阈值从 0.001 改成 0.5（像素级），
+        // 避免环宽 fade 到很小时突然变成实心圆。
         String applyFn =
         "#define PI 3.14159265\n" +
         "\n" +
@@ -231,7 +234,7 @@ public class DistortionRenderer {
         "    float ringThickness = e.z;\n" +
         "    float falloff;\n" +
         "\n" +
-        "    if(ringThickness > 0.001){\n" +
+        "    if(ringThickness > 0.5){\n" +
         "        float halfWidth = ringThickness * 0.5;\n" +
         "        float ringDist = abs(dist - d.z);\n" +
         "        if(ringDist >= halfWidth) return vec2(0.0);\n" +
@@ -283,6 +286,15 @@ public class DistortionRenderer {
             float progress = data.elapsed / data.lifetime;
             float curve = data.interp.apply(progress);
             data.radius = data.maxRadius * Mathf.lerp(data.radiusFrom, data.radiusTo, curve);
+
+            // ============================================================
+            //  ★ 关键改动：后 50% 开始淡出，强度和环宽一起平滑归零
+            // ============================================================
+            float fadeT = Mathf.clamp((progress - 0.5f) / 0.5f);
+            float fade = 1f - fadeT * fadeT;
+            // 1 - t²，先慢后快的下降曲线
+            data.currentStrength = data.strength * fade;
+            data.currentRingWidth = data.ringWidth * fade;
         }
     }
 
@@ -319,6 +331,10 @@ public class DistortionRenderer {
         data.radiusTo = radiusTo;
         data.ringWidth = ringWidth;
         data.interp = interp;
+        data.currentStrength = strength;
+        // ← 初始值
+        data.currentRingWidth = ringWidth;
+        // ← 初始值
         active.add(data);
     }
 
