@@ -6,12 +6,12 @@ import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
+import arc.math.Interp;
+import arc.math.Mathf;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
-import arc.math.Interp;
-import arc.math.Mathf;
 import mindustry.game.EventType.Trigger;
 import mindustry.graphics.Layer;
 import project.SSSettings;
@@ -27,6 +27,9 @@ public class DistortionRenderer {
         public float lifetime;
         public float elapsed;
         public int type;
+        public float radiusFrom, radiusTo;
+        public float ringWidth;
+        public Interp interp;
     }
 
     private static final Seq<Data> active = new Seq<>();
@@ -117,9 +120,11 @@ public class DistortionRenderer {
                     ? Math.min(1f, data.elapsed / data.lifetime)
                     : 1f;
 
+                float ringPx = data.ringWidth * data.maxRadius / camW * w;
+
                 e[i * 4]     = data.type;
                 e[i * 4 + 1] = progress;
-                e[i * 4 + 2] = 0f;
+                e[i * 4 + 2] = ringPx;
                 e[i * 4 + 3] = 0f;
             }
 
@@ -206,32 +211,44 @@ public class DistortionRenderer {
             "vec2 applyDistort(vec2 screenPos, vec4 d, vec4 e){\n" +
             "    vec2 diff = screenPos - d.xy;\n" +
             "    float dist = length(diff);\n" +
-            "    if(dist >= d.z || dist <= 0.001) return vec2(0.0);\n" +
+            "    if(dist <= 0.001) return vec2(0.0);\n" +
             "\n" +
-            "    float t = 1.0 - dist / d.z;\n" +
-            "    t = t * t;\n" +
+            "    float ringThickness = e.z;\n" +
+            "    float falloff;\n" +
+            "\n" +
+            "    if(ringThickness > 0.001){\n" +
+            "        float halfWidth = ringThickness * 0.5;\n" +
+            "        float ringDist = abs(dist - d.z);\n" +
+            "        if(ringDist >= halfWidth) return vec2(0.0);\n" +
+            "        float t = 1.0 - ringDist / halfWidth;\n" +
+            "        falloff = t * t;\n" +
+            "    } else {\n" +
+            "        if(dist >= d.z) return vec2(0.0);\n" +
+            "        float t = 1.0 - dist / d.z;\n" +
+            "        falloff = t * t;\n" +
+            "    }\n" +
             "\n" +
             "    int type = int(e.x + 0.5);\n" +
             "    float progress = e.y;\n" +
             "\n" +
-            "    float dir = 1.0;\n" +   // 正 = 内凹，负 = 外凸
+            "    float dir = 1.0;\n" +
             "    float mag = 1.0;\n" +
             "\n" +
-            "    if(type == 0){\n" +      // 内凹
+            "    if(type == 0){\n" +
             "        dir = 1.0;\n" +
-            "    }else if(type == 1){\n" +  // 外凸
+            "    }else if(type == 1){\n" +
             "        dir = -1.0;\n" +
-            "    }else if(type == 2){\n" +  // 先凹后凸
+            "    }else if(type == 2){\n" +
             "        dir = cos(progress * PI);\n" +
-            "    }else if(type == 3){\n" +  // 先凸后凹
+            "    }else if(type == 3){\n" +
             "        dir = -cos(progress * PI);\n" +
-            "    }else if(type == 4){\n" +  // 延迟外凸
+            "    }else if(type == 4){\n" +
             "        float delay = 0.3;\n" +
             "        mag = max(0.0, (progress - delay) / (1.0 - delay));\n" +
             "        dir = -1.0;\n" +
             "    }\n" +
             "\n" +
-            "    return diff / dist * t * d.w * mag * dir * 20.0;\n" +
+            "    return diff / dist * falloff * d.w * mag * dir * 20.0;\n" +
             "}\n" +
             "\n" +
             "void main(){\n" +
@@ -260,12 +277,16 @@ public class DistortionRenderer {
                 active.remove(i);
                 continue;
             }
-            float t = 1f - data.elapsed / data.lifetime;
-            data.radius = data.maxRadius * t;
+            float progress = data.elapsed / data.lifetime;
+            float curve = data.interp.apply(progress);
+            data.radius = data.maxRadius * Mathf.lerp(data.radiusFrom, data.radiusTo, curve);
         }
     }
 
-    public static void addDistortion(float x, float y, float radius, float strength, float lifetime, int type) {
+    public static void addDistortion(float x, float y, float radius, float strength,
+                                     float lifetime, int type,
+                                     float radiusFrom, float radiusTo,
+                                     float ringWidth, Interp interp) {
         if (!SSSettings.enabled() || unsupported) return;
 
         resetFrameCounter();
@@ -291,6 +312,10 @@ public class DistortionRenderer {
         data.lifetime = lifetime;
         data.elapsed = 0f;
         data.type = type;
+        data.radiusFrom = radiusFrom;
+        data.radiusTo = radiusTo;
+        data.ringWidth = ringWidth;
+        data.interp = interp;
         active.add(data);
     }
 
