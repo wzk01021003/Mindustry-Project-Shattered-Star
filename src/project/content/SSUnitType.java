@@ -86,6 +86,8 @@ import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
 
+import static arc.graphics.g2d.Draw.color;
+import static arc.graphics.g2d.Lines.stroke;
 import static mindustry.Vars.tilePayload;
 import static mindustry.Vars.tilesize;
 
