@@ -18,7 +18,8 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    public static final int MAX_GPU_SLOTS = 6;
+    /** 同时最多渲染几个扭曲。改这一个数字即可扩/缩容，shader 会自动适配。 */
+    public static final int MAX_GPU_SLOTS = 96;
 
     public static class Data {
         public final Vec2 position = new Vec2();
@@ -48,6 +49,16 @@ public class DistortionRenderer {
     private static int fpsSamples = 0;
     private static int lastFps = 60;
     private static int downgrade = 0;
+
+    /** 预生成的 uniform 名字，避免每帧拼字符串 */
+    private static final String[] D_NAMES = new String[MAX_GPU_SLOTS];
+    private static final String[] E_NAMES = new String[MAX_GPU_SLOTS];
+    static {
+        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+            D_NAMES[i] = "u_d" + i;
+            E_NAMES[i] = "u_e" + i;
+        }
+    }
 
     public static void init() {
         if (eventsRegistered) return;
@@ -106,8 +117,8 @@ public class DistortionRenderer {
             float camW = Core.camera.width;
             float camH = Core.camera.height;
 
-            float[] d = new float[24];
-            float[] e = new float[24];
+            float[] d = new float[MAX_GPU_SLOTS * 4];
+            float[] e = new float[MAX_GPU_SLOTS * 4];
 
             for (int i = 0; i < slots; i++) {
                 Data data = active.get(i);
@@ -117,8 +128,8 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
 
                 float progress = data.lifetime > 0f
-                    ? Math.min(1f, data.elapsed / data.lifetime)
-                    : 1f;
+                ? Math.min(1f, data.elapsed / data.lifetime)
+                : 1f;
 
                 float ringPx = data.ringWidth * data.maxRadius / camW * w;
 
@@ -132,24 +143,16 @@ public class DistortionRenderer {
             shader.setUniformi("u_count", slots);
             shader.setUniformf("u_resolution", w, h);
 
-            shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
-            shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
-            shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
-            shader.setUniformf("u_d3", d[12], d[13], d[14], d[15]);
-            shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
-            shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
-
-            shader.setUniformf("u_e0", e[0],  e[1],  e[2],  e[3]);
-            shader.setUniformf("u_e1", e[4],  e[5],  e[6],  e[7]);
-            shader.setUniformf("u_e2", e[8],  e[9],  e[10], e[11]);
-            shader.setUniformf("u_e3", e[12], e[13], e[14], e[15]);
-            shader.setUniformf("u_e4", e[16], e[17], e[18], e[19]);
-            shader.setUniformf("u_e5", e[20], e[21], e[22], e[23]);
+            for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+                shader.setUniformf(D_NAMES[i], d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]);
+                shader.setUniformf(E_NAMES[i], e[i * 4], e[i * 4 + 1], e[i * 4 + 2], e[i * 4 + 3]);
+            }
 
             buffer.blit(shader);
 
             if (SSSettings.showDebug()) {
-                Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
+                Log.info("[ss-distort] slots=" + slots + "/" + active.size
+                    + " fps=" + lastFps + " downgrade=" + downgrade);
             }
         } catch (Throwable t) {
             Log.err("[ss-distort] endCaptureAndRender 异常", t);
@@ -180,91 +183,91 @@ public class DistortionRenderer {
 
     private static Shader createShader() {
         String vertex =
-            "attribute vec4 a_position;\n" +
-            "attribute vec2 a_texCoord0;\n" +
-            "varying vec2 v_texCoords;\n" +
-            "void main(){\n" +
-            "    v_texCoords = a_texCoord0;\n" +
-            "    gl_Position = a_position;\n" +
-            "}\n";
+        "attribute vec4 a_position;\n" +
+        "attribute vec2 a_texCoord0;\n" +
+        "varying vec2 v_texCoords;\n" +
+        "void main(){\n" +
+        "    v_texCoords = a_texCoord0;\n" +
+        "    gl_Position = a_position;\n" +
+        "}\n";
 
-        String fragment =
-            "varying vec2 v_texCoords;\n" +
-            "uniform sampler2D u_texture;\n" +
-            "uniform vec2 u_resolution;\n" +
-            "uniform int u_count;\n" +
-            "uniform vec4 u_d0;\n" +
-            "uniform vec4 u_d1;\n" +
-            "uniform vec4 u_d2;\n" +
-            "uniform vec4 u_d3;\n" +
-            "uniform vec4 u_d4;\n" +
-            "uniform vec4 u_d5;\n" +
-            "uniform vec4 u_e0;\n" +
-            "uniform vec4 u_e1;\n" +
-            "uniform vec4 u_e2;\n" +
-            "uniform vec4 u_e3;\n" +
-            "uniform vec4 u_e4;\n" +
-            "uniform vec4 u_e5;\n" +
-            "\n" +
-            "#define PI 3.14159265\n" +
-            "\n" +
-            "vec2 applyDistort(vec2 screenPos, vec4 d, vec4 e){\n" +
-            "    vec2 diff = screenPos - d.xy;\n" +
-            "    float dist = length(diff);\n" +
-            "    if(dist <= 0.001) return vec2(0.0);\n" +
-            "\n" +
-            "    float ringThickness = e.z;\n" +
-            "    float falloff;\n" +
-            "\n" +
-            "    if(ringThickness > 0.001){\n" +
-            "        float halfWidth = ringThickness * 0.5;\n" +
-            "        float ringDist = abs(dist - d.z);\n" +
-            "        if(ringDist >= halfWidth) return vec2(0.0);\n" +
-            "        float t = 1.0 - ringDist / halfWidth;\n" +
-            "        falloff = t * t;\n" +
-            "    } else {\n" +
-            "        if(dist >= d.z) return vec2(0.0);\n" +
-            "        float t = 1.0 - dist / d.z;\n" +
-            "        falloff = t * t;\n" +
-            "    }\n" +
-            "\n" +
-            "    int type = int(e.x + 0.5);\n" +
-            "    float progress = e.y;\n" +
-            "\n" +
-            "    float dir = 1.0;\n" +
-            "    float mag = 1.0;\n" +
-            "\n" +
-            "    if(type == 0){\n" +
-            "        dir = 1.0;\n" +
-            "    }else if(type == 1){\n" +
-            "        dir = -1.0;\n" +
-            "    }else if(type == 2){\n" +
-            "        dir = cos(progress * PI);\n" +
-            "    }else if(type == 3){\n" +
-            "        dir = -cos(progress * PI);\n" +
-            "    }else if(type == 4){\n" +
-            "        float delay = 0.3;\n" +
-            "        mag = max(0.0, (progress - delay) / (1.0 - delay));\n" +
-            "        dir = -1.0;\n" +
-            "    }\n" +
-            "\n" +
-            "    return diff / dist * falloff * d.w * mag * dir * 20.0;\n" +
-            "}\n" +
-            "\n" +
-            "void main(){\n" +
-            "    vec2 uv = v_texCoords;\n" +
-            "    vec2 screenPos = uv * u_resolution;\n" +
-            "    vec2 offset = vec2(0.0);\n" +
-            "    if(u_count > 0) offset += applyDistort(screenPos, u_d0, u_e0);\n" +
-            "    if(u_count > 1) offset += applyDistort(screenPos, u_d1, u_e1);\n" +
-            "    if(u_count > 2) offset += applyDistort(screenPos, u_d2, u_e2);\n" +
-            "    if(u_count > 3) offset += applyDistort(screenPos, u_d3, u_e3);\n" +
-            "    if(u_count > 4) offset += applyDistort(screenPos, u_d4, u_e4);\n" +
-            "    if(u_count > 5) offset += applyDistort(screenPos, u_d5, u_e5);\n" +
-            "    vec2 distortedUv = uv + offset / u_resolution;\n" +
-            "    vec4 c = texture2D(u_texture, distortedUv);\n" +
-            "    gl_FragColor = vec4(c.rgb, 1.0);\n" +
-            "}\n";
+        // 动态生成 uniform 声明
+        StringBuilder uniformDecl = new StringBuilder();
+        uniformDecl.append("varying vec2 v_texCoords;\n");
+        uniformDecl.append("uniform sampler2D u_texture;\n");
+        uniformDecl.append("uniform vec2 u_resolution;\n");
+        uniformDecl.append("uniform int u_count;\n");
+        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+            uniformDecl.append("uniform vec4 u_d").append(i).append(";\n");
+        }
+        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+            uniformDecl.append("uniform vec4 u_e").append(i).append(";\n");
+        }
+
+        // 动态生成 main 里的累加分支
+        StringBuilder mainBody = new StringBuilder();
+        mainBody.append("void main(){\n");
+        mainBody.append("    vec2 uv = v_texCoords;\n");
+        mainBody.append("    vec2 screenPos = uv * u_resolution;\n");
+        mainBody.append("    vec2 offset = vec2(0.0);\n");
+        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+            mainBody.append("    if(u_count > ").append(i)
+            .append(") offset += applyDistort(screenPos, u_d").append(i)
+            .append(", u_e").append(i).append(");\n");
+        }
+        mainBody.append("    vec2 distortedUv = uv + offset / u_resolution;\n");
+        mainBody.append("    vec4 c = texture2D(u_texture, distortedUv);\n");
+        mainBody.append("    gl_FragColor = vec4(c.rgb, 1.0);\n");
+        mainBody.append("}\n");
+
+        String applyFn =
+        "#define PI 3.14159265\n" +
+        "\n" +
+        "vec2 applyDistort(vec2 screenPos, vec4 d, vec4 e){\n" +
+        "    vec2 diff = screenPos - d.xy;\n" +
+        "    float dist = length(diff);\n" +
+        "    if(dist <= 0.001) return vec2(0.0);\n" +
+        "\n" +
+        "    float ringThickness = e.z;\n" +
+        "    float falloff;\n" +
+        "\n" +
+        "    if(ringThickness > 0.001){\n" +
+        "        float halfWidth = ringThickness * 0.5;\n" +
+        "        float ringDist = abs(dist - d.z);\n" +
+        "        if(ringDist >= halfWidth) return vec2(0.0);\n" +
+        "        float t = 1.0 - ringDist / halfWidth;\n" +
+        "        falloff = t * t;\n" +
+        "    } else {\n" +
+        "        if(dist >= d.z) return vec2(0.0);\n" +
+        "        float t = 1.0 - dist / d.z;\n" +
+        "        falloff = t * t;\n" +
+        "    }\n" +
+        "\n" +
+        "    int type = int(e.x + 0.5);\n" +
+        "    float progress = e.y;\n" +
+        "\n" +
+        "    float dir = 1.0;\n" +
+        "    float mag = 1.0;\n" +
+        "\n" +
+        "    if(type == 0){\n" +
+        "        dir = 1.0;\n" +
+        "    }else if(type == 1){\n" +
+        "        dir = -1.0;\n" +
+        "    }else if(type == 2){\n" +
+        "        dir = cos(progress * PI);\n" +
+        "    }else if(type == 3){\n" +
+        "        dir = -cos(progress * PI);\n" +
+        "    }else if(type == 4){\n" +
+        "        float delay = 0.3;\n" +
+        "        mag = max(0.0, (progress - delay) / (1.0 - delay));\n" +
+        "        dir = -1.0;\n" +
+        "    }\n" +
+        "\n" +
+        "    return diff / dist * falloff * d.w * mag * dir * 20.0;\n" +
+        "}\n" +
+        "\n";
+
+        String fragment = uniformDecl.toString() + "\n" + applyFn + mainBody.toString();
 
         return new Shader(vertex, fragment);
     }
@@ -284,9 +287,9 @@ public class DistortionRenderer {
     }
 
     public static void addDistortion(float x, float y, float radius, float strength,
-                                     float lifetime, int type,
-                                     float radiusFrom, float radiusTo,
-                                     float ringWidth, Interp interp) {
+        float lifetime, int type,
+        float radiusFrom, float radiusTo,
+        float ringWidth, Interp interp) {
         if (!SSSettings.enabled() || unsupported) return;
 
         resetFrameCounter();
@@ -354,9 +357,9 @@ public class DistortionRenderer {
 
     private static int effectiveSlots() {
         int n = active.size;
-        if (downgrade >= 1) n = Math.min(n, 4);
-        if (downgrade >= 2) n = Math.min(n, 2);
-        if (downgrade >= 3) n = Math.min(n, 1);
+        if (downgrade >= 1) n = Math.min(n, 8);
+        if (downgrade >= 2) n = Math.min(n, 4);
+        if (downgrade >= 3) n = Math.min(n, 2);
         return Math.min(n, MAX_GPU_SLOTS);
     }
 

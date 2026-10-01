@@ -90,36 +90,36 @@ public class SSSettings {
 
     public static int maxConcurrent() {
         switch (getLevel()) {
-            case LEVEL_LOW:    return 2;
-            case LEVEL_MEDIUM: return 6;
-            case LEVEL_HIGH:   return 12;
+            case LEVEL_LOW:    return 15;
+            case LEVEL_MEDIUM: return 50;
+            case LEVEL_HIGH:   return 100;
             default:           return 0;
         }
     }
 
     public static float maxRadius() {
         switch (getLevel()) {
-            case LEVEL_LOW:    return 80f;
-            case LEVEL_MEDIUM: return 160f;
-            case LEVEL_HIGH:   return 320f;
+            case LEVEL_LOW:    return 120f;
+            case LEVEL_MEDIUM: return 240f;
+            case LEVEL_HIGH:   return 480f;
             default:           return 0f;
         }
     }
 
     public static float maxStrength() {
         switch (getLevel()) {
-            case LEVEL_LOW:    return 0.5f;
-            case LEVEL_MEDIUM: return 1f;
-            case LEVEL_HIGH:   return 2f;
+            case LEVEL_LOW:    return 0.8f;
+            case LEVEL_MEDIUM: return 1.5f;
+            case LEVEL_HIGH:   return 3f;
             default:           return 0f;
         }
     }
 
     public static int maxPerFrame() {
         switch (getLevel()) {
-            case LEVEL_LOW:    return 1;
-            case LEVEL_MEDIUM: return 2;
-            case LEVEL_HIGH:   return 5;
+            case LEVEL_LOW:    return 2;
+            case LEVEL_MEDIUM: return 5;
+            case LEVEL_HIGH:   return 10;
             default:           return 0;
         }
     }
