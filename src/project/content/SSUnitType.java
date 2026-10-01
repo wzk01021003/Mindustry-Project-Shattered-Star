@@ -84,6 +84,7 @@ import mindustry.world.meta.Env;
 
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
+import project.graphics.DistortionFx;
 
 import static mindustry.Vars.tilePayload;
 import static mindustry.Vars.tilesize;
@@ -1571,11 +1572,13 @@ public class SSUnitType {
                             heatColor = Color.valueOf("FFA665");
                             bullet = missiles;
 
-                            shoot = new ShootSpread() {{
-                                shots = 2;
-                                shotDelay = 0f;
-                                spread = 8f;
-                            }};
+                            shoot = new ShootSpread() {
+                                {
+                                    shots = 2;
+                                    shotDelay = 0f;
+                                    spread = 8f;
+                                }
+                            };
                         }
                     },
                     new Weapon("zenith-missiles") {
@@ -3241,30 +3244,33 @@ public class SSUnitType {
                                             }
                                         });
 
-                                    hitEffect = new Effect(50f, 100f, e -> {
-                                            e.scaled(7f, b -> {
-                                                    color(Pal.heal, b.fout());
-                                                    Fill.circle(e.x, e.y, rad);
-                                                });
+                                    hitEffect = new MultiEffect(
+                                        new Effect(50f, 100f, e -> {
+                                                e.scaled(7f, b -> {
+                                                        color(Pal.heal, b.fout());
+                                                        Fill.circle(e.x, e.y, rad);
+                                                    });
 
-                                            color(Pal.heal);
-                                            stroke(e.fout() * 3f);
-                                            Lines.circle(e.x, e.y, rad);
+                                                color(Pal.heal);
+                                                stroke(e.fout() * 3f);
+                                                Lines.circle(e.x, e.y, rad);
 
-                                            int points = 10;
-                                            float offset = Mathf.randomSeed(e.id, 360f);
-                                            for (int i = 0; i < points; i++) {
-                                                float angle = i * 360f / points + offset;
-                                                Drawf.tri(e.x + Angles.trnsx(angle, rad),
-                                                    e.y + Angles.trnsy(angle, rad),
-                                                    6f, 50f * e.fout(), angle);
-                                            }
+                                                int points = 10;
+                                                float offset = Mathf.randomSeed(e.id, 360f);
+                                                for (int i = 0; i < points; i++) {
+                                                    float angle = i * 360f / points + offset;
+                                                    Drawf.tri(e.x + Angles.trnsx(angle, rad),
+                                                        e.y + Angles.trnsy(angle, rad),
+                                                        6f, 50f * e.fout(), angle);
+                                                }
 
-                                            Fill.circle(e.x, e.y, 12f * e.fout());
-                                            color();
-                                            Fill.circle(e.x, e.y, 6f * e.fout());
-                                            Drawf.light(e.x, e.y, rad * 1.6f, Pal.heal, e.fout());
-                                        });
+                                                Fill.circle(e.x, e.y, 12f * e.fout());
+                                                color();
+                                                Fill.circle(e.x, e.y, 6f * e.fout());
+                                                Drawf.light(e.x, e.y, rad * 1.6f, Pal.heal, e.fout());
+                                            }),
+                                        DistortionFx.largeIonImpact
+                                    );
                                 }
                             };
                         }
