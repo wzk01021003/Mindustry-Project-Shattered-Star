@@ -2,7 +2,7 @@ package project.graphics;
 
 import arc.Core;
 import arc.Events;
-import arc.graphics.Color;
+import arc.graphics.Gl;
 import arc.graphics.g2d.Draw;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
@@ -15,7 +15,6 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    // 最大支持的同时扭曲效果数量
     public static final int MAX_GPU_SLOTS = 6;
 
     public static class Data {
@@ -31,8 +30,8 @@ public class DistortionRenderer {
     private static FrameBuffer buffer;
     private static Shader shader;
     private static boolean unsupported = false;
-    private static boolean capturing = false;
     private static boolean eventsRegistered = false;
+    private static int texW = -1, texH = -1;
 
     private static int addedThisFrame = 0;
     private static long lastFrameId = -1;
@@ -42,16 +41,10 @@ public class DistortionRenderer {
     private static int lastFps = 60;
     private static int downgrade = 0;
 
-    private static int bufW = -1, bufH = -1;
-
     public static void init() {
         if (eventsRegistered) return;
         eventsRegistered = true;
-        // 1. 在游戏逻辑更新时，维护扭曲列表和FPS统计
-        Events.run(Trigger.update, DistortionRenderer::onUpdate);
-        // 2. 在场景绘制开始前，绑定我们的FBO
-        Events.run(Trigger.preDraw, DistortionRenderer::onPreDraw);
-        // 3. 在场景绘制结束后，进行后处理并输出
+        Events.run(Trigger.update,   DistortionRenderer::onUpdate);
         Events.run(Trigger.postDraw, DistortionRenderer::onPostDraw);
     }
 
@@ -64,53 +57,33 @@ public class DistortionRenderer {
         updateActive();
     }
 
-    private static void onPreDraw() {
-        // 关键：没有活跃扭曲时，完全不干预渲染，保持游戏原生性能
-        if (unsupported || !SSSettings.enabled() || active.size == 0) {
-            capturing = false;
-            return;
-        }
-
-        try {
-            ensureInit();
-            if (unsupported) { capturing = false; return; }
-
-            int w = Core.graphics.getWidth();
-            int h = Core.graphics.getHeight();
-            if (w <= 0 || h <= 0) { capturing = false; return; }
-
-            if (bufW != w || bufH != h) {
-                buffer.resize(w, h);
-                bufW = w;
-                bufH = h;
-            }
-
-            // 提交上一帧的绘制，避免遗留内容混入
-            Draw.flush();
-            // 用不透明黑色清屏，避免alpha通道问题
-            buffer.begin(Color.black);
-            capturing = true;
-        } catch (Throwable t) {
-            Log.err("[ss-distort] preDraw 异常，已自动禁用", t);
-            unsupported = true;
-            capturing = false;
-            dispose();
-        }
-    }
-
     private static void onPostDraw() {
-        if (!capturing) return;
-        capturing = false;
+        if (unsupported || !SSSettings.enabled() || active.size == 0) return;
+
+        int w = Core.graphics.getWidth();
+        int h = Core.graphics.getHeight();
+        if (w <= 0 || h <= 0) return;
 
         try {
-            // 关键：将本帧所有绘制指令真正提交到FBO
-            Draw.flush();
-            buffer.end();
+            ensureInit(w, h);
 
+            // 1. 绑定我们自己的 texture 到 unit 0
+            int texId = buffer.getTexture().getTextureObjectHandle();
+            Gl.activeTexture(Gl.texture0);
+            Gl.bindTexture(Gl.texture2d, texId);
+
+            // 2. 从当前屏幕拷贝内容到我们的 texture。
+            //    只读 READ framebuffer（就是屏幕），不改绑定，因此不会
+            //    被 Mindustry 内部的 framebuffer 切换打断。
+            Gl.copyTexImage2D(Gl.texture2d, 0, Gl.rgba, 0, 0, w, h, 0);
+
+            // 3. 设置 uniform
             int slots = effectiveSlots();
 
-            float screenW = Core.graphics.getWidth();
-            float screenH = Core.graphics.getHeight();
+            shader.bind();
+            shader.setUniformi("u_count", slots);
+            shader.setUniformf("u_resolution", (float) w, (float) h);
+
             float camX = Core.camera.position.x;
             float camY = Core.camera.position.y;
             float camW = Core.camera.width;
@@ -119,18 +92,12 @@ public class DistortionRenderer {
             float[] d = new float[24];
             for (int i = 0; i < slots; i++) {
                 Data data = active.get(i);
-                d[i * 4]     = (data.position.x - camX) / camW * screenW + screenW / 2f;
-                d[i * 4 + 1] = (data.position.y - camY) / camH * screenH + screenH / 2f;
-                d[i * 4 + 2] = data.radius / camW * screenW;
+                d[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
+                d[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
+                d[i * 4 + 2] = data.radius / camW * w;
                 d[i * 4 + 3] = data.strength;
             }
 
-            // 切换到屏幕正交投影，绘制全屏四边形
-            Draw.proj(0f, 0f, screenW, screenH);
-            Draw.shader(shader);
-
-            shader.setUniformi("u_count", slots);
-            shader.setUniformf("u_resolution", screenW, screenH);
             shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
             shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
             shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
@@ -138,11 +105,9 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            Draw.color(Color.white);
-            Draw.rect(Draw.wrap(buffer.getTexture()),
-                screenW / 2f, screenH / 2f, screenW, screenH);
-            Draw.flush();
-            Draw.shader();
+            // 4. 用 ScreenQuad 把处理后的画面画满屏幕。
+            //    Draw.blit 内部走 batch 之外的路径，用 NDC 坐标直接绘制。
+            Draw.blit(buffer.getTexture(), shader);
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
@@ -154,48 +119,39 @@ public class DistortionRenderer {
         }
     }
 
-    private static void updateActive() {
-        for (int i = active.size - 1; i >= 0; i--) {
-            Data data = active.get(i);
-            data.elapsed += Time.delta;
-            if (data.elapsed >= data.lifetime) {
-                active.remove(i);
-                continue;
-            }
-            float t = 1f - data.elapsed / data.lifetime;
-            data.radius = data.maxRadius * t;
+    private static void ensureInit(int w, int h) {
+        // 尺寸变了 → 重建
+        if (buffer != null && (texW != w || texH != h)) {
+            buffer.dispose();
+            buffer = null;
         }
-    }
-
-    private static void ensureInit() {
-        if (buffer != null && shader != null) return;
-        if (Core.graphics == null) return;
-
-        int w = Core.graphics.getWidth();
-        int h = Core.graphics.getHeight();
-        if (w <= 0 || h <= 0) return;
 
         try {
-            buffer = new FrameBuffer(w, h);
-            shader = createShader();
-            bufW = w;
-            bufH = h;
+            if (buffer == null) {
+                // 只用来承载一个 texture；不使用它的 begin/end。
+                buffer = new FrameBuffer(w, h);
+                texW = w;
+                texH = h;
+            }
+            if (shader == null) {
+                shader = createShader();
+            }
         } catch (Throwable t) {
-            Log.err("[ss-distort] shader 创建失败", t);
+            Log.err("[ss-distort] 初始化失败", t);
             unsupported = true;
             dispose();
         }
     }
 
     private static Shader createShader() {
+        // 顶点：NDC 直通。ScreenQuad 传的 a_position 就是 NDC 坐标。
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
-            "uniform mat4 u_proj;\n" +
             "varying vec2 v_texCoords;\n" +
             "void main(){\n" +
             "    v_texCoords = a_texCoord0;\n" +
-            "    gl_Position = u_proj * a_position;\n" +
+            "    gl_Position = a_position;\n" +
             "}\n";
 
         String fragment =
@@ -237,6 +193,19 @@ public class DistortionRenderer {
             "}\n";
 
         return new Shader(vertex, fragment);
+    }
+
+    private static void updateActive() {
+        for (int i = active.size - 1; i >= 0; i--) {
+            Data data = active.get(i);
+            data.elapsed += Time.delta;
+            if (data.elapsed >= data.lifetime) {
+                active.remove(i);
+                continue;
+            }
+            float t = 1f - data.elapsed / data.lifetime;
+            data.radius = data.maxRadius * t;
+        }
     }
 
     public static void addDistortion(float x, float y, float radius, float strength, float lifetime) {
@@ -317,7 +286,7 @@ public class DistortionRenderer {
             shader.dispose();
             shader = null;
         }
-        bufW = bufH = -1;
+        texW = texH = -1;
     }
 
     public static int activeCount() {
