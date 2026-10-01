@@ -2,6 +2,7 @@ package project.graphics;
 
 import arc.Core;
 import arc.Events;
+import arc.graphics.Color;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
 import arc.math.geom.Vec2;
@@ -13,7 +14,8 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    public static final int MAX_GPU_SLOTS = 16;
+    // shader 里手写了 6 个独立 uniform，超过的丢弃
+    public static final int MAX_GPU_SLOTS = 6;
 
     public static class Data {
         public final Vec2 position = new Vec2();
@@ -24,44 +26,129 @@ public class DistortionRenderer {
     }
 
     private static final Seq<Data> active = new Seq<>();
+
     private static FrameBuffer buffer;
     private static Shader shader;
-    private static boolean initialized = false;
     private static boolean unsupported = false;
+    private static boolean capturing = false;
+    private static boolean eventsRegistered = false;
 
-    // 每帧添加计数器
     private static int addedThisFrame = 0;
     private static long lastFrameId = -1;
 
-    // 自动降级
     private static float fpsAccum = 0f;
     private static int fpsSamples = 0;
     private static int lastFps = 60;
     private static int downgrade = 0;
 
     public static void init() {
-        if (initialized || unsupported) return;
+        if (eventsRegistered) return;
+        eventsRegistered = true;
+        Events.run(Trigger.preDraw,  DistortionRenderer::onPreDraw);
+        Events.run(Trigger.postDraw, DistortionRenderer::onPostDraw);
+    }
 
-        Events.run(Trigger.draw, () -> {
-                if (unsupported || !SSSettings.enabled()) {
-                    active.clear();
-                    return;
-                }
-                try {
-                    ensureInit();
-                    if (unsupported) return;
-                    tickFps();
-                    renderPass();
-                } catch (Throwable t) {
-                    Log.err("[ss-distort] 运行异常，已自动禁用", t);
-                    unsupported = true;
-                    dispose();
-                }
-            });
+    private static void onPreDraw() {
+        if (unsupported || !SSSettings.enabled()) {
+            capturing = false;
+            active.clear();
+            return;
+        }
+
+        try {
+            ensureInit();
+            if (unsupported) {
+                capturing = false;
+                return;
+            }
+            tickFps();
+            updateActive();
+
+            int w = Core.graphics.getWidth();
+            int h = Core.graphics.getHeight();
+            if (w <= 0 || h <= 0) {
+                capturing = false;
+                return;
+            }
+
+            if (buffer.getWidth() != w || buffer.getHeight() != h) {
+                buffer.resize(w, h);
+            }
+
+            buffer.begin(Color.clear);
+            capturing = true;
+        } catch (Throwable t) {
+            Log.err("[ss-distort] preDraw 异常，已自动禁用", t);
+            unsupported = true;
+            capturing = false;
+            dispose();
+        }
+    }
+
+    private static void onPostDraw() {
+        if (!capturing) return;
+        capturing = false;
+
+        try {
+            buffer.end();
+
+            int slots = effectiveSlots();
+
+            shader.bind();
+            shader.setUniformi("u_count", slots);
+            shader.setUniform2f("u_resolution",
+                Core.graphics.getWidth(), Core.graphics.getHeight());
+
+            float screenW = Core.graphics.getWidth();
+            float screenH = Core.graphics.getHeight();
+            float camX = Core.camera.position.x;
+            float camY = Core.camera.position.y;
+            float camW = Core.camera.width;
+            float camH = Core.camera.height;
+
+            float[] d = new float[24]; // 6 * 4
+            for (int i = 0; i < slots; i++) {
+                Data data = active.get(i);
+                d[i * 4]     = (data.position.x - camX) / camW * screenW + screenW / 2f;
+                d[i * 4 + 1] = (data.position.y - camY) / camH * screenH + screenH / 2f;
+                d[i * 4 + 2] = data.radius / camW * screenW;
+                d[i * 4 + 3] = data.strength;
+            }
+
+            shader.setUniform4f("u_d0", d[0],  d[1],  d[2],  d[3]);
+            shader.setUniform4f("u_d1", d[4],  d[5],  d[6],  d[7]);
+            shader.setUniform4f("u_d2", d[8],  d[9],  d[10], d[11]);
+            shader.setUniform4f("u_d3", d[12], d[13], d[14], d[15]);
+            shader.setUniform4f("u_d4", d[16], d[17], d[18], d[19]);
+            shader.setUniform4f("u_d5", d[20], d[21], d[22], d[23]);
+
+            buffer.blit(shader);
+
+            if (SSSettings.showDebug()) {
+                Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
+            }
+        } catch (Throwable t) {
+            Log.err("[ss-distort] postDraw 异常，已自动禁用", t);
+            unsupported = true;
+            dispose();
+        }
+    }
+
+    private static void updateActive() {
+        for (int i = active.size - 1; i >= 0; i--) {
+            Data data = active.get(i);
+            data.elapsed += Time.delta;
+            if (data.elapsed >= data.lifetime) {
+                active.remove(i);
+                continue;
+            }
+            float t = 1f - data.elapsed / data.lifetime;
+            data.radius = data.maxRadius * t;
+        }
     }
 
     private static void ensureInit() {
-        if (initialized) return;
+        if (buffer != null && shader != null) return;
         if (Core.graphics == null) return;
 
         int w = Core.graphics.getWidth();
@@ -70,48 +157,90 @@ public class DistortionRenderer {
 
         try {
             buffer = new FrameBuffer(w, h);
-            // shader = createShader();  // 渲染管线还没接，暂时不用
-            initialized = true;
+            shader = createShader();
         } catch (Throwable t) {
+            Log.err("[ss-distort] shader 创建失败", t);
             unsupported = true;
             dispose();
         }
     }
 
-    // ============================================================
-    //  外部调用入口 —— 所有限制都在这里
-    // ============================================================
+    private static Shader createShader() {
+        String vertex =
+            "attribute vec4 a_position;\n" +
+            "attribute vec2 a_texCoord0;\n" +
+            "varying vec2 v_texCoords;\n" +
+            "void main(){\n" +
+            "    v_texCoords = a_texCoord0;\n" +
+            "    gl_Position = a_position;\n" +
+            "}\n";
+
+        String fragment =
+            "varying vec2 v_texCoords;\n" +
+            "uniform sampler2D u_texture;\n" +
+            "uniform vec2 u_resolution;\n" +
+            "uniform int u_count;\n" +
+            "uniform vec4 u_d0;\n" +
+            "uniform vec4 u_d1;\n" +
+            "uniform vec4 u_d2;\n" +
+            "uniform vec4 u_d3;\n" +
+            "uniform vec4 u_d4;\n" +
+            "uniform vec4 u_d5;\n" +
+            "\n" +
+            "vec2 applyDistort(vec2 screenPos, vec4 d){\n" +
+            "    vec2 diff = screenPos - d.xy;\n" +
+            "    float dist = length(diff);\n" +
+            "    if(dist < d.z && dist > 0.001){\n" +
+            "        float t = 1.0 - dist / d.z;\n" +
+            "        t = t * t;\n" +
+            "        return diff / dist * t * d.w * 20.0;\n" +
+            "    }\n" +
+            "    return vec2(0.0);\n" +
+            "}\n" +
+            "\n" +
+            "void main(){\n" +
+            "    vec2 uv = v_texCoords;\n" +
+            "    vec2 screenPos = uv * u_resolution;\n" +
+            "    vec2 offset = vec2(0.0);\n" +
+            "    if(u_count > 0) offset += applyDistort(screenPos, u_d0);\n" +
+            "    if(u_count > 1) offset += applyDistort(screenPos, u_d1);\n" +
+            "    if(u_count > 2) offset += applyDistort(screenPos, u_d2);\n" +
+            "    if(u_count > 3) offset += applyDistort(screenPos, u_d3);\n" +
+            "    if(u_count > 4) offset += applyDistort(screenPos, u_d4);\n" +
+            "    if(u_count > 5) offset += applyDistort(screenPos, u_d5);\n" +
+            "    vec2 distortedUv = uv + offset / u_resolution;\n" +
+            "    gl_FragColor = texture2D(u_texture, distortedUv);\n" +
+            "}\n";
+
+        return new Shader(vertex, fragment);
+    }
+
     public static void addDistortion(float x, float y, float radius, float strength, float lifetime) {
         if (!SSSettings.enabled() || unsupported) return;
 
-        // 1. 每帧数量上限
         resetFrameCounter();
         if (addedThisFrame >= SSSettings.maxPerFrame()) return;
         addedThisFrame++;
 
-        // 2. 数据健全性检查
         if (!Float.isFinite(x) || !Float.isFinite(y)
             || !Float.isFinite(radius) || !Float.isFinite(strength) || !Float.isFinite(lifetime)) return;
         if (radius <= 0f || strength <= 0f || lifetime <= 0f) return;
 
-        // 3. 数值 clamp
         radius   = Math.min(radius,   SSSettings.maxRadius());
         strength = Math.min(strength, SSSettings.maxStrength());
 
-        // 4. 屏幕外剔除
         if (SSSettings.cullOffscreen() && isOffscreen(x, y, radius)) return;
 
-        // 5. 并发数量上限，超出丢最旧
         int max = SSSettings.maxConcurrent();
         while (active.size >= max) active.remove(0);
 
-        Data d = new Data();
-        d.position.set(x, y);
-        d.maxRadius = d.radius = radius;
-        d.strength = strength;
-        d.lifetime = lifetime;
-        d.elapsed = 0f;
-        active.add(d);
+        Data data = new Data();
+        data.position.set(x, y);
+        data.maxRadius = data.radius = radius;
+        data.strength = strength;
+        data.lifetime = lifetime;
+        data.elapsed = 0f;
+        active.add(data);
     }
 
     private static void resetFrameCounter() {
@@ -131,9 +260,6 @@ public class DistortionRenderer {
         return Math.abs(x - cx) > hw || Math.abs(y - cy) > hh;
     }
 
-    // ============================================================
-    //  自动降级
-    // ============================================================
     private static void tickFps() {
         if (!SSSettings.autoDisable()) {
             downgrade = 0;
@@ -154,37 +280,10 @@ public class DistortionRenderer {
 
     private static int effectiveSlots() {
         int n = active.size;
-        if (downgrade >= 1) n = Math.min(n, 12);
-        if (downgrade >= 2) n = Math.min(n, 6);
-        if (downgrade >= 3) n = Math.min(n, 3);
+        if (downgrade >= 1) n = Math.min(n, 4);
+        if (downgrade >= 2) n = Math.min(n, 2);
+        if (downgrade >= 3) n = Math.min(n, 1);
         return Math.min(n, MAX_GPU_SLOTS);
-    }
-
-    // ============================================================
-    //  渲染
-    //  真正把 buffer 画回屏幕的那一步，需要你自己接。
-    // ============================================================
-    private static void renderPass() {
-        // 生命周期推进
-        for (int i = active.size - 1; i >= 0; i--) {
-            Data d = active.get(i);
-            d.elapsed += Time.delta;
-            if (d.elapsed >= d.lifetime) {
-                active.remove(i);
-                continue;
-            }
-            float t = 1f - d.elapsed / d.lifetime;
-            d.radius = d.maxRadius * t;
-        }
-
-        int slots = effectiveSlots();
-        if (slots == 0) return;
-
-        // TODO: 接渲染管线，把 buffer 内容用 shader 处理并画回屏幕
-
-        if (SSSettings.showDebug()) {
-            Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
-        }
     }
 
     public static void dispose() {
@@ -196,13 +295,13 @@ public class DistortionRenderer {
             shader.dispose();
             shader = null;
         }
-        initialized = false;
     }
 
     public static int activeCount() {
         return active.size;
     }
-    public static int currentFps()  {
+
+    public static int currentFps() {
         return lastFps;
     }
 }
