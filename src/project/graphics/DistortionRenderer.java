@@ -14,6 +14,7 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
+    // shader 里手写了 6 个独立 uniform，超过的丢弃
     public static final int MAX_GPU_SLOTS = 6;
 
     public static class Data {
@@ -168,10 +169,11 @@ public class DistortionRenderer {
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
+            "uniform mat4 u_proj;\n" +
             "varying vec2 v_texCoords;\n" +
             "void main(){\n" +
             "    v_texCoords = a_texCoord0;\n" +
-            "    gl_Position = a_position;\n" +
+            "    gl_Position = u_proj * a_position;\n" +
             "}\n";
 
         String fragment =
