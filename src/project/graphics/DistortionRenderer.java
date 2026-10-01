@@ -5,6 +5,7 @@ import arc.Events;
 import arc.graphics.Color;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
+import arc.math.Mat;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
@@ -16,13 +17,10 @@ public class DistortionRenderer {
 
     // ============================================================
     //  诊断模式：
-    //    0 = 正常运行（实验性扭曲）
+    //    0 = 正常运行
     //    1 = 无 shader，直接把 FBO 拷贝回屏幕
     //        画面正常 → FBO 抓取成功，问题在 shader
-    //        还是黑屏 → FBO 是空的，抓取时机有问题
-    //    2 = shader 输出纯红（不采样纹理）
-    //        全屏红 → shader 应用成功，问题在纹理采样
-    //        还是黑屏 → shader 没被应用
+    //        黑屏     → FBO 是空的，抓取时机有问题
     // ============================================================
     public static final int DEBUG_MODE = 0;
 
@@ -106,11 +104,6 @@ public class DistortionRenderer {
 
             int slots = effectiveSlots();
 
-            shader.bind();
-            shader.setUniformi("u_count", slots);
-            shader.setUniformf("u_resolution",
-                (float)Core.graphics.getWidth(), (float)Core.graphics.getHeight());
-
             float screenW = Core.graphics.getWidth();
             float screenH = Core.graphics.getHeight();
             float camX = Core.camera.position.x;
@@ -127,6 +120,16 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
             }
 
+            // 用 batch 路径绘制全屏 quad。
+            // 关键：临时把投影换成屏幕正交，画完再恢复。
+            Mat prevProj = Draw.proj().cpy();
+
+            Draw.flush();
+            Draw.proj().setOrtho(0f, 0f, screenW, screenH);
+
+            Draw.shader(shader);
+            shader.setUniformi("u_count", slots);
+            shader.setUniformf("u_resolution", screenW, screenH);
             shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
             shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
             shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
@@ -134,9 +137,14 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            // 用 blit(shader) —— Arc 官方方式。
-            // 它会自动绑定 FBO 的 texture 到 sampler，并设置好 NDC 坐标。
-            buffer.blit(shader);
+            Draw.color(Color.white);
+            Draw.rect(Draw.wrap(buffer.getTexture()),
+                screenW / 2f, screenH / 2f, screenW, screenH);
+
+            Draw.flush();
+            Draw.shader();
+            Draw.proj(prevProj);
+            Draw.flush();
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
@@ -180,28 +188,27 @@ public class DistortionRenderer {
     }
 
     private static Shader createShader() {
-        // 顶点着色器：直通 NDC，不做任何变换。
-        // FrameBuffer.blit(shader) 会传 NDC 坐标进来，直接输出即可。
+        // 标准 batch shader：用 u_proj 做投影。
+        // 我们临时把投影设为屏幕正交，u_proj 会被 batch 自动填上。
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
+            "uniform mat4 u_proj;\n" +
             "varying vec2 v_texCoords;\n" +
             "void main(){\n" +
             "    v_texCoords = a_texCoord0;\n" +
-            "    gl_Position = a_position;\n" +
+            "    gl_Position = u_proj * a_position;\n" +
             "}\n";
 
         String fragment;
 
         if (DEBUG_MODE == 2) {
-            // 诊断：纯红输出
             fragment =
                 "varying vec2 v_texCoords;\n" +
                 "void main(){\n" +
                 "    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n" +
                 "}\n";
         } else {
-            // 正常扭曲 fragment
             fragment =
                 "varying vec2 v_texCoords;\n" +
                 "uniform sampler2D u_texture;\n" +
