@@ -2,18 +2,15 @@ package project.graphics;
 
 import arc.Core;
 import arc.Events;
-import arc.graphics.Gl;
-import arc.graphics.Pixmap;
-import arc.graphics.Texture;
-import arc.graphics.Texture.TextureFilter;
-import arc.graphics.Texture.TextureWrap;
-import arc.graphics.g2d.Draw;
+import arc.graphics.Color;
+import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
 import mindustry.game.EventType.Trigger;
+import mindustry.graphics.Layer;
 import project.SSSettings;
 
 public class DistortionRenderer {
@@ -30,10 +27,10 @@ public class DistortionRenderer {
 
     private static final Seq<Data> active = new Seq<>();
 
-    // 独立的 texture，与任何 FBO 都无关
-    private static Texture screenTex;
+    private static FrameBuffer buffer;
     private static Shader shader;
     private static boolean unsupported = false;
+    private static boolean capturing = false;
     private static boolean eventsRegistered = false;
     private static int texW = -1, texH = -1;
 
@@ -48,8 +45,8 @@ public class DistortionRenderer {
     public static void init() {
         if (eventsRegistered) return;
         eventsRegistered = true;
-        Events.run(Trigger.update,   DistortionRenderer::onUpdate);
-        Events.run(Trigger.postDraw, DistortionRenderer::onPostDraw);
+        Events.run(Trigger.update, DistortionRenderer::onUpdate);
+        Events.run(Trigger.draw,   DistortionRenderer::onDrawEvent);
     }
 
     private static void onUpdate() {
@@ -61,40 +58,49 @@ public class DistortionRenderer {
         updateActive();
     }
 
-    private static void onPostDraw() {
+    // ============================================================
+    //  Trigger.draw 里我们把 capture/render 插入到场景绘制的正确时机。
+    //  这是 Bloom.java 的做法，能避免与 Mindustry 内部的 framebuffer
+    //  切换冲突。
+    // ============================================================
+    private static void onDrawEvent() {
         if (unsupported || !SSSettings.enabled() || active.size == 0) return;
 
+        // 在场景最前面开始捕获
+        Draw.draw(Layer.background - 1f, DistortionRenderer::beginCapture);
+        // 在 UI 之前结束捕获并渲染
+        Draw.draw(Layer.overlayUI - 1f, DistortionRenderer::endCaptureAndRender);
+    }
+
+    private static void beginCapture() {
         int w = Core.graphics.getWidth();
         int h = Core.graphics.getHeight();
         if (w <= 0 || h <= 0) return;
 
+        ensureInit(w, h);
+        if (unsupported) return;
+
         try {
-            ensureInit(w, h);
+            buffer.begin(Color.clear);
+            capturing = true;
+        } catch (Throwable t) {
+            Log.err("[ss-distort] beginCapture 异常", t);
+            unsupported = true;
+            capturing = false;
+        }
+    }
 
-            // ---- 关键修复 1：显式绑定默认屏幕 framebuffer ----
-            // Mindustry 在 postDraw 前可能还绑着 bloom 等的 FBO。
-            // 不绑定到 0，拷贝的就是错误的 buffer。
-            Gl.bindFramebuffer(Gl.framebuffer, 0);
+    private static void endCaptureAndRender() {
+        if (!capturing) return;
+        capturing = false;
 
-            // ---- 关键修复 2：用独立 texture，不用 FrameBuffer 的 ----
-            int texId = screenTex.getTextureObjectHandle();
-            Gl.activeTexture(Gl.texture0);
-            Gl.bindTexture(Gl.texture2d, texId);
-            Gl.copyTexImage2D(Gl.texture2d, 0, Gl.rgba, 0, 0, w, h, 0);
+        try {
+            buffer.end();
 
-            // 拷贝后重置 texture 参数（copyTexImage2D 可能改变默认值）
-            Gl.texParameteri(Gl.texture2d, Gl.textureMinFilter, Gl.linear);
-            Gl.texParameteri(Gl.texture2d, Gl.textureMagFilter, Gl.linear);
-            Gl.texParameteri(Gl.texture2d, Gl.textureWrapS, Gl.clampToEdge);
-            Gl.texParameteri(Gl.texture2d, Gl.textureWrapT, Gl.clampToEdge);
-
-            // 设置 uniform
             int slots = effectiveSlots();
 
-            shader.bind();
-            shader.setUniformi("u_count", slots);
-            shader.setUniformf("u_resolution", (float) w, (float) h);
-
+            float w = Core.graphics.getWidth();
+            float h = Core.graphics.getHeight();
             float camX = Core.camera.position.x;
             float camY = Core.camera.position.y;
             float camW = Core.camera.width;
@@ -109,6 +115,9 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
             }
 
+            shader.bind();
+            shader.setUniformi("u_count", slots);
+            shader.setUniformf("u_resolution", w, h);
             shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
             shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
             shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
@@ -116,33 +125,27 @@ public class DistortionRenderer {
             shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
             shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
-            // 用 ScreenQuad 把处理后的画面画满屏幕
-            Draw.blit(screenTex, shader);
+            // buffer.blit 会用 ScreenQuad 直接渲染，不走 batch
+            buffer.blit(shader);
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
             }
         } catch (Throwable t) {
-            Log.err("[ss-distort] postDraw 异常，已自动禁用", t);
+            Log.err("[ss-distort] endCaptureAndRender 异常", t);
             unsupported = true;
-            dispose();
         }
     }
 
     private static void ensureInit(int w, int h) {
-        if (screenTex != null && (texW != w || texH != h)) {
-            screenTex.dispose();
-            screenTex = null;
+        if (buffer != null && (texW != w || texH != h)) {
+            buffer.dispose();
+            buffer = null;
         }
 
         try {
-            if (screenTex == null) {
-                // 用一个空 Pixmap 创建 texture，与任何 FBO 无关
-                Pixmap pm = new Pixmap(w, h);
-                screenTex = new Texture(pm);
-                pm.dispose();
-                screenTex.setFilter(TextureFilter.linear, TextureFilter.linear);
-                screenTex.setWrap(TextureWrap.clampToEdge, TextureWrap.clampToEdge);
+            if (buffer == null) {
+                buffer = new FrameBuffer(w, h);
                 texW = w;
                 texH = h;
             }
@@ -152,11 +155,11 @@ public class DistortionRenderer {
         } catch (Throwable t) {
             Log.err("[ss-distort] 初始化失败", t);
             unsupported = true;
-            dispose();
         }
     }
 
     private static Shader createShader() {
+        // ScreenQuad 直接传 NDC 坐标，不需要 u_proj
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
@@ -290,9 +293,9 @@ public class DistortionRenderer {
     }
 
     public static void dispose() {
-        if (screenTex != null) {
-            screenTex.dispose();
-            screenTex = null;
+        if (buffer != null) {
+            buffer.dispose();
+            buffer = null;
         }
         if (shader != null) {
             shader.dispose();
