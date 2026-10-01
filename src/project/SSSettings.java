@@ -1,20 +1,20 @@
 package project;
 
 import arc.Core;
+import arc.scene.ui.TextButton;
+import arc.scene.ui.layout.Table;
 import arc.util.Log;
 import mindustry.Vars;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
 
 public class SSSettings {
 
-    // === 设置键 ===
     public static final String KEY_ENABLE       = "ss-render-enabled";
     public static final String KEY_LEVEL        = "ss-render-level";
     public static final String KEY_CULL         = "ss-render-cull";
     public static final String KEY_AUTO_DISABLE = "ss-render-autodisable";
     public static final String KEY_DEBUG        = "ss-render-debug";
 
-    // 等级：0=关 1=低 2=中 3=高
     public static final int LEVEL_OFF = 0, LEVEL_LOW = 1, LEVEL_MEDIUM = 2, LEVEL_HIGH = 3;
 
     private static boolean deviceSupported = true;
@@ -44,23 +44,26 @@ public class SSSettings {
         table.checkPref(KEY_AUTO_DISABLE, true);
         table.checkPref(KEY_DEBUG, false);
 
-        // 等级用按钮循环切换
-        arc.scene.ui.layout.Table levelRow = new arc.scene.ui.layout.Table();
-        levelRow.add("[lightgray]" + Core.bundle.get("ss-settings.level") + "[]").padRight(8f);
-        arc.scene.ui.TextButton b = levelRow.button("", () -> {
-                int l = (getLevel() + 1) % 4;
-                Core.settings.put(KEY_LEVEL, l);
-            }).get();
+        // 等级：用一个 Table 承载 [标签 + 按钮]
+        Table levelRow = new Table();
+        levelRow.add("[lightgray]" + Core.bundle.get("ss-settings.level", "Level") + "[]").padRight(8f);
+
+        TextButton b = levelRow.button(levelName(getLevel()), () -> {
+            int l = (getLevel() + 1) % 4;
+            Core.settings.put(KEY_LEVEL, l);
+        }).minWidth(120f).get();
+
         b.update(() -> b.setText(levelName(getLevel())));
-        table.add(levelRow).left().padBottom(4);
+
+        table.add(levelRow).left().padBottom(4).growX().row();
     }
 
     private static String levelName(int l) {
         switch (l) {
-            case LEVEL_LOW:    return Core.bundle.get("ss-settings.level.low");
-            case LEVEL_MEDIUM: return Core.bundle.get("ss-settings.level.medium");
-            case LEVEL_HIGH:   return Core.bundle.get("ss-settings.level.high");
-            default:           return Core.bundle.get("ss-settings.level.off");
+            case LEVEL_LOW:    return Core.bundle.get("ss-settings.level.low", "Low");
+            case LEVEL_MEDIUM: return Core.bundle.get("ss-settings.level.medium", "Medium");
+            case LEVEL_HIGH:   return Core.bundle.get("ss-settings.level.high", "High");
+            default:           return Core.bundle.get("ss-settings.level.off", "Off");
         }
     }
 
@@ -71,11 +74,12 @@ public class SSSettings {
                 deviceReason = "ss-settings.device.gl";
             }
         } catch (Throwable t) {
-            deviceSupported = true;
+            // 检测失败时保守处理，不强行开启
+            deviceSupported = false;
+            deviceReason = "ss-settings.device.gl";
         }
     }
 
-    // === 读取接口 ===
     public static boolean enabled() {
         return deviceSupported && Core.settings.getBool(KEY_ENABLE, false) && getLevel() != LEVEL_OFF;
     }
@@ -83,10 +87,12 @@ public class SSSettings {
     public static boolean cullOffscreen() {
         return Core.settings.getBool(KEY_CULL, true);
     }
-    public static boolean autoDisable()   {
+
+    public static boolean autoDisable() {
         return Core.settings.getBool(KEY_AUTO_DISABLE, true);
     }
-    public static boolean showDebug()     {
+
+    public static boolean showDebug() {
         return Core.settings.getBool(KEY_DEBUG, false);
     }
 
@@ -95,7 +101,6 @@ public class SSSettings {
         return (l < 0 || l > 3) ? LEVEL_MEDIUM : l;
     }
 
-    // === 各级别限制 ===
     public static int maxConcurrent() {
         switch (getLevel()) {
             case LEVEL_LOW:    return 2;

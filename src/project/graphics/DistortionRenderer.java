@@ -14,7 +14,6 @@ import project.SSSettings;
 
 public class DistortionRenderer {
 
-    // shader 里手写了 6 个独立 uniform，超过的丢弃
     public static final int MAX_GPU_SLOTS = 6;
 
     public static class Data {
@@ -96,8 +95,8 @@ public class DistortionRenderer {
 
             shader.bind();
             shader.setUniformi("u_count", slots);
-            shader.setUniform2f("u_resolution",
-                Core.graphics.getWidth(), Core.graphics.getHeight());
+            shader.setUniformf("u_resolution",
+                (float)Core.graphics.getWidth(), (float)Core.graphics.getHeight());
 
             float screenW = Core.graphics.getWidth();
             float screenH = Core.graphics.getHeight();
@@ -106,7 +105,7 @@ public class DistortionRenderer {
             float camW = Core.camera.width;
             float camH = Core.camera.height;
 
-            float[] d = new float[24]; // 6 * 4
+            float[] d = new float[24];
             for (int i = 0; i < slots; i++) {
                 Data data = active.get(i);
                 d[i * 4]     = (data.position.x - camX) / camW * screenW + screenW / 2f;
@@ -115,12 +114,12 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
             }
 
-            shader.setUniform4f("u_d0", d[0],  d[1],  d[2],  d[3]);
-            shader.setUniform4f("u_d1", d[4],  d[5],  d[6],  d[7]);
-            shader.setUniform4f("u_d2", d[8],  d[9],  d[10], d[11]);
-            shader.setUniform4f("u_d3", d[12], d[13], d[14], d[15]);
-            shader.setUniform4f("u_d4", d[16], d[17], d[18], d[19]);
-            shader.setUniform4f("u_d5", d[20], d[21], d[22], d[23]);
+            shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
+            shader.setUniformf("u_d1", d[4],  d[5],  d[6],  d[7]);
+            shader.setUniformf("u_d2", d[8],  d[9],  d[10], d[11]);
+            shader.setUniformf("u_d3", d[12], d[13], d[14], d[15]);
+            shader.setUniformf("u_d4", d[16], d[17], d[18], d[19]);
+            shader.setUniformf("u_d5", d[20], d[21], d[22], d[23]);
 
             buffer.blit(shader);
 
