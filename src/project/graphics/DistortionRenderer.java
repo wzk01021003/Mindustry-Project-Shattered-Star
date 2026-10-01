@@ -46,9 +46,7 @@ public class DistortionRenderer {
     public static void init() {
         if (eventsRegistered) return;
         eventsRegistered = true;
-        // update: 只做生命周期和 fps 统计，不抓 FBO
         Events.run(Trigger.update,  DistortionRenderer::onUpdate);
-        // preDraw: 只在有活跃扭曲时抓 FBO
         Events.run(Trigger.preDraw,  DistortionRenderer::onPreDraw);
         Events.run(Trigger.postDraw, DistortionRenderer::onPostDraw);
     }
@@ -63,7 +61,6 @@ public class DistortionRenderer {
     }
 
     private static void onPreDraw() {
-        // 关键：没东西要扭曲，不抓 FBO
         if (unsupported || !SSSettings.enabled() || active.size == 0) {
             capturing = false;
             return;
@@ -83,7 +80,8 @@ public class DistortionRenderer {
                 bufH = h;
             }
 
-            buffer.begin(Color.clear);
+            // 用不透明黑清屏，避免 alpha=0 被混合掉
+            buffer.begin(Color.black);
             capturing = true;
         } catch (Throwable t) {
             Log.err("[ss-distort] preDraw 异常，已自动禁用", t);
@@ -225,7 +223,8 @@ public class DistortionRenderer {
             "    if(u_count > 4) offset += applyDistort(screenPos, u_d4);\n" +
             "    if(u_count > 5) offset += applyDistort(screenPos, u_d5);\n" +
             "    vec2 distortedUv = uv + offset / u_resolution;\n" +
-            "    gl_FragColor = texture2D(u_texture, distortedUv);\n" +
+            "    vec4 c = texture2D(u_texture, distortedUv);\n" +
+            "    gl_FragColor = vec4(c.rgb, 1.0);\n" +
             "}\n";
 
         return new Shader(vertex, fragment);
