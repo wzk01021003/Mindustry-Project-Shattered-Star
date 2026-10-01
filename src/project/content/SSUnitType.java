@@ -790,7 +790,7 @@ public class SSUnitType {
         // ============================================================
         corvusR = new GlowLegsUnitType("corvus-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 hitSize = 29f;
                 health = 18000f;
                 armor = 14f;
@@ -947,7 +947,7 @@ public class SSUnitType {
         // ============================================================
         atraxR = new GlowLegsUnitType("atrax-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.6f;
                 drag = 0.4f;
                 hitSize = 13f;
@@ -1003,7 +1003,7 @@ public class SSUnitType {
         // ============================================================
         spiroctR = new GlowLegsUnitType("spiroct-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.7f;
                 drag = 0.4f;
                 hitSize = 15f;
@@ -1086,7 +1086,7 @@ public class SSUnitType {
         // ============================================================
         arkyidR = new GlowLegsUnitType("arkyid-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 drag = 0.1f;
                 speed = 0.65f;
                 hitSize = 23f;
@@ -1211,7 +1211,7 @@ public class SSUnitType {
         // ============================================================
         toxopidR = new GlowLegsUnitType("toxopid-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 drag = 0.1f;
                 speed = 0.65f;
                 hitSize = 26f;
@@ -1930,7 +1930,7 @@ public class SSUnitType {
         // ============================================================
         megaR = new UnitType("mega-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 defaultCommand = UnitCommand.repairCommand;
                 mineTier = 3;
                 mineSpeed = 4.5f;
@@ -2001,7 +2001,7 @@ public class SSUnitType {
         // ============================================================
         quadR = new UnitType("quad-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 armor = 10f;
                 health = 6000f;
                 speed = 1.2f;
@@ -2074,7 +2074,7 @@ public class SSUnitType {
         // ============================================================
         octR = new UnitType("oct-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 aiController = DefenderAI::new;
                 armor = 20f;
                 health = 24000f;
@@ -2153,7 +2153,7 @@ public class SSUnitType {
         // ============================================================
         rissoR = new UnitType("risso-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 speed = 1.1f;
                 drag = 0.13f;
                 hitSize = 10f;
@@ -2234,7 +2234,7 @@ public class SSUnitType {
         // ============================================================
         minkeR = new UnitType("minke-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 600f;
                 speed = 0.9f;
                 drag = 0.15f;
@@ -2319,7 +2319,7 @@ public class SSUnitType {
         // ============================================================
         brydeR = new UnitType("bryde-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 910f;
                 speed = 0.85f;
                 accel = 0.2f;
@@ -2430,7 +2430,7 @@ public class SSUnitType {
         // ============================================================
         seiR = new UnitType("sei-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 11000f;
                 armor = 12f;
 
@@ -2538,7 +2538,7 @@ public class SSUnitType {
         // ============================================================
         omuraR = new UnitType("omura-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 22000f;
                 speed = 0.62f;
                 drag = 0.18f;
@@ -2640,7 +2640,7 @@ public class SSUnitType {
         // ============================================================
         retusaR = new UnitType("retusa-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 speed = 0.9f;
                 drag = 0.14f;
                 hitSize = 11f;
@@ -2769,7 +2769,7 @@ public class SSUnitType {
         // ============================================================
         oxynoeR = new UnitType("oxynoe-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 560f;
                 speed = 0.83f;
                 drag = 0.14f;
@@ -2857,7 +2857,7 @@ public class SSUnitType {
         // ============================================================
         cyerceR = new UnitType("cyerce-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 870f;
                 speed = 0.86f;
                 accel = 0.22f;
@@ -3016,7 +3016,7 @@ public class SSUnitType {
         // ============================================================
         aegiresR = new UnitType("aegires-r") {
             {
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 12000f;
                 armor = 12f;
 
@@ -3084,7 +3084,7 @@ public class SSUnitType {
         navanaxR = new UnitType("navanax-r") {
             {
                 // ============ 基础 ============
-                constructor = UnitWaterMove::create
+                constructor = UnitWaterMove::create;
                 health = 20000f;
                 speed = 0.65f;
                 drag = 0.17f;
@@ -3523,7 +3523,7 @@ public class SSUnitType {
         // ============================================================
         stellR = new TankUnitType("stell-r") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 12f;
                 treadPullOffset = 3;
                 speed = 0.75f;
@@ -3579,7 +3579,7 @@ public class SSUnitType {
         // ============================================================
         locusR = new TankUnitType("locus-r") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 18f;
                 treadPullOffset = 5;
                 speed = 0.7f;
@@ -3641,7 +3641,7 @@ public class SSUnitType {
         // ============================================================
         preceptR = new TankUnitType("precept-r") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 24f;
                 treadPullOffset = 5;
                 speed = 0.64f;
@@ -3730,7 +3730,7 @@ public class SSUnitType {
         // ============================================================
         vanquishR = new TankUnitType("vanquish-r") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 28f;
                 treadPullOffset = 4;
                 speed = 0.63f;
@@ -3860,7 +3860,7 @@ public class SSUnitType {
         // ============================================================
         conquerR = new TankUnitType("conquer-r") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 46f;
                 treadPullOffset = 1;
                 speed = 0.48f;
@@ -3984,7 +3984,7 @@ public class SSUnitType {
         // ============================================================
         eludeR = new UnitType("elude-r") {
             {
-                constructor = ElevationMoveUnit::create
+                constructor = ElevationMoveUnit::create;
                 hovering = true;
                 canDrown = false;
                 shadowElevation = 0.1f;
@@ -4285,7 +4285,7 @@ public class SSUnitType {
         // ============================================================
         quellR = new UnitType("quell-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 lowAltitude = false;
                 flying = true;
                 drag = 0.06f;
@@ -4407,7 +4407,7 @@ public class SSUnitType {
         // ============================================================
         disruptR = new UnitType("disrupt-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 lowAltitude = false;
                 flying = true;
                 drag = 0.07f;
@@ -4592,7 +4592,7 @@ public class SSUnitType {
         // ============================================================
         meruiR = new GlowErekirLegsUnitType("merui-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.72f;
                 drag = 0.11f;
                 hitSize = 9f;
@@ -4689,7 +4689,7 @@ public class SSUnitType {
         // ============================================================
         cleroiR = new GlowErekirLegsUnitType("cleroi-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.6f;
                 drag = 0.1f;
                 hitSize = 14f;
@@ -4818,7 +4818,7 @@ public class SSUnitType {
         // ============================================================
         anthicusR = new GlowErekirLegsUnitType("anthicus-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.65f;
                 drag = 0.1f;
                 hitSize = 21f;
@@ -5009,7 +5009,7 @@ public class SSUnitType {
         // ============================================================
         tectaR = new GlowErekirLegsUnitType("tecta-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 drag = 0.1f;
                 speed = 0.6f;
                 hitSize = 30f;
@@ -5129,7 +5129,7 @@ public class SSUnitType {
         // ============================================================
         collarisR = new GlowErekirLegsUnitType("collaris-r") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 drag = 0.1f;
                 speed = 1.1f;
                 hitSize = 44f;
@@ -5326,7 +5326,7 @@ public class SSUnitType {
         // ============================================================
         manifoldR = new ErekirUnitType("manifold-r") {
             {
-                constructor = BuildingTetherPayloadUnit::create
+                constructor = BuildingTetherPayloadUnit::create;
                 controller = u -> new CargoAI();
                 isEnemy = false;
                 allowedInPayloads = false;
@@ -5362,7 +5362,7 @@ public class SSUnitType {
         // ============================================================
         assemblyDroneR = new ErekirUnitType("assembly-drone-r") {
             {
-                constructor = BuildingTetherPayloadUnit::create
+                constructor = BuildingTetherPayloadUnit::create;
                 controller = u -> new AssemblerAI();
 
                 flying = true;
@@ -5582,7 +5582,7 @@ public class SSUnitType {
         // ============================================================
         evokeR = new ErekirUnitType("evoke-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 coreUnitDock = true;
                 controller = u -> new BuilderAI(true, 500f);
                 isEnemy = false;
@@ -5658,7 +5658,7 @@ public class SSUnitType {
         // ============================================================
         inciteR = new ErekirUnitType("incite-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 coreUnitDock = true;
                 controller = u -> new BuilderAI(true, 500f);
                 isEnemy = false;
@@ -5749,7 +5749,7 @@ public class SSUnitType {
         // ============================================================
         emanateR = new ErekirUnitType("emanate-r") {
             {
-                constructor = PayloadUnit::create
+                constructor = PayloadUnit::create;
                 coreUnitDock = true;
                 controller = u -> new BuilderAI(true, 500f);
                 isEnemy = false;
@@ -5830,7 +5830,7 @@ public class SSUnitType {
         // ============================================================
         stellSerpulo = new TankUnitType("stell-serpulo") {
             {
-                constructor = TankUnit::create
+                constructor = TankUnit::create;
                 hitSize = 12f;
                 treadPullOffset = 3;
                 speed = 0.75f;
@@ -5890,7 +5890,7 @@ public class SSUnitType {
         // ============================================================
         eludeSerpulo = new UnitType("elude-serpulo") {
             {
-                constructor = ElevationMoveUnit::create
+                constructor = ElevationMoveUnit::create;
                 hovering = true;
                 canDrown = false;
                 shadowElevation = 0.1f;
@@ -5991,7 +5991,7 @@ public class SSUnitType {
         // ============================================================
         meruiSerpulo = new GlowErekirLegsUnitType("merui-serpulo") {
             {
-                constructor = LegsUnit::create
+                constructor = LegsUnit::create;
                 speed = 0.72f;
                 drag = 0.11f;
                 hitSize = 9f;
