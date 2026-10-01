@@ -5,7 +5,6 @@ import arc.Events;
 import arc.graphics.Color;
 import arc.graphics.gl.FrameBuffer;
 import arc.graphics.gl.Shader;
-import arc.math.Mat;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
@@ -14,15 +13,6 @@ import mindustry.game.EventType.Trigger;
 import project.SSSettings;
 
 public class DistortionRenderer {
-
-    // ============================================================
-    //  诊断模式：
-    //    0 = 正常运行
-    //    1 = 无 shader，直接把 FBO 拷贝回屏幕
-    //        画面正常 → FBO 抓取成功，问题在 shader
-    //        黑屏     → FBO 是空的，抓取时机有问题
-    // ============================================================
-    public static final int DEBUG_MODE = 0;
 
     public static final int MAX_GPU_SLOTS = 6;
 
@@ -63,7 +53,6 @@ public class DistortionRenderer {
             active.clear();
             return;
         }
-
         try {
             ensureInit();
             if (unsupported) { capturing = false; return; }
@@ -95,13 +84,6 @@ public class DistortionRenderer {
         try {
             buffer.end();
 
-            // ---- 诊断模式 1：无 shader 直接拷贝 ----
-            if (DEBUG_MODE == 1) {
-                buffer.blit();
-                if (SSSettings.showDebug()) Log.info("[ss-distort] debug=1 (raw blit)");
-                return;
-            }
-
             int slots = effectiveSlots();
 
             float screenW = Core.graphics.getWidth();
@@ -120,14 +102,10 @@ public class DistortionRenderer {
                 d[i * 4 + 3] = data.strength;
             }
 
-            // 用 batch 路径绘制全屏 quad。
-            // 关键：临时把投影换成屏幕正交，画完再恢复。
-            Mat prevProj = Draw.proj().cpy();
-
             Draw.flush();
-            Draw.proj().setOrtho(0f, 0f, screenW, screenH);
-
+            Draw.proj(0f, 0f, screenW, screenH);
             Draw.shader(shader);
+
             shader.setUniformi("u_count", slots);
             shader.setUniformf("u_resolution", screenW, screenH);
             shader.setUniformf("u_d0", d[0],  d[1],  d[2],  d[3]);
@@ -140,11 +118,8 @@ public class DistortionRenderer {
             Draw.color(Color.white);
             Draw.rect(Draw.wrap(buffer.getTexture()),
                 screenW / 2f, screenH / 2f, screenW, screenH);
-
             Draw.flush();
             Draw.shader();
-            Draw.proj(prevProj);
-            Draw.flush();
 
             if (SSSettings.showDebug()) {
                 Log.info("[ss-distort] slots=" + slots + " fps=" + lastFps + " downgrade=" + downgrade);
@@ -188,8 +163,6 @@ public class DistortionRenderer {
     }
 
     private static Shader createShader() {
-        // 标准 batch shader：用 u_proj 做投影。
-        // 我们临时把投影设为屏幕正交，u_proj 会被 batch 自动填上。
         String vertex =
             "attribute vec4 a_position;\n" +
             "attribute vec2 a_texCoord0;\n" +
@@ -200,52 +173,42 @@ public class DistortionRenderer {
             "    gl_Position = u_proj * a_position;\n" +
             "}\n";
 
-        String fragment;
-
-        if (DEBUG_MODE == 2) {
-            fragment =
-                "varying vec2 v_texCoords;\n" +
-                "void main(){\n" +
-                "    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n" +
-                "}\n";
-        } else {
-            fragment =
-                "varying vec2 v_texCoords;\n" +
-                "uniform sampler2D u_texture;\n" +
-                "uniform vec2 u_resolution;\n" +
-                "uniform int u_count;\n" +
-                "uniform vec4 u_d0;\n" +
-                "uniform vec4 u_d1;\n" +
-                "uniform vec4 u_d2;\n" +
-                "uniform vec4 u_d3;\n" +
-                "uniform vec4 u_d4;\n" +
-                "uniform vec4 u_d5;\n" +
-                "\n" +
-                "vec2 applyDistort(vec2 screenPos, vec4 d){\n" +
-                "    vec2 diff = screenPos - d.xy;\n" +
-                "    float dist = length(diff);\n" +
-                "    if(dist < d.z && dist > 0.001){\n" +
-                "        float t = 1.0 - dist / d.z;\n" +
-                "        t = t * t;\n" +
-                "        return diff / dist * t * d.w * 20.0;\n" +
-                "    }\n" +
-                "    return vec2(0.0);\n" +
-                "}\n" +
-                "\n" +
-                "void main(){\n" +
-                "    vec2 uv = v_texCoords;\n" +
-                "    vec2 screenPos = uv * u_resolution;\n" +
-                "    vec2 offset = vec2(0.0);\n" +
-                "    if(u_count > 0) offset += applyDistort(screenPos, u_d0);\n" +
-                "    if(u_count > 1) offset += applyDistort(screenPos, u_d1);\n" +
-                "    if(u_count > 2) offset += applyDistort(screenPos, u_d2);\n" +
-                "    if(u_count > 3) offset += applyDistort(screenPos, u_d3);\n" +
-                "    if(u_count > 4) offset += applyDistort(screenPos, u_d4);\n" +
-                "    if(u_count > 5) offset += applyDistort(screenPos, u_d5);\n" +
-                "    vec2 distortedUv = uv + offset / u_resolution;\n" +
-                "    gl_FragColor = texture2D(u_texture, distortedUv);\n" +
-                "}\n";
-        }
+        String fragment =
+            "varying vec2 v_texCoords;\n" +
+            "uniform sampler2D u_texture;\n" +
+            "uniform vec2 u_resolution;\n" +
+            "uniform int u_count;\n" +
+            "uniform vec4 u_d0;\n" +
+            "uniform vec4 u_d1;\n" +
+            "uniform vec4 u_d2;\n" +
+            "uniform vec4 u_d3;\n" +
+            "uniform vec4 u_d4;\n" +
+            "uniform vec4 u_d5;\n" +
+            "\n" +
+            "vec2 applyDistort(vec2 screenPos, vec4 d){\n" +
+            "    vec2 diff = screenPos - d.xy;\n" +
+            "    float dist = length(diff);\n" +
+            "    if(dist < d.z && dist > 0.001){\n" +
+            "        float t = 1.0 - dist / d.z;\n" +
+            "        t = t * t;\n" +
+            "        return diff / dist * t * d.w * 20.0;\n" +
+            "    }\n" +
+            "    return vec2(0.0);\n" +
+            "}\n" +
+            "\n" +
+            "void main(){\n" +
+            "    vec2 uv = v_texCoords;\n" +
+            "    vec2 screenPos = uv * u_resolution;\n" +
+            "    vec2 offset = vec2(0.0);\n" +
+            "    if(u_count > 0) offset += applyDistort(screenPos, u_d0);\n" +
+            "    if(u_count > 1) offset += applyDistort(screenPos, u_d1);\n" +
+            "    if(u_count > 2) offset += applyDistort(screenPos, u_d2);\n" +
+            "    if(u_count > 3) offset += applyDistort(screenPos, u_d3);\n" +
+            "    if(u_count > 4) offset += applyDistort(screenPos, u_d4);\n" +
+            "    if(u_count > 5) offset += applyDistort(screenPos, u_d5);\n" +
+            "    vec2 distortedUv = uv + offset / u_resolution;\n" +
+            "    gl_FragColor = texture2D(u_texture, distortedUv);\n" +
+            "}\n";
 
         return new Shader(vertex, fragment);
     }
@@ -300,14 +263,12 @@ public class DistortionRenderer {
             downgrade = 0;
             return;
         }
-
         fpsAccum += Time.delta;
         fpsSamples++;
         if (fpsSamples >= 30) {
             lastFps = (int) (30f / Math.max(fpsAccum, 0.0001f));
             fpsAccum = 0;
             fpsSamples = 0;
-
             if (lastFps < 25 && downgrade < 3) downgrade++;
             else if (lastFps > 45 && downgrade > 0) downgrade--;
         }
