@@ -3298,52 +3298,31 @@ public class SSUnitType {
                                     );
 
                                     hitEffect = new MultiEffect(
-                                        new WaveEffect() {
-                                            {
-                                                colorFrom = Pal.heal;
-                                                colorTo = Pal.heal;
-                                                sizeFrom = 100f;
-                                                sizeTo = 100f;
-                                                strokeFrom = 3f;
-                                                strokeTo = 0f;
-                                                lifetime = 50f;
-                                            }
-                                        },
-                                        new ParticleEffect() {
-                                            {
-                                                particles = 20;
-                                                colorFrom = Pal.heal;
-                                                colorTo = Color.white;
-                                                sizeFrom = 4f;
-                                                sizeTo = 0f;
-                                                lifetime = 40f;
-                                                length = 15f;
-                                                cone = 360f;
-                                            }
-                                        },
-                                        new WaveEffect() {
-                                            {
-                                                colorFrom = Color.white;
-                                                colorTo = Color.valueOf("ffffff00");
-                                                sizeFrom = 8f;
-                                                sizeTo = 8f;
-                                                strokeFrom = 0f;
-                                                strokeTo = 0f;
-                                                lifetime = 20f;
-                                            }
-                                        },
-                                        new ParticleEffect() {
-                                            {
-                                                particles = 10;
-                                                colorFrom = Pal.heal;
-                                                colorTo = Color.white;
-                                                sizeFrom = 4f;
-                                                sizeTo = 0f;
-                                                lifetime = 30f;
-                                                length = 50f;
-                                                cone = 360f;
-                                            }
-                                        }
+                                        new Effect(50f, 100f, e -> {
+                                                e.scaled(7f, b -> {
+                                                        color(Pal.heal, b.fout());
+                                                        Fill.circle(e.x, e.y, 100f);
+                                                    });
+
+                                                color(Pal.heal);
+                                                stroke(e.fout() * 3f);
+                                                Lines.circle(e.x, e.y, 100f);
+
+                                                int points = 10;
+                                                float offset = Mathf.randomSeed(e.id, 360f);
+                                                for (int i = 0; i < points; i++) {
+                                                    float angle = i * 360f / points + offset;
+                                                    Drawf.tri(e.x + Angles.trnsx(angle, 100f),
+                                                        e.y + Angles.trnsy(angle, 100f),
+                                                        6f, 50f * e.fout(), angle);
+                                                }
+
+                                                Fill.circle(e.x, e.y, 12f * e.fout());
+                                                color();
+                                                Fill.circle(e.x, e.y, 6f * e.fout());
+                                                Drawf.light(e.x, e.y, 100f * 1.6f, Pal.heal, e.fout());
+                                            }),
+                                        DistortionFx.largeIonImpact
                                     );
                                 }
                             };
