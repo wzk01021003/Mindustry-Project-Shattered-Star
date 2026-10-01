@@ -41,31 +41,46 @@ public class DistortionRenderer {
     private static int lastFps = 60;
     private static int downgrade = 0;
 
+    private static int bufW = -1, bufH = -1;
+
     public static void init() {
         if (eventsRegistered) return;
         eventsRegistered = true;
+        // update: 只做生命周期和 fps 统计，不抓 FBO
+        Events.run(Trigger.update,  DistortionRenderer::onUpdate);
+        // preDraw: 只在有活跃扭曲时抓 FBO
         Events.run(Trigger.preDraw,  DistortionRenderer::onPreDraw);
         Events.run(Trigger.postDraw, DistortionRenderer::onPostDraw);
     }
 
-    private static void onPreDraw() {
+    private static void onUpdate() {
         if (unsupported || !SSSettings.enabled()) {
-            capturing = false;
             active.clear();
             return;
         }
+        tickFps();
+        updateActive();
+    }
+
+    private static void onPreDraw() {
+        // 关键：没东西要扭曲，不抓 FBO
+        if (unsupported || !SSSettings.enabled() || active.size == 0) {
+            capturing = false;
+            return;
+        }
+
         try {
             ensureInit();
             if (unsupported) { capturing = false; return; }
-            tickFps();
-            updateActive();
 
             int w = Core.graphics.getWidth();
             int h = Core.graphics.getHeight();
             if (w <= 0 || h <= 0) { capturing = false; return; }
 
-            if (buffer.getWidth() != w || buffer.getHeight() != h) {
+            if (bufW != w || bufH != h) {
                 buffer.resize(w, h);
+                bufW = w;
+                bufH = h;
             }
 
             buffer.begin(Color.clear);
@@ -156,6 +171,8 @@ public class DistortionRenderer {
         try {
             buffer = new FrameBuffer(w, h);
             shader = createShader();
+            bufW = w;
+            bufH = h;
         } catch (Throwable t) {
             Log.err("[ss-distort] shader 创建失败", t);
             unsupported = true;
@@ -292,6 +309,7 @@ public class DistortionRenderer {
             shader.dispose();
             shader = null;
         }
+        bufW = bufH = -1;
     }
 
     public static int activeCount() {
