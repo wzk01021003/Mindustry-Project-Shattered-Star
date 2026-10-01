@@ -103,15 +103,15 @@ public class ShatteredStarMod extends Mod {
 
         // ============ 4. 全局出厂指令给予 ============
         Events.on(UnitCreateEvent.class, e -> {
-            if (!globalFactoryCommandEnabled) return;
-            if (globalFactoryCommand == null) return;
-            if (e.spawner == null) return;
-            if (e.unit == null) return;
-            if (!e.unit.isCommandable()) return;
-            if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
+                if (!globalFactoryCommandEnabled) return;
+                if (globalFactoryCommand == null) return;
+                if (e.spawner == null) return;
+                if (e.unit == null) return;
+                if (!e.unit.isCommandable()) return;
+                if (!e.unit.type.commands.contains(globalFactoryCommand)) return;
 
-            e.unit.command().command(globalFactoryCommand);
-        });
+                e.unit.command().command(globalFactoryCommand);
+            });
     }
 
     private static void register(UnitCommand cmd) {
