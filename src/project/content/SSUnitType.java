@@ -3315,7 +3315,11 @@ public class SSUnitType {
                                                 Fill.circle(e.x, e.y, 6f * e.fout());
                                                 Drawf.light(e.x, e.y, 100f * 1.6f, Pal.heal, e.fout());
                                             }),
-                                        DistortionFx.shockwaveRing
+                                        new DistortionFx(280f, 2.0f, 60f,
+                                            DistortionFx.TYPE_OUTWARD,
+                                            0f, 1f,
+                                            0.15f,
+                                            Interp.pow3Out)
                                     );
                                 }
                             };
