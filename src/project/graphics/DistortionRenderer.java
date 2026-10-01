@@ -10,6 +10,8 @@ import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
+import arc.math.Interp;
+import arc.math.Mathf;
 import mindustry.game.EventType.Trigger;
 import mindustry.graphics.Layer;
 import project.SSSettings;

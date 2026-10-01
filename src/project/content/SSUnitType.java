@@ -3315,7 +3315,7 @@ public class SSUnitType {
                                                 Fill.circle(e.x, e.y, 6f * e.fout());
                                                 Drawf.light(e.x, e.y, 100f * 1.6f, Pal.heal, e.fout());
                                             }),
-                                        DistortionFx.largeIonImpact
+                                        new DistortionFx(150f, 1.5f, 40f, DistortionFx.TYPE_INWARD, 1f, 0f, Interp.pow3In)
                                     );
                                 }
                             };
