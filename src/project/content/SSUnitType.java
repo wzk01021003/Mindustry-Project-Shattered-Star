@@ -3049,7 +3049,6 @@ public class SSUnitType {
         // ============================================================
         navanaxR = new UnitType("navanax-r") {
             {
-
                 // ============ 基础 ============
                 health = 20000f;
                 speed = 0.65f;
@@ -3073,8 +3072,7 @@ public class SSUnitType {
                 rotateToBuilding = false;
 
                 // ============================================================
-                //  内嵌 plasma-missile 单位
-                //  （只在 navanaxR 构造时 new 一次，自动注册到 content）
+                //  内嵌 plasma-missile 单位（保持不变）
                 // ============================================================
                 MissileUnitType plasmaMissile = new MissileUnitType("plasma-missile") {
                     {
@@ -3188,25 +3186,25 @@ public class SSUnitType {
                 };
 
                 // ============================================================
-                //  EMP 主炮
+                //  EMP 主炮 —— 参数按 JSON
                 // ============================================================
                 weapons.add(new Weapon("emp-cannon-mount") {
                         {
                             rotate = true;
-                            x = 70f / 4f;
-                            y = -26f / 4f;
-                            reload = 65f;
+                            x = 17.5f;
+                            y = -6.5f;
+                            reload = 30f;
                             shake = 3f;
-                            rotateSpeed = 2f;
+                            rotateSpeed = 3f;
                             shadow = 30f;
                             shootY = 7f;
                             recoil = 4f;
-                            cooldownTime = reload - 10f;
+                            cooldownTime = 30f;
                             shootSound = Sounds.shootNavanax;
 
                             bullet = new EmpBulletType() {
                                 {
-                                    float rad = 100f;
+                                    float rad = 104f;
 
                                     scaleLife = true;
                                     lightOpacity = 0.7f;
@@ -3215,63 +3213,102 @@ public class SSUnitType {
                                     timeIncrease = 3f;
                                     timeDuration = 60f * 20f;
                                     powerDamageScl = 3f;
-                                    damage = 110f;
+                                    damage = 40f;
                                     hitColor = lightColor = Pal.heal;
                                     lightRadius = 70f;
-                                    clipSize = 250f;
                                     shootEffect = Fx.hitEmpSpark;
                                     smokeEffect = Fx.shootBigSmoke2;
-                                    lifetime = 60f;
+                                    lifetime = 30f;
                                     sprite = "circle-bullet";
                                     backColor = Pal.heal;
                                     frontColor = Color.white;
                                     width = height = 12f;
                                     shrinkY = 0f;
-                                    speed = 5f;
+                                    speed = 10f;
                                     trailLength = 20;
                                     trailWidth = 6f;
                                     trailColor = Pal.heal;
                                     trailInterval = 3f;
-                                    splashDamage = 110f;
+                                    splashDamage = 50f;
                                     splashDamageRadius = rad;
                                     hitShake = 4f;
                                     trailRotation = true;
                                     status = StatusEffects.electrified;
                                     hitSound = Sounds.explosionNavanax;
 
-                                    trailEffect = new Effect(16f, e -> {
-                                            color(Pal.heal);
-                                            for (int s : Mathf.signs) {
-                                                Drawf.tri(e.x, e.y, 4f, 30f * e.fslope(), e.rotation + 90f * s);
+                                    trailEffect = new MultiEffect(
+                                        new ParticleEffect() {
+                                            {
+                                                particles = 3;
+                                                colorFrom = Pal.heal;
+                                                colorTo = Color.white;
+                                                sizeFrom = 3f;
+                                                sizeTo = 0f;
+                                                lifetime = 16f;
+                                                length = 10f;
+                                                cone = 30f;
                                             }
-                                        });
+                                        },
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = Pal.heal;
+                                                colorTo = Color.white;
+                                                sizeFrom = 2f;
+                                                sizeTo = 8f;
+                                                strokeFrom = 2f;
+                                                strokeTo = 0f;
+                                                lifetime = 16f;
+                                            }
+                                        }
+                                    );
 
                                     hitEffect = new MultiEffect(
-                                        new Effect(50f, 100f, e -> {
-                                                e.scaled(7f, b -> {
-                                                        color(Pal.heal, b.fout());
-                                                        Fill.circle(e.x, e.y, rad);
-                                                    });
-
-                                                color(Pal.heal);
-                                                stroke(e.fout() * 3f);
-                                                Lines.circle(e.x, e.y, rad);
-
-                                                int points = 10;
-                                                float offset = Mathf.randomSeed(e.id, 360f);
-                                                for (int i = 0; i < points; i++) {
-                                                    float angle = i * 360f / points + offset;
-                                                    Drawf.tri(e.x + Angles.trnsx(angle, rad),
-                                                        e.y + Angles.trnsy(angle, rad),
-                                                        6f, 50f * e.fout(), angle);
-                                                }
-
-                                                Fill.circle(e.x, e.y, 12f * e.fout());
-                                                color();
-                                                Fill.circle(e.x, e.y, 6f * e.fout());
-                                                Drawf.light(e.x, e.y, rad * 1.6f, Pal.heal, e.fout());
-                                            }),
-                                        DistortionFx.largeIonImpact
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = Pal.heal;
+                                                colorTo = Pal.heal;
+                                                sizeFrom = 100f;
+                                                sizeTo = 100f;
+                                                strokeFrom = 3f;
+                                                strokeTo = 0f;
+                                                lifetime = 50f;
+                                            }
+                                        },
+                                        new ParticleEffect() {
+                                            {
+                                                particles = 20;
+                                                colorFrom = Pal.heal;
+                                                colorTo = Color.white;
+                                                sizeFrom = 4f;
+                                                sizeTo = 0f;
+                                                lifetime = 40f;
+                                                length = 15f;
+                                                cone = 360f;
+                                            }
+                                        },
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = Color.white;
+                                                colorTo = Color.valueOf("ffffff00");
+                                                sizeFrom = 8f;
+                                                sizeTo = 8f;
+                                                strokeFrom = 0f;
+                                                strokeTo = 0f;
+                                                lifetime = 20f;
+                                            }
+                                        },
+                                        new ParticleEffect() {
+                                            {
+                                                particles = 10;
+                                                colorFrom = Pal.heal;
+                                                colorTo = Color.white;
+                                                sizeFrom = 4f;
+                                                sizeTo = 0f;
+                                                lifetime = 30f;
+                                                length = 50f;
+                                                cone = 360f;
+                                            }
+                                        }
                                     );
                                 }
                             };
@@ -3279,73 +3316,88 @@ public class SSUnitType {
                     });
 
                 // ============================================================
-                //  4 个等离子激光（左右各两门，上下各一组）
+                //  2 个等离子速射机枪（左右各一，y=12.5）—— 按 JSON 改成 LaserBoltBulletType
                 // ============================================================
-                for (float mountY : new float[]{
-                        -117f / 4f, 50f / 4f}) {
-                    for (float sign : Mathf.signs) {
-                        final float my = mountY, sx = sign;
-                        weapons.add(new Weapon("plasma-laser-mount") {
-                                {
-                                    shadow = 20f;
-                                    controllable = false;
-                                    autoTarget = true;
-                                    mirror = false;
-                                    shake = 3f;
-                                    shootY = 7f;
-                                    rotate = true;
-                                    x = 84f / 4f * sx;
-                                    y = my;
+                for (float sign : Mathf.signs) {
+                    final float sx = sign;
+                    weapons.add(new Weapon("plasma-laser-mount") {
+                            {
+                                x = 21f * sx;
+                                y = 12.5f;
+                                rotate = true;
+                                mirror = false;
+                                autoTarget = true;
+                                controllable = false;
+                                targetInterval = 0f;
+                                targetSwitchInterval = 0f;
+                                rotateSpeed = 5f;
+                                reload = 1f;
+                                recoil = 0.5f;
+                                shootY = 0f;
+                                shootSound = Sounds.shootLaser;
+                                heatColor = Color.valueOf("ff3300");
+                                cooldownTime = 60f;
+                                minWarmup = 0.5f;
+                                shootWarmupSpeed = 0.05f;
 
-                                    targetInterval = 20f;
-                                    targetSwitchInterval = 35f;
+                                shoot = new ShootBarrel() {
+                                    {
+                                        barrels = new float[]{
+                                            -3, 6, 0,
+                                            0, 3, 0,
+                                            3, 6, 0
+                                        };
+                                    }
+                                };
 
-                                    rotateSpeed = 3.5f;
-                                    reload = 170f;
-                                    recoil = 1f;
-                                    shootSound = Sounds.beamPlasmaSmall;
-                                    initialShootSound = Sounds.shootBeamPlasmaSmall;
-                                    continuous = true;
-                                    cooldownTime = reload;
-                                    immunities.add(StatusEffects.burning);
+                                bullet = new LaserBoltBulletType(12f, 25f) {
+                                    {
+                                        lifetime = 20f;
+                                        width = 2f;
+                                        height = 10f;
+                                        pierce = true;
+                                        pierceCap = 2;
+                                        pierceBuilding = true;
+                                        armorMultiplier = 0.75f;
+                                        backColor = Pal.heal;
+                                        frontColor = Color.white;
+                                        hitEffect = Fx.hitLaser;
+                                        despawnEffect = Fx.hitLaser;
 
-                                    bullet = new ContinuousLaserBulletType() {
-                                        {
-                                            maxRange = 90f;
-                                            damage = 27f;
-                                            length = 95f;
-                                            hitEffect = Fx.hitMeltHeal;
-                                            drawSize = 200f;
-                                            lifetime = 155f;
-                                            shake = 1f;
-
-                                            shootEffect = Fx.shootHeal;
-                                            smokeEffect = Fx.none;
-                                            width = 4f;
-                                            largeHit = false;
-
-                                            incendChance = 0.03f;
-                                            incendSpread = 5f;
-                                            incendAmount = 1;
-
-                                            healPercent = 0.4f;
-                                            collidesTeam = true;
-
-                                            colors = new Color[]{
-                                                Pal.heal.cpy().a(.2f),
-                                                Pal.heal.cpy().a(.5f),
-                                                Pal.heal.cpy().mul(1.2f),
-                                                Color.white
-                                            };
-                                        }
-                                    };
-                                }
-                            });
-                    }
+                                        shootEffect = new MultiEffect(
+                                            Fx.shootSmall,
+                                            new ParticleEffect() {
+                                                {
+                                                    particles = 5;
+                                                    colorFrom = Pal.heal;
+                                                    colorTo = Color.white;
+                                                    sizeFrom = 3f;
+                                                    sizeTo = 0f;
+                                                    lifetime = 12f;
+                                                    length = 6f;
+                                                    cone = 20f;
+                                                }
+                                            },
+                                            new WaveEffect() {
+                                                {
+                                                    colorFrom = Pal.heal;
+                                                    colorTo = Color.white;
+                                                    sizeFrom = 2f;
+                                                    sizeTo = 8f;
+                                                    strokeFrom = 2f;
+                                                    strokeTo = 0f;
+                                                    lifetime = 8f;
+                                                }
+                                            }
+                                        );
+                                    }
+                                };
+                            }
+                        });
                 }
 
                 // ============================================================
-                //  2 个等离子导弹（左右各一）
+                //  2 个等离子导弹（左右各一，y=-29.5）—— 保持原结构
                 // ============================================================
                 for (float sign : Mathf.signs) {
                     final float sx = sign;
@@ -3365,7 +3417,8 @@ public class SSUnitType {
                                 shoot = new ShootBarrel() {
                                     {
                                         barrels = new float[]{
-                                            0, 1, 0};
+                                            0, 1, 0
+                                        };
                                         firstShotDelay = 90f;
                                     }
                                 };
@@ -3376,6 +3429,7 @@ public class SSUnitType {
                                         keepVelocity = false;
                                         collidesAir = false;
                                         spawnUnit = plasmaMissile;
+
                                         shootEffect = new MultiEffect(
                                             Fx.shootBigSmoke,
                                             new ParticleEffect() {
