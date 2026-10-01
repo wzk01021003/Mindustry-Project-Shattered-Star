@@ -3106,9 +3106,7 @@ public class SSUnitType {
                 buildSpeed = 3.5f;
                 rotateToBuilding = false;
 
-                // ============================================================
-                //  内嵌 plasma-missile 单位（保持不变）
-                // ============================================================
+                // 内嵌 plasma-missile 单位
                 MissileUnitType plasmaMissile = new MissileUnitType("plasma-missile") {
                     {
                         allowedInPayloads = true;
@@ -3220,9 +3218,7 @@ public class SSUnitType {
                     }
                 };
 
-                // ============================================================
-                //  EMP 主炮 —— 参数按 JSON
-                // ============================================================
+                // EMP 主炮
                 weapons.add(new Weapon("emp-cannon-mount") {
                         {
                             rotate = true;
@@ -3298,7 +3294,6 @@ public class SSUnitType {
                                     );
 
                                     hitEffect = new MultiEffect(
-                                        // 原来的特效（保留原版海王EMP特效）
                                         new Effect(50f, 100f, e -> {
                                                 e.scaled(7f, b -> {
                                                         color(Pal.heal, b.fout());
@@ -3320,3158 +3315,3149 @@ public class SSUnitType {
                                                 Fill.circle(e.x, e.y, 6f * e.fout());
                                                 Drawf.light(e.x, e.y, 100f * 1.6f, Pal.heal, e.fout());
                                             }),
-                                        // 新增：屏幕扭曲效果
                                         DistortionFx.largeIonImpact
                                     );
                                 }
                             };
                         }
-                    };
-                }
-            });
+                    });
 
-        // ============================================================
-        //  2 个等离子速射机枪（左右各一，y=12.5）—— 按 JSON 改成 LaserBoltBulletType
-        // ============================================================
-        for (float sign : Mathf.signs) {
-            final float sx = sign;
-            weapons.add(new Weapon("plasma-laser-mount") {
-                    {
-                        x = 21f * sx;
-                        y = 12.5f;
-                        rotate = true;
-                        mirror = false;
-                        autoTarget = true;
-                        controllable = false;
-                        targetInterval = 0f;
-                        targetSwitchInterval = 0f;
-                        rotateSpeed = 5f;
-                        reload = 1f;
-                        recoil = 0.5f;
-                        shootY = 0f;
-                        shootSound = Sounds.shootLaser;
-                        heatColor = Color.valueOf("ff3300");
-                        cooldownTime = 60f;
-                        minWarmup = 0.5f;
-                        shootWarmupSpeed = 0.05f;
-
-                        shoot = new ShootBarrel() {
+                // 2 个等离子速射机枪
+                for (float sign : Mathf.signs) {
+                    final float sx = sign;
+                    weapons.add(new Weapon("plasma-laser-mount") {
                             {
-                                barrels = new float[]{
-                                    -3, 6, 0,
-                                    0, 3, 0,
-                                    3, 6, 0
-                                };
-                            }
-                        };
+                                x = 21f * sx;
+                                y = 12.5f;
+                                rotate = true;
+                                mirror = false;
+                                autoTarget = true;
+                                controllable = false;
+                                targetInterval = 0f;
+                                targetSwitchInterval = 0f;
+                                rotateSpeed = 5f;
+                                reload = 1f;
+                                recoil = 0.5f;
+                                shootY = 0f;
+                                shootSound = Sounds.shootLaser;
+                                heatColor = Color.valueOf("ff3300");
+                                cooldownTime = 60f;
+                                minWarmup = 0.5f;
+                                shootWarmupSpeed = 0.05f;
 
-                        bullet = new LaserBoltBulletType(12f, 25f) {
-                            {
-                                lifetime = 20f;
-                                width = 2f;
-                                height = 10f;
-                                pierce = true;
-                                pierceCap = 2;
-                                pierceBuilding = true;
-                                armorMultiplier = 0.75f;
-                                backColor = Pal.heal;
-                                frontColor = Color.white;
-                                hitEffect = Fx.hitLaser;
-                                despawnEffect = Fx.hitLaser;
-
-                                shootEffect = new MultiEffect(
-                                    Fx.shootSmall,
-                                    new ParticleEffect() {
-                                        {
-                                            particles = 5;
-                                            colorFrom = Pal.heal;
-                                            colorTo = Color.white;
-                                            sizeFrom = 3f;
-                                            sizeTo = 0f;
-                                            lifetime = 12f;
-                                            length = 6f;
-                                            cone = 20f;
-                                        }
-                                    },
-                                    new WaveEffect() {
-                                        {
-                                            colorFrom = Pal.heal;
-                                            colorTo = Color.white;
-                                            sizeFrom = 2f;
-                                            sizeTo = 8f;
-                                            strokeFrom = 2f;
-                                            strokeTo = 0f;
-                                            lifetime = 8f;
-                                        }
-                                    }
-                                );
-                            }
-                        };
-                    }
-                });
-        }
-
-        // ============================================================
-        //  2 个等离子导弹（左右各一，y=-29.5）—— 保持原结构
-        // ============================================================
-        for (float sign : Mathf.signs) {
-            final float sx = sign;
-            weapons.add(new Weapon("plasma-missile-mount") {
-                    {
-                        x = 21f * sx;
-                        y = -29.5f;
-                        rotate = true;
-                        rotateSpeed = 3f;
-                        mirror = false;
-                        reload = 480f;
-                        recoil = 2f;
-                        shootY = 5f;
-                        shootSound = Sounds.shootMissileLarge;
-                        shootCone = 15f;
-
-                        shoot = new ShootBarrel() {
-                            {
-                                barrels = new float[]{
-                                    0, 1, 0
-                                };
-                                firstShotDelay = 90f;
-                            }
-                        };
-
-                        bullet = new BulletType() {
-                            {
-                                speed = 0f;
-                                keepVelocity = false;
-                                collidesAir = false;
-                                spawnUnit = plasmaMissile;
-
-                                shootEffect = new MultiEffect(
-                                    Fx.shootBigSmoke,
-                                    new ParticleEffect() {
-                                        {
-                                            particles = 15;
-                                            colorFrom = Color.valueOf("ffd37f");
-                                            colorTo = Color.white;
-                                            sizeFrom = 4f;
-                                            sizeTo = 0f;
-                                            lifetime = 20f;
-                                            length = 15f;
-                                            cone = 25f;
-                                        }
-                                    }
-                                );
-                                smokeEffect = Fx.none;
-
-                                chargeEffect = new ParticleEffect() {
+                                shoot = new ShootBarrel() {
                                     {
-                                        particles = 8;
-                                        colorFrom = Color.valueOf("ffffff88");
-                                        colorTo = Color.valueOf("98ffa900");
-                                        sizeFrom = 4f;
-                                        sizeTo = 12f;
-                                        lifetime = 30f;
-                                        length = 20f;
-                                        baseLength = 5f;
-                                        cone = 30f;
-                                        interp = Interp.circleOut;
+                                        barrels = new float[]{
+                                            -3, 6, 0,
+                                            0, 3, 0,
+                                            3, 6, 0
+                                        };
                                     }
                                 };
-                            }
-                        };
-                    }
-                });
-        }
 
-        // ============================================================
-        //  压制场
-        // ============================================================
-        abilities.add(new SuppressionFieldAbility() {
-                {
-                    orbRadius = 5f;
-                    particleSize = 3f;
-                    y = -10f;
-                    particles = 10;
-                    color = particleColor = effectColor = Pal.heal;
-                }
-            });
-    }
-};
-}
-private static void loadErekirTanks() {
-    // ============================================================
-    //  stell-r  (TankUnitType)
-    // ============================================================
-    stellR = new TankUnitType("stell-r") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 12f;
-            treadPullOffset = 3;
-            speed = 0.75f;
-            rotateSpeed = 3.5f;
-            health = 850f;
-            armor = 6f;
-            itemCapacity = 0;
-            floorMultiplier = 0.95f;
-            treadRects = new Rect[]{
-                new Rect(12f - 32f, 7f - 32f, 14f, 51f)};
-
-            tankMoveVolume *= 0.32f;
-            tankMoveSound = Sounds.tankMoveSmall;
-
-            weapons.add(new Weapon("stell-weapon") {
-                    {
-                        shootSound = Sounds.shootStell;
-                        layerOffset = 0.0001f;
-                        reload = 50f;
-                        shootY = 4.5f;
-                        recoil = 1f;
-                        rotate = true;
-                        rotateSpeed = 2.2f;
-                        mirror = false;
-                        x = 0f;
-                        y = -0.75f;
-                        heatColor = Color.valueOf("f9350f");
-                        cooldownTime = 30f;
-
-                        bullet = new BasicBulletType(8f, 40) {
-                            {
-                                sprite = "missile-large";
-                                smokeEffect = Fx.shootBigSmoke;
-                                shootEffect = Fx.shootBigColor;
-                                width = 5f;
-                                height = 7f;
-                                lifetime = 20f;
-                                hitSize = 4f;
-                                hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                frontColor = Color.white;
-                                trailWidth = 1.7f;
-                                trailLength = 5;
-                                despawnEffect = hitEffect = Fx.hitBulletColor;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  locus-r
-    // ============================================================
-    locusR = new TankUnitType("locus-r") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 18f;
-            treadPullOffset = 5;
-            speed = 0.7f;
-            rotateSpeed = 2.6f;
-            health = 2100f;
-            armor = 8f;
-            itemCapacity = 0;
-            floorMultiplier = 0.8f;
-            treadRects = new Rect[]{
-                new Rect(17f - 96f/2f, 10f - 96f/2f, 19f, 76f)};
-            crushFragile = true;
-
-            tankMoveVolume *= 0.55f;
-            tankMoveSound = Sounds.tankMove;
-
-            weapons.add(new Weapon("locus-weapon") {
-                    {
-                        shootSound = Sounds.shootLocus;
-                        layerOffset = 0.0001f;
-                        reload = 18f;
-                        shootY = 10f;
-                        recoil = 1f;
-                        rotate = true;
-                        rotateSpeed = 1.4f;
-                        mirror = false;
-                        shootCone = 2f;
-                        x = 0f;
-                        y = 0f;
-                        heatColor = Color.valueOf("f9350f");
-                        cooldownTime = 30f;
-
-                        shoot = new ShootAlternate(3.5f);
-
-                        bullet = new RailBulletType() {
-                            {
-                                length = 160f;
-                                damage = 48f;
-                                hitColor = Color.valueOf("feb380");
-                                hitEffect = endEffect = Fx.hitBulletColor;
-                                pierceDamageFactor = 0.8f;
-                                smokeEffect = Fx.colorSpark;
-
-                                endEffect = new Effect(14f, e -> {
-                                        color(e.color);
-                                        Drawf.tri(e.x, e.y, e.fout() * 1.5f, 5f, e.rotation);
-                                    });
-
-                                shootEffect = Fx.shootBigColor;
-                                lineEffect = Fx.none;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  precept-r
-    // ============================================================
-    preceptR = new TankUnitType("precept-r") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 24f;
-            treadPullOffset = 5;
-            speed = 0.64f;
-            rotateSpeed = 1.5f;
-            health = 5000f;
-            armor = 11f;
-            itemCapacity = 0;
-            floorMultiplier = 0.65f;
-            drownTimeMultiplier = 1.2f;
-            immunities.addAll(StatusEffects.burning, StatusEffects.melting);
-            treadRects = new Rect[]{
-                new Rect(16f - 60f, 48f - 70f, 30f, 75f),
-                new Rect(44f - 60f, 17f - 70f, 17f, 60f)
-            };
-            crushFragile = true;
-
-            weapons.add(new Weapon("precept-weapon") {
-                    {
-                        shootSound = Sounds.explosionDull;
-                        layerOffset = 0.0001f;
-                        reload = 80f;
-                        shootY = 16f;
-                        recoil = 3f;
-                        rotate = true;
-                        rotateSpeed = 1.625f;
-                        mirror = false;
-                        shootCone = 2f;
-                        x = 0f;
-                        y = -1f;
-                        heatColor = Color.valueOf("f9350f");
-                        cooldownTime = 30f;
-
-                        bullet = new BasicBulletType(7f, 120) {
-                            {
-                                sprite = "missile-large";
-                                width = 7.5f;
-                                height = 13f;
-                                lifetime = 28f;
-                                hitSize = 6f;
-                                pierceCap = 2;
-                                pierce = true;
-                                pierceBuilding = true;
-                                hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                frontColor = Color.white;
-                                trailWidth = 2.8f;
-                                trailLength = 8;
-                                hitEffect = despawnEffect = Fx.blastExplosion;
-                                shootEffect = Fx.shootTitan;
-                                smokeEffect = Fx.shootSmokeTitan;
-                                splashDamageRadius = 20f;
-                                splashDamage = 50f;
-
-                                trailEffect = Fx.hitSquaresColor;
-                                trailRotation = true;
-                                trailInterval = 3f;
-
-                                fragBullets = 4;
-
-                                fragBullet = new BasicBulletType(5f, 35) {
+                                bullet = new LaserBoltBulletType(12f, 25f) {
                                     {
-                                        sprite = "missile-large";
-                                        width = 5f;
-                                        height = 7f;
-                                        lifetime = 15f;
-                                        hitSize = 4f;
-                                        pierceCap = 3;
+                                        lifetime = 20f;
+                                        width = 2f;
+                                        height = 10f;
                                         pierce = true;
+                                        pierceCap = 2;
                                         pierceBuilding = true;
-                                        hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                        armorMultiplier = 0.75f;
+                                        backColor = Pal.heal;
                                         frontColor = Color.white;
-                                        trailWidth = 1.7f;
-                                        trailLength = 3;
-                                        drag = 0.01f;
-                                        despawnEffect = hitEffect = Fx.hitBulletColor;
+                                        hitEffect = Fx.hitLaser;
+                                        despawnEffect = Fx.hitLaser;
+
+                                        shootEffect = new MultiEffect(
+                                            Fx.shootSmall,
+                                            new ParticleEffect() {
+                                                {
+                                                    particles = 5;
+                                                    colorFrom = Pal.heal;
+                                                    colorTo = Color.white;
+                                                    sizeFrom = 3f;
+                                                    sizeTo = 0f;
+                                                    lifetime = 12f;
+                                                    length = 6f;
+                                                    cone = 20f;
+                                                }
+                                            },
+                                            new WaveEffect() {
+                                                {
+                                                    colorFrom = Pal.heal;
+                                                    colorTo = Color.white;
+                                                    sizeFrom = 2f;
+                                                    sizeTo = 8f;
+                                                    strokeFrom = 2f;
+                                                    strokeTo = 0f;
+                                                    lifetime = 8f;
+                                                }
+                                            }
+                                        );
                                     }
                                 };
                             }
-                        };
-                    }
-                });
-        }
-    };
+                        });
+                }
 
-    // ============================================================
-    //  vanquish-r
-    // ============================================================
-    vanquishR = new TankUnitType("vanquish-r") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 28f;
-            treadPullOffset = 4;
-            speed = 0.63f;
-            health = 11000f;
-            armor = 20f;
-            itemCapacity = 0;
-            crushDamage = 13f / 5f;
-            floorMultiplier = 0.5f;
-            drownTimeMultiplier = 1.25f;
-            immunities.addAll(StatusEffects.burning, StatusEffects.melting);
-            crushFragile = true;
-            treadRects = new Rect[]{
-                new Rect(22f - 154f/2f, 16f - 154f/2f, 28f, 130f)};
-
-            tankMoveVolume *= 1.25f;
-            tankMoveSound = Sounds.tankMoveHeavy;
-
-            weapons.add(new Weapon("vanquish-weapon") {
-                    {
-                        shootSound = Sounds.shootTank;
-                        layerOffset = 0.0001f;
-                        reload = 80f;
-                        shootY = 71f / 4f;
-                        shake = 5f;
-                        recoil = 4f;
-                        rotate = true;
-                        rotateSpeed = 1f;
-                        mirror = false;
-                        x = 0f;
-                        y = 0f;
-                        shadow = 28f;
-                        heatColor = Color.valueOf("f9350f");
-                        cooldownTime = 80f;
-
-                        bullet = new BasicBulletType(8f, 150f) {
+                // 2 个等离子导弹
+                for (float sign : Mathf.signs) {
+                    final float sx = sign;
+                    weapons.add(new Weapon("plasma-missile-mount") {
                             {
-                                sprite = "missile-large";
-                                width = 9.5f;
-                                height = 18f;
-                                lifetime = 16f;
-                                hitSize = 6f;
-                                shootEffect = Fx.shootTitan;
-                                smokeEffect = Fx.shootSmokeTitan;
-                                pierceCap = 2;
-                                pierce = true;
-                                pierceBuilding = true;
+                                x = 21f * sx;
+                                y = -29.5f;
+                                rotate = true;
+                                rotateSpeed = 3f;
+                                mirror = false;
+                                reload = 480f;
+                                recoil = 2f;
+                                shootY = 5f;
+                                shootSound = Sounds.shootMissileLarge;
+                                shootCone = 15f;
 
-                                hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                frontColor = Color.white;
-                                trailWidth = 3.1f;
-                                trailLength = 8;
-                                hitEffect = despawnEffect = Fx.blastExplosion;
-                                splashDamageRadius = 20f;
-                                splashDamage = 50f;
-                                maxRange = 190f;
-
-                                fragOnHit = false;
-                                pierceFragCap = 1;
-                                fragRandomSpread = 0f;
-                                fragSpread = 10f;
-                                fragBullets = 5;
-                                fragVelocityMin = 1f;
-                                despawnSound = Sounds.explosionDull;
-
-                                fragBullet = new BasicBulletType(8f, 35f) {
+                                shoot = new ShootBarrel() {
                                     {
-                                        sprite = "missile-large";
-                                        width = 8f;
-                                        height = 16f;
-                                        lifetime = 10f;
-                                        hitSize = 4f;
-                                        hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                        frontColor = Color.white;
-                                        trailWidth = 2.8f;
-                                        trailLength = 6;
-                                        hitEffect = despawnEffect = Fx.blastExplosion;
-                                        splashDamageRadius = 10f;
-                                        splashDamage = 20f;
+                                        barrels = new float[]{
+                                            0, 1, 0
+                                        };
+                                        firstShotDelay = 90f;
+                                    }
+                                };
+
+                                bullet = new BulletType() {
+                                    {
+                                        speed = 0f;
+                                        keepVelocity = false;
+                                        collidesAir = false;
+                                        spawnUnit = plasmaMissile;
+
+                                        shootEffect = new MultiEffect(
+                                            Fx.shootBigSmoke,
+                                            new ParticleEffect() {
+                                                {
+                                                    particles = 15;
+                                                    colorFrom = Color.valueOf("ffd37f");
+                                                    colorTo = Color.white;
+                                                    sizeFrom = 4f;
+                                                    sizeTo = 0f;
+                                                    lifetime = 20f;
+                                                    length = 15f;
+                                                    cone = 25f;
+                                                }
+                                            }
+                                        );
+                                        smokeEffect = Fx.none;
+
+                                        chargeEffect = new ParticleEffect() {
+                                            {
+                                                particles = 8;
+                                                colorFrom = Color.valueOf("ffffff88");
+                                                colorTo = Color.valueOf("98ffa900");
+                                                sizeFrom = 4f;
+                                                sizeTo = 12f;
+                                                lifetime = 30f;
+                                                length = 20f;
+                                                baseLength = 5f;
+                                                cone = 30f;
+                                                interp = Interp.circleOut;
+                                            }
+                                        };
                                     }
                                 };
                             }
-                        };
-                    }
-                });
+                        });
+                }
 
-            // 两个副炮
-            for (float fy : new float[]{
-                    34f / 4f, -36f / 4f}) {
-                final float fyf = fy;
-                weapons.add(new Weapon("vanquish-point-weapon") {
+                // 压制场
+                abilities.add(new SuppressionFieldAbility() {
                         {
-                            reload = 22f;
-                            x = 48f / 4f;
-                            y = fyf;
-                            shootY = 5.5f;
-                            recoil = 2f;
-                            rotate = true;
-                            rotateSpeed = 2f;
-                            shootSound = Sounds.shootStell;
+                            orbRadius = 5f;
+                            particleSize = 3f;
+                            y = -10f;
+                            particles = 10;
+                            color = particleColor = effectColor = Pal.heal;
+                        }
+                    });
+            }
+        };
+    }
+    private static void loadErekirTanks() {
+        // ============================================================
+        //  stell-r  (TankUnitType)
+        // ============================================================
+        stellR = new TankUnitType("stell-r") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 12f;
+                treadPullOffset = 3;
+                speed = 0.75f;
+                rotateSpeed = 3.5f;
+                health = 850f;
+                armor = 6f;
+                itemCapacity = 0;
+                floorMultiplier = 0.95f;
+                treadRects = new Rect[]{
+                    new Rect(12f - 32f, 7f - 32f, 14f, 51f)};
 
-                            bullet = new BasicBulletType(12f, 50f) {
+                tankMoveVolume *= 0.32f;
+                tankMoveSound = Sounds.tankMoveSmall;
+
+                weapons.add(new Weapon("stell-weapon") {
+                        {
+                            shootSound = Sounds.shootStell;
+                            layerOffset = 0.0001f;
+                            reload = 50f;
+                            shootY = 4.5f;
+                            recoil = 1f;
+                            rotate = true;
+                            rotateSpeed = 2.2f;
+                            mirror = false;
+                            x = 0f;
+                            y = -0.75f;
+                            heatColor = Color.valueOf("f9350f");
+                            cooldownTime = 30f;
+
+                            bullet = new BasicBulletType(8f, 40) {
                                 {
                                     sprite = "missile-large";
-                                    width = 6.5f;
-                                    height = 11f;
-                                    shrinkY = 0f;
-                                    shrinkX = 0.2f;
-                                    lifetime = 15f;
-                                    shootEffect = Fx.sparkShoot;
                                     smokeEffect = Fx.shootBigSmoke;
+                                    shootEffect = Fx.shootBigColor;
+                                    width = 5f;
+                                    height = 7f;
+                                    lifetime = 20f;
+                                    hitSize = 4f;
                                     hitColor = backColor = trailColor = Color.valueOf("feb380");
                                     frontColor = Color.white;
-                                    trailWidth = 2.5f;
+                                    trailWidth = 1.7f;
                                     trailLength = 5;
-                                    hitEffect = Fx.blastExplosion;
+                                    despawnEffect = hitEffect = Fx.hitBulletColor;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  locus-r
+        // ============================================================
+        locusR = new TankUnitType("locus-r") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 18f;
+                treadPullOffset = 5;
+                speed = 0.7f;
+                rotateSpeed = 2.6f;
+                health = 2100f;
+                armor = 8f;
+                itemCapacity = 0;
+                floorMultiplier = 0.8f;
+                treadRects = new Rect[]{
+                    new Rect(17f - 96f/2f, 10f - 96f/2f, 19f, 76f)};
+                crushFragile = true;
+
+                tankMoveVolume *= 0.55f;
+                tankMoveSound = Sounds.tankMove;
+
+                weapons.add(new Weapon("locus-weapon") {
+                        {
+                            shootSound = Sounds.shootLocus;
+                            layerOffset = 0.0001f;
+                            reload = 18f;
+                            shootY = 10f;
+                            recoil = 1f;
+                            rotate = true;
+                            rotateSpeed = 1.4f;
+                            mirror = false;
+                            shootCone = 2f;
+                            x = 0f;
+                            y = 0f;
+                            heatColor = Color.valueOf("f9350f");
+                            cooldownTime = 30f;
+
+                            shoot = new ShootAlternate(3.5f);
+
+                            bullet = new RailBulletType() {
+                                {
+                                    length = 160f;
+                                    damage = 48f;
+                                    hitColor = Color.valueOf("feb380");
+                                    hitEffect = endEffect = Fx.hitBulletColor;
+                                    pierceDamageFactor = 0.8f;
+                                    smokeEffect = Fx.colorSpark;
+
+                                    endEffect = new Effect(14f, e -> {
+                                            color(e.color);
+                                            Drawf.tri(e.x, e.y, e.fout() * 1.5f, 5f, e.rotation);
+                                        });
+
+                                    shootEffect = Fx.shootBigColor;
+                                    lineEffect = Fx.none;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  precept-r
+        // ============================================================
+        preceptR = new TankUnitType("precept-r") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 24f;
+                treadPullOffset = 5;
+                speed = 0.64f;
+                rotateSpeed = 1.5f;
+                health = 5000f;
+                armor = 11f;
+                itemCapacity = 0;
+                floorMultiplier = 0.65f;
+                drownTimeMultiplier = 1.2f;
+                immunities.addAll(StatusEffects.burning, StatusEffects.melting);
+                treadRects = new Rect[]{
+                    new Rect(16f - 60f, 48f - 70f, 30f, 75f),
+                    new Rect(44f - 60f, 17f - 70f, 17f, 60f)
+                };
+                crushFragile = true;
+
+                weapons.add(new Weapon("precept-weapon") {
+                        {
+                            shootSound = Sounds.explosionDull;
+                            layerOffset = 0.0001f;
+                            reload = 80f;
+                            shootY = 16f;
+                            recoil = 3f;
+                            rotate = true;
+                            rotateSpeed = 1.625f;
+                            mirror = false;
+                            shootCone = 2f;
+                            x = 0f;
+                            y = -1f;
+                            heatColor = Color.valueOf("f9350f");
+                            cooldownTime = 30f;
+
+                            bullet = new BasicBulletType(7f, 120) {
+                                {
+                                    sprite = "missile-large";
+                                    width = 7.5f;
+                                    height = 13f;
+                                    lifetime = 28f;
+                                    hitSize = 6f;
+                                    pierceCap = 2;
+                                    pierce = true;
+                                    pierceBuilding = true;
+                                    hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                    frontColor = Color.white;
+                                    trailWidth = 2.8f;
+                                    trailLength = 8;
+                                    hitEffect = despawnEffect = Fx.blastExplosion;
+                                    shootEffect = Fx.shootTitan;
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    splashDamageRadius = 20f;
+                                    splashDamage = 50f;
+
+                                    trailEffect = Fx.hitSquaresColor;
+                                    trailRotation = true;
+                                    trailInterval = 3f;
+
+                                    fragBullets = 4;
+
+                                    fragBullet = new BasicBulletType(5f, 35) {
+                                        {
+                                            sprite = "missile-large";
+                                            width = 5f;
+                                            height = 7f;
+                                            lifetime = 15f;
+                                            hitSize = 4f;
+                                            pierceCap = 3;
+                                            pierce = true;
+                                            pierceBuilding = true;
+                                            hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                            frontColor = Color.white;
+                                            trailWidth = 1.7f;
+                                            trailLength = 3;
+                                            drag = 0.01f;
+                                            despawnEffect = hitEffect = Fx.hitBulletColor;
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  vanquish-r
+        // ============================================================
+        vanquishR = new TankUnitType("vanquish-r") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 28f;
+                treadPullOffset = 4;
+                speed = 0.63f;
+                health = 11000f;
+                armor = 20f;
+                itemCapacity = 0;
+                crushDamage = 13f / 5f;
+                floorMultiplier = 0.5f;
+                drownTimeMultiplier = 1.25f;
+                immunities.addAll(StatusEffects.burning, StatusEffects.melting);
+                crushFragile = true;
+                treadRects = new Rect[]{
+                    new Rect(22f - 154f/2f, 16f - 154f/2f, 28f, 130f)};
+
+                tankMoveVolume *= 1.25f;
+                tankMoveSound = Sounds.tankMoveHeavy;
+
+                weapons.add(new Weapon("vanquish-weapon") {
+                        {
+                            shootSound = Sounds.shootTank;
+                            layerOffset = 0.0001f;
+                            reload = 80f;
+                            shootY = 71f / 4f;
+                            shake = 5f;
+                            recoil = 4f;
+                            rotate = true;
+                            rotateSpeed = 1f;
+                            mirror = false;
+                            x = 0f;
+                            y = 0f;
+                            shadow = 28f;
+                            heatColor = Color.valueOf("f9350f");
+                            cooldownTime = 80f;
+
+                            bullet = new BasicBulletType(8f, 150f) {
+                                {
+                                    sprite = "missile-large";
+                                    width = 9.5f;
+                                    height = 18f;
+                                    lifetime = 16f;
+                                    hitSize = 6f;
+                                    shootEffect = Fx.shootTitan;
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    pierceCap = 2;
+                                    pierce = true;
+                                    pierceBuilding = true;
+
+                                    hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                    frontColor = Color.white;
+                                    trailWidth = 3.1f;
+                                    trailLength = 8;
+                                    hitEffect = despawnEffect = Fx.blastExplosion;
+                                    splashDamageRadius = 20f;
+                                    splashDamage = 50f;
+                                    maxRange = 190f;
+
+                                    fragOnHit = false;
+                                    pierceFragCap = 1;
+                                    fragRandomSpread = 0f;
+                                    fragSpread = 10f;
+                                    fragBullets = 5;
+                                    fragVelocityMin = 1f;
+                                    despawnSound = Sounds.explosionDull;
+
+                                    fragBullet = new BasicBulletType(8f, 35f) {
+                                        {
+                                            sprite = "missile-large";
+                                            width = 8f;
+                                            height = 16f;
+                                            lifetime = 10f;
+                                            hitSize = 4f;
+                                            hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                            frontColor = Color.white;
+                                            trailWidth = 2.8f;
+                                            trailLength = 6;
+                                            hitEffect = despawnEffect = Fx.blastExplosion;
+                                            splashDamageRadius = 10f;
+                                            splashDamage = 20f;
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+
+                // 两个副炮
+                for (float fy : new float[]{
+                        34f / 4f, -36f / 4f}) {
+                    final float fyf = fy;
+                    weapons.add(new Weapon("vanquish-point-weapon") {
+                            {
+                                reload = 22f;
+                                x = 48f / 4f;
+                                y = fyf;
+                                shootY = 5.5f;
+                                recoil = 2f;
+                                rotate = true;
+                                rotateSpeed = 2f;
+                                shootSound = Sounds.shootStell;
+
+                                bullet = new BasicBulletType(12f, 50f) {
+                                    {
+                                        sprite = "missile-large";
+                                        width = 6.5f;
+                                        height = 11f;
+                                        shrinkY = 0f;
+                                        shrinkX = 0.2f;
+                                        lifetime = 15f;
+                                        shootEffect = Fx.sparkShoot;
+                                        smokeEffect = Fx.shootBigSmoke;
+                                        hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                        frontColor = Color.white;
+                                        trailWidth = 2.5f;
+                                        trailLength = 5;
+                                        hitEffect = Fx.blastExplosion;
+                                        despawnEffect = Fx.hitBulletColor;
+                                    }
+                                };
+                            }
+                        });
+                }
+            }
+        };
+
+        // ============================================================
+        //  conquer-r
+        // ============================================================
+        conquerR = new TankUnitType("conquer-r") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 46f;
+                treadPullOffset = 1;
+                speed = 0.48f;
+                health = 22000f;
+                armor = 26f;
+                crushDamage = 25f / 5f;
+                rotateSpeed = 0.8f;
+                floorMultiplier = 0.3f;
+                immunities.addAll(StatusEffects.burning, StatusEffects.melting);
+
+                tankMoveVolume *= 1.5f;
+                tankMoveSound = Sounds.tankMoveHeavy;
+                crushFragile = true;
+
+                float xo = 231f / 2f, yo = 231f / 2f;
+                treadRects = new Rect[]{
+                    new Rect(27f - xo, 152f - yo, 56f, 73f),
+                    new Rect(24f - xo, 51f - 9f - yo, 29f, 17f),
+                    new Rect(59f - xo, 18f - 9f - yo, 39f, 19f)
+                };
+
+                weapons.add(new Weapon("conquer-weapon") {
+                        {
+                            shootSound = Sounds.shootConquer;
+                            layerOffset = 0.1f;
+                            reload = 100f;
+                            shootY = 32.5f;
+                            shake = 5f;
+                            recoil = 5f;
+                            rotate = true;
+                            rotateSpeed = 0.6f;
+                            mirror = false;
+                            x = 0f;
+                            y = -2f;
+                            shadow = 50f;
+                            heatColor = Color.valueOf("f9350f");
+                            shootWarmupSpeed = 0.06f;
+                            cooldownTime = 110f;
+                            minWarmup = 0.9f;
+
+                            bullet = new BasicBulletType(8f, 360f) {
+                                {
+                                    sprite = "missile-large";
+                                    width = 12f;
+                                    height = 20f;
+                                    lifetime = 35f;
+                                    hitSize = 6f;
+
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    pierceCap = 3;
+                                    pierce = true;
+                                    pierceBuilding = true;
+                                    hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                    frontColor = Color.white;
+                                    trailWidth = 4f;
+                                    trailLength = 9;
+                                    hitEffect = despawnEffect = Fx.massiveExplosion;
+
+                                    shootEffect = new ExplosionEffect() {
+                                        {
+                                            lifetime = 40f;
+                                            waveStroke = 4f;
+                                            waveColor = sparkColor = trailColor;
+                                            waveRad = 15f;
+                                            smokeSize = 5f;
+                                            smokes = 8;
+                                            smokeSizeBase = 0f;
+                                            smokeColor = trailColor;
+                                            sparks = 8;
+                                            sparkRad = 40f;
+                                            sparkLen = 4f;
+                                            sparkStroke = 3f;
+                                        }
+                                    };
+
+                                    // 6 对子子弹
+                                    int count = 6;
+                                    for (int j = 0; j < count; j++) {
+                                        int s = j;
+                                        for (int i : Mathf.signs) {
+                                            float fin = 0.05f + (j + 1) / (float) count;
+                                            float spd = speed;
+                                            float life = lifetime / Mathf.lerp(fin, 1f, 0.5f);
+                                            boolean show = j == 0 && i > 0;
+                                            spawnBullets.add(new BasicBulletType(spd * fin, 60) {
+                                                    {
+                                                        drag = 0.002f;
+                                                        width = 12f;
+                                                        height = 11f;
+                                                        lifetime = life + 5f;
+                                                        weaveRandom = false;
+                                                        hitSize = 5f;
+                                                        pierceCap = 2;
+                                                        pierce = true;
+                                                        showStats = show;
+                                                        pierceBuilding = true;
+                                                        hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                                        frontColor = Color.white;
+                                                        trailWidth = 2.5f;
+                                                        trailLength = 7;
+                                                        weaveScale = (3f + s / 2f) / 1.2f;
+                                                        weaveMag = i * (4f - fin * 2f);
+
+                                                        splashDamage = 65f;
+                                                        splashDamageRadius = 30f;
+                                                        despawnEffect = Fx.blastExplosion;
+                                                    }
+                                                });
+                                        }
+                                    }
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+    }
+    private static void loadErekirAir() {
+        // ============================================================
+        //  elude-r  (悬浮单位)
+        // ============================================================
+        eludeR = new UnitType("elude-r") {
+            {
+                constructor = ElevationMoveUnit::create;
+                hovering = true;
+                canDrown = false;
+                shadowElevation = 0.1f;
+
+                drag = 0.07f;
+                speed = 1.8f;
+                rotateSpeed = 5f;
+                accel = 0.09f;
+                health = 600f;
+                armor = 1f;
+                hitSize = 11f;
+                engineOffset = 7f;
+                engineSize = 2f;
+                itemCapacity = 0;
+                useEngineElevation = false;
+
+                moveSound = Sounds.loopExtract;
+                moveSoundVolume = 0.25f;
+                moveSoundPitchMin = 0.7f;
+                moveSoundPitchMax = 1.5f;
+
+                abilities.add(new MoveEffectAbility(0f, -7f, Pal.sapBulletBack, Fx.missileTrailShort, 4f) {
+                        {
+                            teamColor = true;
+                        }
+                    });
+
+                for (float f : new float[]{
+                        -3f, 3f}) {
+                    final float fy = f;
+                    parts.add(new HoverPart() {
+                            {
+                                x = 3.9f;
+                                y = fy;
+                                mirror = true;
+                                radius = 6f;
+                                phase = 90f;
+                                stroke = 2f;
+                                layerOffset = -0.001f;
+                                color = Color.valueOf("bf92f9");
+                            }
+                        });
+                }
+
+                weapons.add(new Weapon("elude-weapon") {
+                        {
+                            shootSound = Sounds.shootElude;
+                            y = -2f;
+                            x = 4f;
+                            top = true;
+                            mirror = true;
+                            reload = 40f;
+                            baseRotation = -35f;
+                            shootCone = 360f;
+
+                            shoot = new ShootSpread(2, 11f);
+
+                            bullet = new BasicBulletType(5f, 16) {
+                                {
+                                    homingPower = 0.19f;
+                                    homingDelay = 4f;
+                                    width = 7f;
+                                    height = 12f;
+                                    lifetime = 30f;
+                                    shootEffect = Fx.sparkShoot;
+                                    smokeEffect = Fx.shootBigSmoke;
+                                    hitColor = backColor = trailColor = Pal.suppress;
+                                    frontColor = Color.white;
+                                    trailWidth = 1.5f;
+                                    trailLength = 5;
+                                    hitEffect = despawnEffect = Fx.hitBulletColor;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  avert-r  (战机)
+        // ============================================================
+        avertR = new UnitType("avert-r") {
+            {
+                lowAltitude = false;
+                flying = true;
+                drag = 0.08f;
+                speed = 2f;
+                rotateSpeed = 8f;
+                accel = 0.09f;
+                health = 1100f;
+                armor = 3f;
+                hitSize = 12f;
+                engineSize = 0f;
+                fogRadius = 25f;
+                itemCapacity = 0;
+
+                setEnginesMirror(
+                    new UnitEngine(35f / 4f, -38f / 4f, 3f, 315f),
+                    new UnitEngine(39f / 4f, -16f / 4f, 3f, 315f)
+                );
+
+                weapons.add(new Weapon("avert-weapon") {
+                        {
+                            shootSound = Sounds.shootAvert;
+                            reload = 35f;
+                            x = 0f;
+                            y = 6.5f;
+                            shootY = 5f;
+                            recoil = 1f;
+                            top = false;
+                            layerOffset = -0.01f;
+                            rotate = false;
+                            mirror = false;
+                            shoot = new ShootHelix();
+
+                            bullet = new BasicBulletType(5f, 22f / 0.75f) {
+                                {
+                                    width = 7f;
+                                    height = 12f;
+                                    lifetime = 18f;
+                                    buildingDamageMultiplier = 0.599999f;
+                                    blockArmorMultiplier = 0.5f;
+                                    shootEffect = Fx.sparkShoot;
+                                    smokeEffect = Fx.shootBigSmoke;
+                                    hitColor = backColor = trailColor = Pal.suppress;
+                                    frontColor = Color.white;
+                                    trailWidth = 1.5f;
+                                    trailLength = 5;
+                                    hitEffect = despawnEffect = new MultiEffect(Fx.hitSquaresColor, Fx.squareWaveEffect);
+
+                                    fragOnDespawn = false;
+                                    fragBullets = 2;
+
+                                    fragBullet = new BasicBulletType(3f, 10) {
+                                        {
+                                            width = 5f;
+                                            height = 8f;
+                                            lifetime = 14f;
+                                            fragVelocityMax = 1f;
+                                            fragVelocityMin = 0.7f;
+                                            hitColor = backColor = trailColor = Pal.suppress;
+                                            frontColor = Color.white;
+                                            trailWidth = 1.2f;
+                                            trailLength = 4;
+                                            hitEffect = despawnEffect = Fx.hitBulletColor;
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  obviate-r  (战机)
+        // ============================================================
+        obviateR = new UnitType("obviate-r") {
+            {
+                flying = true;
+                drag = 0.08f;
+                speed = 1.8f;
+                rotateSpeed = 2.5f;
+                accel = 0.09f;
+                health = 2300f;
+                armor = 6f;
+                hitSize = 25f;
+                engineSize = 4.3f;
+                engineOffset = 54f / 4f;
+                fogRadius = 25f;
+                itemCapacity = 0;
+                lowAltitude = true;
+
+                setEnginesMirror(
+                    new UnitEngine(38f / 4f, -46f / 4f, 3.1f, 315f)
+                );
+
+                parts.add(new RegionPart("-blade") {
+                        {
+                            moveRot = -10f;
+                            moveX = -1f;
+                            moves.add(new PartMove(PartProgress.reload, 2f, 1f, -5f));
+                            progress = PartProgress.warmup;
+                            mirror = true;
+
+                            children.add(new RegionPart("-side") {
+                                    {
+                                        moveX = 2f;
+                                        moveY = -2f;
+                                        progress = PartProgress.warmup;
+                                        under = true;
+                                        mirror = true;
+                                        moves.add(new PartMove(PartProgress.reload, -2f, 2f, 0f));
+                                    }
+                                });
+                        }
+                    });
+
+                weapons.add(new Weapon() {
+                        {
+                            shootSound = Sounds.explosionObviate;
+                            x = 0f;
+                            y = -2f;
+                            shootY = 0f;
+                            reload = 140f;
+                            mirror = false;
+                            minWarmup = 0.95f;
+                            shake = 3f;
+                            cooldownTime = reload - 10f;
+
+                            bullet = new BasicBulletType() {
+                                {
+                                    shoot = new ShootHelix() {
+                                        {
+                                            mag = 1f;
+                                            scl = 5f;
+                                        }
+                                    };
+
+                                    shootEffect = new MultiEffect(Fx.shootTitan, new WaveEffect() {
+                                            {
+                                                colorTo = Pal.sapBulletBack;
+                                                sizeTo = 26f;
+                                                lifetime = 14f;
+                                                strokeFrom = 4f;
+                                            }
+                                        });
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    hitColor = Pal.sapBullet;
+                                    despawnSound = Sounds.explosionArtilleryShock;
+
+                                    sprite = "large-orb";
+                                    trailEffect = Fx.missileTrail;
+                                    trailInterval = 3f;
+                                    trailParam = 4f;
+                                    speed = 3f;
+                                    damage = 75f;
+                                    lifetime = 60f;
+                                    width = height = 15f;
+                                    backColor = Pal.sapBulletBack;
+                                    frontColor = Pal.sapBullet;
+                                    shrinkX = shrinkY = 0f;
+                                    trailColor = Pal.sapBulletBack;
+                                    trailLength = 12;
+                                    trailWidth = 2.2f;
+
+                                    despawnEffect = hitEffect = new ExplosionEffect() {
+                                        {
+                                            waveColor = Pal.sapBullet;
+                                            smokeColor = Color.gray;
+                                            sparkColor = Pal.sap;
+                                            waveStroke = 4f;
+                                            waveRad = 40f;
+                                        }
+                                    };
+
+                                    intervalBullet = new LightningBulletType() {
+                                        {
+                                            damage = 16f;
+                                            collidesAir = false;
+                                            ammoMultiplier = 1f;
+                                            lightningColor = Pal.sapBullet;
+                                            lightningLength = 3;
+                                            lightningLengthRand = 6;
+                                            buildingDamageMultiplier = 0.25f;
+
+                                            lightningType = new BulletType(0.0001f, 0f) {
+                                                {
+                                                    lifetime = Fx.lightning.lifetime;
+                                                    hitEffect = Fx.hitLancer;
+                                                    despawnEffect = Fx.none;
+                                                    status = StatusEffects.shocked;
+                                                    statusDuration = 10f;
+                                                    hittable = false;
+                                                    lightColor = Color.white;
+                                                    buildingDamageMultiplier = 0.25f;
+                                                }
+                                            };
+                                        }
+                                    };
+
+                                    bulletInterval = 4f;
+
+                                    lightningColor = Pal.sapBullet;
+                                    lightningDamage = 17f;
+                                    lightning = 8;
+                                    lightningLength = 2;
+                                    lightningLengthRand = 8;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  quell-r  (战机 - 导弹)
+        // ============================================================
+        quellR = new UnitType("quell-r") {
+            {
+                constructor = PayloadUnit::create;
+                lowAltitude = false;
+                flying = true;
+                drag = 0.06f;
+                speed = 1.1f;
+                rotateSpeed = 3.2f;
+                accel = 0.1f;
+                health = 6000f;
+                armor = 4f;
+                hitSize = 36f;
+                payloadCapacity = Mathf.sqr(4f) * tilePayload;
+                targetAir = false;
+                envDisabled = 0;
+
+                engineSize = 4.8f;
+                engineOffset = 61f / 4f;
+                range = 4.3f * 60f * 1.4f;
+
+                loopSoundVolume = 0.85f;
+                loopSound = Sounds.loopHover;
+
+                abilities.add(new SuppressionFieldAbility() {
+                        {
+                            reload = 60f * 8f;
+                            orbRadius = 5.3f;
+                            y = 1f;
+                        }
+                    });
+
+                weapons.add(new Weapon("quell-weapon") {
+                        {
+                            shootSound = Sounds.shootMissileSmall;
+                            x = 51f / 4f;
+                            y = 5f / 4f;
+                            rotate = true;
+                            rotateSpeed = 2f;
+                            reload = 55f;
+                            layerOffset = -0.001f;
+                            recoil = 1f;
+                            rotationLimit = 60f;
+
+                            bullet = new BasicBulletType(4.3f, 70f, "missile-large") {
+                                {
+                                    shootEffect = Fx.shootBig;
+                                    smokeEffect = Fx.shootBigSmoke2;
+                                    shake = 1f;
+                                    lifetime = 60f * 0.496f;
+                                    rangeOverride = 361.2f;
+                                    followAimSpeed = 5f;
+
+                                    width = 12f;
+                                    height = 22f;
+                                    hitSize = 7f;
+                                    hitColor = backColor = trailColor = Pal.sapBulletBack;
+                                    trailWidth = 3f;
+                                    trailLength = 12;
+                                    hitEffect = despawnEffect = Fx.hitBulletColor;
+
+                                    keepVelocity = false;
+                                    collidesGround = true;
+                                    collidesAir = false;
+
+                                    fragRandomSpread = 0f;
+                                    fragBullets = 1;
+                                    fragVelocityMin = 1f;
+                                    fragOffsetMax = 1f;
+
+                                    fragBullet = new BulletType() {
+                                        {
+                                            speed = 0f;
+                                            keepVelocity = false;
+                                            collidesAir = false;
+
+                                            spawnUnit = new MissileUnitType("quell-missile") {
+                                                {
+                                                    targetAir = false;
+                                                    speed = 4.3f;
+                                                    maxRange = 6f;
+                                                    lifetime = 60f * (1.4f - 0.496f);
+                                                    outlineColor = Pal.darkOutline;
+                                                    engineColor = trailColor = Pal.sapBulletBack;
+                                                    engineLayer = Layer.effect;
+                                                    health = 45;
+                                                    loopSoundVolume = 0.1f;
+
+                                                    weapons.add(new Weapon() {
+                                                            {
+                                                                shootSound = Sounds.none;
+                                                                shootCone = 360f;
+                                                                mirror = false;
+                                                                reload = 1f;
+                                                                shootOnDeath = true;
+                                                                shootOnDeathEffect = Fx.massiveExplosion;
+                                                                bullet = new ExplosionBulletType(110f, 25f) {
+                                                                    {
+                                                                        shootEffect = new WrapEffect(Fx.shootQuellPulse, Pal.suppress);
+                                                                        collidesAir = false;
+                                                                    }
+                                                                };
+                                                            }
+                                                        });
+                                                }
+                                            };
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+
+                setEnginesMirror(
+                    new UnitEngine(62f / 4f, -60f / 4f, 3.9f, 315f),
+                    new UnitEngine(72f / 4f, -29f / 4f, 3f, 315f)
+                );
+            }
+        };
+
+        // ============================================================
+        //  disrupt-r  (战机 - 压制)
+        // ============================================================
+        disruptR = new UnitType("disrupt-r") {
+            {
+                constructor = PayloadUnit::create;
+                lowAltitude = false;
+                flying = true;
+                drag = 0.07f;
+                speed = 1f;
+                rotateSpeed = 2f;
+                accel = 0.1f;
+                health = 12000f;
+                armor = 9f;
+                hitSize = 46f;
+                payloadCapacity = Mathf.sqr(6f) * tilePayload;
+                targetAir = false;
+                envDisabled = 0;
+
+                engineSize = 6f;
+                engineOffset = 25.25f;
+
+                loopSound = Sounds.loopHover;
+
+                float orbRad = 5f, partRad = 3f;
+                int parts = 10;
+
+                abilities.add(new SuppressionFieldAbility() {
+                        {
+                            reload = 60f * 15f;
+                            range = 320f;
+                            orbRadius = orbRad;
+                            particleSize = partRad;
+                            y = 10f;
+                            particles = parts;
+                        }
+                    });
+
+                for (int i : Mathf.signs) {
+                    final int fi = i;
+                    abilities.add(new SuppressionFieldAbility() {
+                            {
+                                orbRadius = orbRad;
+                                particleSize = partRad;
+                                y = -32f / 4f;
+                                x = 43f * fi / 4f;
+                                particles = parts;
+                                active = false;
+                            }
+                        });
+                }
+
+                weapons.add(new Weapon("disrupt-weapon") {
+                        {
+                            shootSound = Sounds.shootMissileLarge;
+                            shootSoundVolume = 0.6f;
+                            x = 78f / 4f;
+                            y = -10f / 4f;
+                            mirror = true;
+                            rotate = true;
+                            rotateSpeed = 0.4f;
+                            reload = 70f;
+                            layerOffset = -20f;
+                            recoil = 1f;
+                            rotationLimit = 22f;
+                            minWarmup = 0.95f;
+                            shootWarmupSpeed = 0.1f;
+                            shootY = 2f;
+                            shootCone = 40f;
+
+                            shoot.shots = 3;
+                            shoot.shotDelay = 5f;
+                            inaccuracy = 28f;
+
+                            parts.add(new RegionPart("-blade") {
+                                    {
+                                        heatProgress = PartProgress.warmup;
+                                        progress = PartProgress.warmup.blend(PartProgress.reload, 0.15f);
+                                        heatColor = Color.valueOf("9c50ff");
+                                        x = 5f / 4f;
+                                        y = 0f;
+                                        moveRot = -33f;
+                                        moveY = -1f;
+                                        moveX = -1f;
+                                        under = true;
+                                        mirror = true;
+                                    }
+                                });
+
+                            bullet = new BulletType() {
+                                {
+                                    shootEffect = Fx.sparkShoot;
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    hitColor = Pal.suppress;
+                                    shake = 1f;
+                                    speed = 0f;
+                                    keepVelocity = false;
+                                    collidesAir = false;
+
+                                    spawnUnit = new MissileUnitType("disrupt-missile") {
+                                        {
+                                            targetAir = false;
+                                            speed = 4.6f;
+                                            maxRange = 5f;
+                                            outlineColor = Pal.darkOutline;
+                                            health = 70;
+                                            homingDelay = 10f;
+                                            lowAltitude = true;
+                                            engineSize = 3f;
+                                            engineColor = trailColor = Pal.sapBulletBack;
+                                            engineLayer = Layer.effect;
+                                            deathExplosionEffect = Fx.none;
+                                            loopSoundVolume = 0.1f;
+
+                                            parts.add(new ShapePart() {
+                                                    {
+                                                        layer = Layer.effect;
+                                                        circle = true;
+                                                        y = -0.25f;
+                                                        radius = 1.5f;
+                                                        color = Pal.suppress;
+                                                        colorTo = Color.white;
+                                                        progress = PartProgress.life.curve(Interp.pow5In);
+                                                    }
+                                                });
+
+                                            parts.add(new RegionPart("-fin") {
+                                                    {
+                                                        mirror = true;
+                                                        progress = PartProgress.life.mul(3f).curve(Interp.pow5In);
+                                                        moveRot = 32f;
+                                                        rotation = -6f;
+                                                        moveY = 1.5f;
+                                                        x = 3f / 4f;
+                                                        y = -6f / 4f;
+                                                    }
+                                                });
+
+                                            weapons.add(new Weapon() {
+                                                    {
+                                                        shootCone = 360f;
+                                                        mirror = false;
+                                                        reload = 1f;
+                                                        shootOnDeath = true;
+                                                        shootOnDeathEffect = Fx.massiveExplosion;
+                                                        bullet = new ExplosionBulletType(140f, 25f) {
+                                                            {
+                                                                collidesAir = false;
+                                                                suppressionRange = 140f;
+                                                                shootEffect = new ExplosionEffect() {
+                                                                    {
+                                                                        lifetime = 50f;
+                                                                        waveStroke = 5f;
+                                                                        waveLife = 12f;
+                                                                        waveColor = Pal.sap.cpy().mul(1.8f);
+                                                                        sparkColor = smokeColor = Pal.suppress;
+                                                                        waveRad = 40f;
+                                                                        smokeSize = 4f;
+                                                                        smokes = 7;
+                                                                        smokeSizeBase = 0f;
+                                                                        sparks = 10;
+                                                                        sparkRad = 40f;
+                                                                        sparkLen = 6f;
+                                                                        sparkStroke = 2f;
+                                                                    }
+                                                                };
+                                                            }
+                                                        };
+                                                    }
+                                                });
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+
+                setEnginesMirror(
+                    new UnitEngine(95f / 4f, -56f / 4f, 5f, 330f),
+                    new UnitEngine(89f / 4f, -95f / 4f, 4f, 315f)
+                );
+            }
+        };
+    }
+    private static void loadErekirSpiders() {
+        // ============================================================
+        //  merui-r
+        // ============================================================
+        meruiR = new GlowErekirLegsUnitType("merui-r") {
+            {
+                constructor = LegsUnit::create;
+                speed = 0.72f;
+                drag = 0.11f;
+                hitSize = 9f;
+                rotateSpeed = 3f;
+                health = 680f;
+                armor = 4f;
+                legStraightness = 0.3f;
+                stepShake = 0f;
+                stepSound = Sounds.walkerStepTiny;
+                stepSoundVolume = 0.4f;
+
+                legCount = 6;
+                legLength = 8f;
+                lockLegBase = true;
+                legContinuousMove = true;
+                legExtension = -2f;
+                legBaseOffset = 3f;
+                legMaxLength = 1.1f;
+                legMinLength = 0.2f;
+                legLengthScl = 0.96f;
+                legForwardScl = 1.1f;
+                legGroupSize = 3;
+                rippleScale = 0.2f;
+
+                legMoveSpace = 1f;
+                allowLegStep = true;
+                hovering = true;
+                legPhysicsLayer = false;
+
+                shadowElevation = 0.1f;
+                groundLayer = Layer.legUnit - 1f;
+                targetAir = false;
+
+                weapons.add(new Weapon("merui-weapon") {
+                        {
+                            shootSound = Sounds.shootMerui;
+                            mirror = false;
+                            showStatSprite = false;
+                            x = 0f;
+                            y = 1f;
+                            shootY = 4f;
+                            reload = 63f;
+                            cooldownTime = 42f;
+                            heatColor = Pal.turretHeat;
+
+                            bullet = new ArtilleryBulletType(3f, 40) {
+                                {
+                                    shootEffect = new MultiEffect(Fx.shootSmallColor, new Effect(9, e -> {
+                                                color(Color.white, e.color, e.fin());
+                                                stroke(0.7f + e.fout());
+                                                Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
+                                                Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
+                                            }));
+
+                                    collidesTiles = true;
+                                    backColor = hitColor = Pal.techBlue;
+                                    frontColor = Color.white;
+
+                                    knockback = 0.8f;
+                                    lifetime = 46f;
+                                    width = height = 9f;
+                                    splashDamageRadius = 19f;
+                                    splashDamage = 30f;
+
+                                    trailLength = 27;
+                                    trailWidth = 2.5f;
+                                    trailEffect = Fx.none;
+                                    trailColor = backColor;
+                                    trailInterp = Interp.slope;
+
+                                    shrinkX = 0.6f;
+                                    shrinkY = 0.2f;
+
+                                    hitEffect = despawnEffect = new MultiEffect(
+                                        Fx.hitSquaresColor,
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = colorTo = Pal.techBlue;
+                                                sizeTo = splashDamageRadius + 2f;
+                                                lifetime = 9f;
+                                                strokeFrom = 2f;
+                                            }
+                                        }
+                                    );
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  cleroi-r
+        // ============================================================
+        cleroiR = new GlowErekirLegsUnitType("cleroi-r") {
+            {
+                constructor = LegsUnit::create;
+                speed = 0.6f;
+                drag = 0.1f;
+                hitSize = 14f;
+                rotateSpeed = 3f;
+                health = 1100f;
+                armor = 5f;
+                stepShake = 0f;
+                stepSound = Sounds.walkerStepSmall;
+
+                legCount = 4;
+                legLength = 14f;
+                lockLegBase = true;
+                legContinuousMove = true;
+                legExtension = -3f;
+                legBaseOffset = 5f;
+                legMaxLength = 1.1f;
+                legMinLength = 0.2f;
+                legLengthScl = 0.95f;
+                legForwardScl = 0.7f;
+
+                legMoveSpace = 1f;
+                hovering = true;
+                shadowElevation = 0.2f;
+                groundLayer = Layer.legUnit - 1f;
+
+                // 5 个 spine 装饰
+                for (int i = 0; i < 5; i++) {
+                    int fi = i;
+                    parts.add(new RegionPart("-spine") {
+                            {
+                                y = 21f / 4f - 45f / 4f * fi / 4f;
+                                moveX = 21f / 4f + Mathf.slope(fi / 4f) * 1.25f;
+                                moveRot = 10f - fi * 14f;
+                                float fin = fi / 4f;
+                                progress = PartProgress.reload.inv().mul(1.3f).add(0.1f).sustain(fin * 0.34f, 0.14f, 0.14f);
+                                layerOffset = -0.001f;
+                                mirror = true;
+                            }
+                        });
+                }
+
+                weapons.add(new Weapon("cleroi-weapon") {
+                        {
+                            shootSound = Sounds.shootCleroi;
+                            x = 14f / 4f;
+                            y = 33f / 4f;
+                            reload = 33f;
+                            layerOffset = -0.002f;
+                            alternate = false;
+                            heatColor = Color.red;
+                            cooldownTime = 25f;
+                            smoothReloadSpeed = 0.15f;
+                            recoil = 2f;
+
+                            bullet = new BasicBulletType(3.5f, 30) {
+                                {
+                                    backColor = trailColor = hitColor = Pal.techBlue;
+                                    frontColor = Color.white;
+                                    width = 7.5f;
+                                    height = 10f;
+                                    lifetime = 40f;
+                                    trailWidth = 2f;
+                                    trailLength = 4;
+                                    shake = 1f;
+
+                                    trailEffect = Fx.missileTrail;
+                                    trailParam = 1.8f;
+                                    trailInterval = 6f;
+
+                                    splashDamageRadius = 30f;
+                                    splashDamage = 43f;
+
+                                    despawnSound = Sounds.explosionCleroi;
+
+                                    hitEffect = despawnEffect = new MultiEffect(
+                                        Fx.hitBulletColor,
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = colorTo = Pal.techBlue;
+                                                sizeTo = splashDamageRadius + 3f;
+                                                lifetime = 9f;
+                                                strokeFrom = 3f;
+                                            }
+                                        }
+                                    );
+
+                                    shootEffect = new MultiEffect(Fx.shootBigColor, new Effect(9, e -> {
+                                                color(Color.white, e.color, e.fin());
+                                                stroke(0.7f + e.fout());
+                                                Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
+                                                Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
+                                            }));
+
+                                    smokeEffect = Fx.shootSmokeSquare;
+                                    ammoMultiplier = 2;
+                                }
+                            };
+                        }
+                    });
+
+                weapons.add(new PointDefenseWeapon("cleroi-point-defense") {
+                        {
+                            x = 16f / 4f;
+                            y = -20f / 4f;
+                            reload = 9f;
+                            targetInterval = 9f;
+                            targetSwitchInterval = 12f;
+                            recoil = 0.5f;
+
+                            bullet = new BulletType() {
+                                {
+                                    shootSound = Sounds.shootLaser;
+                                    shootEffect = Fx.sparkShoot;
+                                    hitEffect = Fx.pointHit;
+                                    maxRange = 100f;
+                                    damage = 38f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  anthicus-r
+        // ============================================================
+        anthicusR = new GlowErekirLegsUnitType("anthicus-r") {
+            {
+                constructor = LegsUnit::create;
+                speed = 0.65f;
+                drag = 0.1f;
+                hitSize = 21f;
+                rotateSpeed = 3f;
+                health = 2700f;
+                armor = 7f;
+                fogRadius = 40f;
+                stepShake = 0f;
+                stepSound = Sounds.walkerStepSmall;
+                stepSoundPitch = 0.78f;
+
+                legCount = 6;
+                legLength = 18f;
+                legGroupSize = 3;
+                lockLegBase = true;
+                legContinuousMove = true;
+                legExtension = -3f;
+                legBaseOffset = 7f;
+                legMaxLength = 1.1f;
+                legMinLength = 0.2f;
+                legLengthScl = 0.95f;
+                legForwardScl = 0.9f;
+
+                legMoveSpace = 1f;
+                hovering = true;
+                shadowElevation = 0.2f;
+                groundLayer = Layer.legUnit - 1f;
+
+                // 3 对 blade 装饰
+                for (int j = 0; j < 3; j++) {
+                    int i = j;
+                    parts.add(new RegionPart("-blade") {
+                            {
+                                layerOffset = -0.01f;
+                                heatLayerOffset = 0.005f;
+                                x = 2f;
+                                moveX = 6f + i * 1.9f;
+                                moveY = 8f + -4f * i;
+                                moveRot = 40f - i * 25f;
+                                mirror = true;
+                                progress = PartProgress.warmup.delay(i * 0.2f);
+                                heatProgress = p -> Mathf.absin(Time.time + i * 14f, 7f, 1f);
+                                heatColor = Pal.techBlue;
+                            }
+                        });
+                }
+
+                weapons.add(new Weapon("anthicus-weapon") {
+                        {
+                            shootSound = Sounds.shootMissileLarge;
+                            shootSoundVolume = 0.5f;
+                            x = 29f / 4f;
+                            y = -11f / 4f;
+                            shootY = 1.5f;
+                            showStatSprite = false;
+                            reload = 130f;
+                            layerOffset = 0.01f;
+                            heatColor = Color.red;
+                            cooldownTime = 60f;
+                            smoothReloadSpeed = 0.15f;
+                            shootWarmupSpeed = 0.05f;
+                            minWarmup = 0.9f;
+                            rotationLimit = 70f;
+                            rotateSpeed = 2f;
+                            inaccuracy = 20f;
+                            shootStatus = StatusEffects.slow;
+                            alwaysShootWhenMoving = true;
+                            rotate = true;
+
+                            shoot = new ShootPattern() {
+                                {
+                                    shots = 2;
+                                    shotDelay = 6f;
+                                }
+                            };
+
+                            // 两个 blade 装饰
+                            parts.add(new RegionPart("-blade") {
+                                    {
+                                        mirror = true;
+                                        moveRot = -25f;
+                                        under = true;
+                                        moves.add(new PartMove(PartProgress.reload, 1f, 0f, 0f));
+                                        heatColor = Color.red;
+                                        cooldownTime = 60f;
+                                    }
+                                });
+
+                            parts.add(new RegionPart("-blade") {
+                                    {
+                                        mirror = true;
+                                        moveRot = -50f;
+                                        moveY = -2f;
+                                        moves.add(new PartMove(PartProgress.reload.shorten(0.5f), 1f, 0f, -15f));
+                                        under = true;
+                                        heatColor = Color.red;
+                                        cooldownTime = 60f;
+                                    }
+                                });
+
+                            bullet = new BulletType() {
+                                {
+                                    shootEffect = new MultiEffect(
+                                        Fx.shootBigColor,
+                                        new Effect(9, e -> {
+                                                color(Color.white, e.color, e.fin());
+                                                stroke(0.7f + e.fout());
+                                                Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
+                                                Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
+                                            }),
+                                        new WaveEffect() {
+                                            {
+                                                colorFrom = colorTo = Pal.techBlue;
+                                                sizeTo = 15f;
+                                                lifetime = 12f;
+                                                strokeFrom = 3f;
+                                            }
+                                        }
+                                    );
+
+                                    smokeEffect = Fx.shootBigSmoke2;
+                                    shake = 2f;
+                                    speed = 0f;
+                                    keepVelocity = false;
+                                    inaccuracy = 2f;
+
+                                    spawnUnit = new MissileUnitType("anthicus-missile") {
+                                        {
+                                            trailColor = engineColor = Pal.techBlue;
+                                            engineSize = 1.75f;
+                                            engineLayer = Layer.effect;
+                                            speed = 3.35f;
+                                            maxRange = 6f;
+                                            lifetime = 60f * 1.66f;
+                                            outlineColor = Pal.darkOutline;
+                                            health = 55f;
+                                            lowAltitude = true;
+
+                                            parts.add(new FlarePart() {
+                                                    {
+                                                        progress = PartProgress.life.slope().curve(Interp.pow2In);
+                                                        radius = 0f;
+                                                        radiusTo = 35f;
+                                                        stroke = 3f;
+                                                        rotation = 45f;
+                                                        y = -5f;
+                                                        followRotation = true;
+                                                    }
+                                                });
+
+                                            weapons.add(new Weapon() {
+                                                    {
+                                                        shootSound = Sounds.none;
+                                                        shootCone = 360f;
+                                                        mirror = false;
+                                                        reload = 1f;
+                                                        shootOnDeath = true;
+                                                        shootOnDeathEffect = Fx.massiveExplosion;
+
+                                                        bullet = new ExplosionBulletType(140f, 25f) {
+                                                            {
+                                                                shootEffect = new MultiEffect(
+                                                                    new WrapEffect(Fx.dynamicSpikes, Pal.techBlue, 24f),
+                                                                    new WaveEffect() {
+                                                                        {
+                                                                            colorFrom = colorTo = Pal.techBlue;
+                                                                            sizeTo = 40f;
+                                                                            lifetime = 12f;
+                                                                            strokeFrom = 4f;
+                                                                        }
+                                                                    }
+                                                                );
+                                                            }
+                                                        };
+                                                    }
+                                                });
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  tecta-r
+        // ============================================================
+        tectaR = new GlowErekirLegsUnitType("tecta-r") {
+            {
+                constructor = LegsUnit::create;
+                drag = 0.1f;
+                speed = 0.6f;
+                hitSize = 30f;
+                health = 6500f;
+                armor = 5f;
+
+                lockLegBase = true;
+                legContinuousMove = true;
+                legGroupSize = 3;
+                legStraightness = 0.4f;
+                baseLegStraightness = 0.5f;
+                legMaxLength = 1.3f;
+
+                stepSound = Sounds.walkerStep;
+                stepSoundVolume = 1f;
+                stepSoundPitch = 1f;
+
+                abilities.add(new ShieldArcAbility() {
+                        {
+                            region = "tecta-shield";
+                            radius = 45f;
+                            angle = 82f;
+                            regen = 45f / 60f;
+                            cooldown = 60f * 8f;
+                            max = 2500f;
+                            y = -20f;
+                            width = 8f;
+                            whenShooting = false;
+                            chanceDeflect = 1f;
+                        }
+                    });
+
+                rotateSpeed = 2.1f;
+
+                legCount = 6;
+                legLength = 15f;
+                legForwardScl = 0.45f;
+                legMoveSpace = 1.4f;
+                rippleScale = 2f;
+                stepShake = 0.5f;
+                legExtension = -5f;
+                legBaseOffset = 5f;
+
+                legSplashDamage = 32;
+                legSplashRange = 30;
+                drownTimeMultiplier = 0.5f;
+
+                hovering = true;
+                shadowElevation = 0.4f;
+                groundLayer = Layer.legUnit;
+
+                weapons.add(new Weapon("tecta-weapon") {
+                        {
+                            shootSound = Sounds.shootMalign;
+                            mirror = true;
+                            top = false;
+                            x = 62f / 4f;
+                            y = 1f;
+                            shootY = 47f / 4f;
+                            recoil = 3f;
+                            reload = 40f;
+                            shake = 3f;
+                            cooldownTime = 40f;
+
+                            shoot.shots = 3;
+                            inaccuracy = 3f;
+                            velocityRnd = 0.33f;
+                            heatColor = Color.red;
+
+                            bullet = new MissileBulletType(4.2f, 51) {
+                                {
+                                    homingPower = 0.2f;
+                                    weaveMag = 4;
+                                    weaveScale = 4;
+                                    lifetime = 55f;
+                                    shootEffect = Fx.shootBig2;
+                                    smokeEffect = Fx.shootSmokeTitan;
+                                    splashDamage = 60f;
+                                    splashDamageRadius = 30f;
+                                    frontColor = Color.white;
+                                    hitSound = Sounds.none;
+                                    width = height = 10f;
+
+                                    lightColor = trailColor = backColor = Pal.techBlue;
+                                    lightRadius = 40f;
+                                    lightOpacity = 0.7f;
+
+                                    trailWidth = 2.8f;
+                                    trailLength = 20;
+                                    trailChance = -1f;
+                                    despawnSound = Sounds.explosionDull;
+
+                                    despawnEffect = Fx.none;
+                                    hitEffect = new ExplosionEffect() {
+                                        {
+                                            lifetime = 20f;
+                                            waveStroke = 2f;
+                                            waveColor = sparkColor = trailColor;
+                                            waveRad = 12f;
+                                            smokeSize = 0f;
+                                            smokeSizeBase = 0f;
+                                            sparks = 10;
+                                            sparkRad = 35f;
+                                            sparkLen = 4f;
+                                            sparkStroke = 1.5f;
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  collaris-r
+        // ============================================================
+        collarisR = new GlowErekirLegsUnitType("collaris-r") {
+            {
+                constructor = LegsUnit::create;
+                drag = 0.1f;
+                speed = 1.1f;
+                hitSize = 44f;
+                health = 18000f;
+                armor = 9f;
+                rotateSpeed = 1.6f;
+                lockLegBase = true;
+                legContinuousMove = true;
+                legStraightness = 0.6f;
+                baseLegStraightness = 0.5f;
+
+                stepSound = Sounds.walkerStep;
+                stepSoundVolume = 1.1f;
+                stepSoundPitch = 0.9f;
+
+                legCount = 8;
+                legLength = 30f;
+                legForwardScl = 2.1f;
+                legMoveSpace = 1.05f;
+                rippleScale = 1.2f;
+                stepShake = 0.5f;
+                legGroupSize = 2;
+                legExtension = -6f;
+                legBaseOffset = 19f;
+                legStraightLength = 0.9f;
+                legMaxLength = 1.2f;
+
+                legSplashDamage = 32;
+                legSplashRange = 32;
+                drownTimeMultiplier = 0.5f;
+
+                hovering = true;
+                shadowElevation = 0.4f;
+                groundLayer = Layer.legUnit;
+
+                targetAir = false;
+                alwaysShootWhenMoving = true;
+
+                weapons.add(new Weapon("collaris-weapon") {
+                        {
+                            shootSound = Sounds.shootCollaris;
+                            mirror = true;
+                            rotationLimit = 30f;
+                            rotateSpeed = 0.4f;
+                            rotate = true;
+
+                            x = 48f / 4f;
+                            y = -28f / 4f;
+                            shootY = 64f / 4f;
+                            recoil = 4f;
+                            reload = 130f;
+                            cooldownTime = reload * 1.2f;
+                            shake = 7f;
+                            layerOffset = 0.02f;
+                            shadow = 10f;
+
+                            shootStatus = StatusEffects.slow;
+                            shootStatusDuration = reload + 170f;
+
+                            shoot.shots = 1;
+                            heatColor = Color.red;
+
+                            for (int i = 0; i < 5; i++) {
+                                int fi = i;
+                                parts.add(new RegionPart("-blade") {
+                                        {
+                                            under = true;
+                                            layerOffset = -0.001f;
+                                            heatColor = Pal.techBlue;
+                                            heatProgress = PartProgress.heat.add(0.2f).min(PartProgress.warmup);
+                                            progress = PartProgress.warmup.blend(PartProgress.reload, 0.1f);
+                                            x = 13.5f / 4f;
+                                            y = 10f / 4f - fi * 2f;
+                                            moveY = 1f - fi * 1f;
+                                            moveX = fi * 0.3f;
+                                            moveRot = -45f - fi * 17f;
+
+                                            moves.add(new PartMove(
+                                                    PartProgress.reload.inv().mul(1.8f).inv().curve(fi / 5f, 0.2f),
+                                                    0f, 0f, 36f));
+                                        }
+                                    });
+                            }
+
+                            bullet = new ArtilleryBulletType(5.5f, 260) {
+                                {
+                                    collidesTiles = collides = true;
+                                    lifetime = 60f;
+                                    shootEffect = Fx.shootBigColor;
+                                    smokeEffect = Fx.shootSmokeSquareBig;
+                                    frontColor = Color.white;
+                                    trailEffect = new MultiEffect(Fx.artilleryTrail, Fx.artilleryTrailSmoke);
+                                    hitSound = Sounds.none;
+                                    width = 18f;
+                                    height = 24f;
+                                    rangeOverride = 385f;
+
+                                    lightColor = trailColor = hitColor = backColor = Pal.techBlue;
+                                    lightRadius = 40f;
+                                    lightOpacity = 0.7f;
+
+                                    trailWidth = 4.5f;
+                                    trailLength = 19;
+                                    trailChance = -1f;
+
+                                    despawnEffect = Fx.none;
+                                    despawnSound = Sounds.explosionDull;
+
+                                    hitEffect = despawnEffect = new ExplosionEffect() {
+                                        {
+                                            lifetime = 50f;
+                                            waveStroke = 5f;
+                                            waveColor = sparkColor = trailColor;
+                                            waveRad = 45f;
+                                            smokeSize = 0f;
+                                            smokeSizeBase = 0f;
+                                            sparks = 10;
+                                            sparkRad = 25f;
+                                            sparkLen = 8f;
+                                            sparkStroke = 3f;
+                                        }
+                                    };
+
+                                    splashDamage = 120f;
+                                    splashDamageRadius = 36f;
+
+                                    fragBullets = 15;
+                                    fragVelocityMin = 0.5f;
+                                    fragRandomSpread = 130f;
+                                    fragLifeMin = 0.3f;
+                                    despawnShake = 5f;
+
+                                    fragBullet = new BasicBulletType(5.5f, 37) {
+                                        {
+                                            pierceCap = 2;
+                                            pierceBuilding = true;
+
+                                            homingPower = 0.09f;
+                                            homingRange = 150f;
+
+                                            lifetime = 40f;
+                                            shootEffect = Fx.shootBigColor;
+                                            smokeEffect = Fx.shootSmokeSquareBig;
+                                            frontColor = Color.white;
+                                            hitSound = Sounds.none;
+                                            width = 12f;
+                                            height = 20f;
+
+                                            lightColor = trailColor = hitColor = backColor = Pal.techBlue;
+                                            lightRadius = 40f;
+                                            lightOpacity = 0.7f;
+
+                                            trailWidth = 2.2f;
+                                            trailLength = 7;
+                                            trailChance = -1f;
+
+                                            collidesAir = false;
+
+                                            despawnEffect = Fx.none;
+                                            splashDamage = 35f;
+                                            splashDamageRadius = 30f;
+
+                                            hitEffect = despawnEffect = new MultiEffect(
+                                                new ExplosionEffect() {
+                                                    {
+                                                        lifetime = 30f;
+                                                        waveStroke = 2f;
+                                                        waveColor = sparkColor = trailColor;
+                                                        waveRad = 5f;
+                                                        smokeSize = 0f;
+                                                        smokeSizeBase = 0f;
+                                                        sparks = 5;
+                                                        sparkRad = 20f;
+                                                        sparkLen = 6f;
+                                                        sparkStroke = 2f;
+                                                    }
+                                                },
+                                                Fx.blastExplosion
+                                            );
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+    }
+    private static void loadCargoAndAssembly() {
+        // ============================================================
+        //  manifold-r  (货运无人机)
+        //  由 unit-cargo-loader 自动派出，负责埃里克尔的自动物流。
+        //  玩家看不见、无法控制，只在物流系统中出现。
+        // ============================================================
+        manifoldR = new ErekirUnitType("manifold-r") {
+            {
+                constructor = BuildingTetherPayloadUnit::create;
+                controller = u -> new CargoAI();
+                isEnemy = false;
+                allowedInPayloads = false;
+                logicControllable = false;
+                playerControllable = false;
+                envDisabled = 0;
+                payloadCapacity = 0f;
+
+                lowAltitude = false;
+                flying = true;
+                drag = 0.06f;
+                speed = 3.5f;
+                rotateSpeed = 9f;
+                accel = 0.1f;
+                itemCapacity = 100;
+                health = 200f;
+                hitSize = 11f;
+                engineSize = 2.3f;
+                engineOffset = 6.5f;
+                hidden = true;
+                targetable = false;
+
+                setEnginesMirror(
+                    new UnitEngine(24f / 4f, -24f / 4f, 2.3f, 315f)
+                );
+            }
+        };
+
+        // ============================================================
+        //  assembly-drone-r  (装配无人机)
+        //  由 UnitAssembler 自动派出，负责向组装厂运送部件。
+        //  内部单位，不显示在数据库中。
+        // ============================================================
+        assemblyDroneR = new ErekirUnitType("assembly-drone-r") {
+            {
+                constructor = BuildingTetherPayloadUnit::create;
+                controller = u -> new AssemblerAI();
+
+                flying = true;
+                drag = 0.06f;
+                accel = 0.11f;
+                speed = 1.3f;
+                health = 90f;
+                engineSize = 2f;
+                engineOffset = 6.5f;
+                payloadCapacity = 0f;
+                targetable = false;
+                bounded = false;
+
+                outlineColor = Pal.darkOutline;
+                isEnemy = false;
+                hidden = true;
+                useUnitCap = false;
+                logicControllable = false;
+                playerControllable = false;
+                allowedInPayloads = false;
+                createWreck = false;
+                envEnabled = Env.any;
+                envDisabled = Env.none;
+            }
+        };
+    }
+    private static void loadCoreUnits() {
+        // ============================================================
+        //  alpha-r  (塞普罗 T1 核心无人机)
+        // ============================================================
+        alphaR = new UnitType("alpha-r") {
+            {
+                controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
+                isEnemy = false;
+
+                targetBuildingsMobile = false;
+                lowAltitude = true;
+                flying = true;
+                mineSpeed = 6.5f;
+                mineTier = 1;
+                buildSpeed = 0.5f;
+                drag = 0.05f;
+                speed = 3f;
+                rotateSpeed = 15f;
+                accel = 0.1f;
+                fogRadius = 0f;
+                itemCapacity = 30;
+                health = 150f;
+                engineOffset = 6f;
+                hitSize = 8f;
+                alwaysUnlocked = true;
+                wreckSoundVolume = 0.8f;
+                deathSoundVolume = 0.7f;
+
+                weapons.add(new Weapon("small-basic-weapon") {
+                        {
+                            reload = 17f;
+                            x = 2.75f;
+                            y = 1f;
+                            top = false;
+                            shootSound = Sounds.shootAlpha;
+
+                            bullet = new LaserBoltBulletType(2.5f, 11) {
+                                {
+                                    scaleKeepVelocity = true;
+                                    width = 1.5f;
+                                    height = 4.5f;
+                                    hitEffect = despawnEffect = Fx.hitBulletColor;
+                                    trailWidth = 1.2f;
+                                    trailLength = 3;
+                                    shootEffect = Fx.shootSmallColor;
+                                    smokeEffect = Fx.hitLaserColor;
+                                    backColor = trailColor = Pal.yellowBoltFront;
+                                    hitColor = Pal.yellowBoltFront;
+                                    frontColor = Color.white;
+                                    lightColor = Pal.yellowBoltFront;
+
+                                    lifetime = 60f;
+                                    buildingDamageMultiplier = 0f;
+                                    homingPower = 0.02f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  beta-r  (塞普罗 T2 核心无人机)
+        // ============================================================
+        betaR = new UnitType("beta-r") {
+            {
+                controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
+                isEnemy = false;
+
+                targetBuildingsMobile = false;
+                flying = true;
+                mineSpeed = 7f;
+                mineTier = 1;
+                buildSpeed = 0.75f;
+                drag = 0.05f;
+                speed = 3.3f;
+                rotateSpeed = 17f;
+                accel = 0.1f;
+                fogRadius = 0f;
+                itemCapacity = 50;
+                health = 170f;
+                engineOffset = 6f;
+                hitSize = 9f;
+                lowAltitude = true;
+
+                weapons.add(new Weapon("small-mount-weapon") {
+                        {
+                            top = false;
+                            reload = 20f;
+                            x = 3f;
+                            y = 1f;
+                            recoil = 1f;
+                            shootSound = Sounds.shootAlpha;
+
+                            shoot.shots = 2;
+                            shoot.shotDelay = 4f;
+
+                            bullet = new LaserBoltBulletType(3f, 11) {
+                                {
+                                    scaleKeepVelocity = true;
+                                    width = 1.5f;
+                                    height = 4.5f;
+                                    hitEffect = despawnEffect = Fx.hitBulletColor;
+                                    trailWidth = 1.2f;
+                                    trailLength = 3;
+                                    shootEffect = Fx.shootSmallColor;
+                                    smokeEffect = Fx.hitLaserColor;
+                                    backColor = trailColor = Pal.yellowBoltFront;
+                                    hitColor = Pal.yellowBoltFront;
+                                    frontColor = Color.white;
+                                    lightColor = Pal.yellowBoltFront;
+
+                                    lifetime = 60f;
+                                    buildingDamageMultiplier = 0f;
+                                    homingPower = 0.03f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  gamma-r  (塞普罗 T3 核心无人机)
+        // ============================================================
+        gammaR = new UnitType("gamma-r") {
+            {
+                controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
+                isEnemy = false;
+
+                targetBuildingsMobile = false;
+                lowAltitude = true;
+                flying = true;
+                mineSpeed = 8f;
+                mineTier = 2;
+                buildSpeed = 1f;
+                drag = 0.05f;
+                speed = 3.55f;
+                rotateSpeed = 19f;
+                accel = 0.11f;
+                fogRadius = 0f;
+                itemCapacity = 70;
+                health = 220f;
+                engineOffset = 6f;
+                hitSize = 11f;
+
+                weapons.add(new Weapon("small-mount-weapon") {
+                        {
+                            top = false;
+                            reload = 15f;
+                            x = 1f;
+                            y = 2f;
+                            inaccuracy = 3f;
+                            shootSound = Sounds.shootAlpha;
+
+                            shoot = new ShootSpread() {
+                                {
+                                    shots = 2;
+                                    shotDelay = 3f;
+                                    spread = 2f;
+                                }
+                            };
+
+                            bullet = new LaserBoltBulletType(3.5f, 11) {
+                                {
+                                    scaleKeepVelocity = true;
+                                    width = 1.5f;
+                                    height = 5f;
+                                    hitEffect = despawnEffect = Fx.hitBulletColor;
+                                    trailWidth = 1.2f;
+                                    trailLength = 4;
+                                    shootEffect = Fx.shootSmallColor;
+                                    smokeEffect = Fx.hitLaserColor;
+                                    backColor = trailColor = Pal.yellowBoltFront;
+                                    hitColor = Pal.yellowBoltFront;
+                                    frontColor = Color.white;
+                                    lightColor = Pal.yellowBoltFront;
+
+                                    lifetime = 70f;
+                                    buildingDamageMultiplier = 0f;
+                                    homingPower = 0.04f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  evoke-r  (埃里克尔 T1 核心无人机)
+        // ============================================================
+        evokeR = new ErekirUnitType("evoke-r") {
+            {
+                constructor = PayloadUnit::create;
+                coreUnitDock = true;
+                controller = u -> new BuilderAI(true, 500f);
+                isEnemy = false;
+                envDisabled = 0;
+
+                range = 60f;
+                faceTarget = true;
+                targetPriority = -2;
+                lowAltitude = false;
+                mineWalls = true;
+                mineFloor = false;
+                mineHardnessScaling = false;
+                flying = true;
+                mineSpeed = 6f;
+                mineTier = 3;
+                buildSpeed = 1.2f;
+                drag = 0.08f;
+                speed = 5.6f;
+                rotateSpeed = 7f;
+                accel = 0.09f;
+                itemCapacity = 60;
+                health = 300f;
+                armor = 1f;
+                hitSize = 9f;
+                engineSize = 0f;
+                payloadCapacity = 2f * 2f * tilesize * tilesize;
+                pickupUnits = false;
+                vulnerableWithPayloads = true;
+
+                fogRadius = 0f;
+                targetable = false;
+                hittable = false;
+
+                setEnginesMirror(
+                    new UnitEngine(21f / 4f, 19f / 4f, 2.2f, 45f),
+                    new UnitEngine(23f / 4f, -22f / 4f, 2.2f, 315f)
+                );
+
+                weapons.add(new RepairBeamWeapon() {
+                        {
+                            widthSinMag = 0.11f;
+                            reload = 20f;
+                            x = 0f;
+                            y = 6.5f;
+                            rotate = false;
+                            shootY = 0f;
+                            beamWidth = 0.7f;
+                            repairSpeed = 3.1f;
+                            fractionRepairSpeed = 0.06f;
+                            aimDst = 0f;
+                            shootCone = 15f;
+                            mirror = false;
+
+                            targetUnits = false;
+                            targetBuildings = true;
+                            autoTarget = false;
+                            controllable = true;
+                            laserColor = Pal.accent;
+                            healColor = Pal.accent;
+
+                            bullet = new BulletType() {
+                                {
+                                    maxRange = 60f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  incite-r  (埃里克尔 T2 核心无人机)
+        // ============================================================
+        inciteR = new ErekirUnitType("incite-r") {
+            {
+                constructor = PayloadUnit::create;
+                coreUnitDock = true;
+                controller = u -> new BuilderAI(true, 500f);
+                isEnemy = false;
+                envDisabled = 0;
+
+                range = 60f;
+                targetPriority = -2;
+                lowAltitude = false;
+                faceTarget = true;
+                mineWalls = true;
+                mineFloor = false;
+                mineHardnessScaling = false;
+                flying = true;
+                mineSpeed = 8f;
+                mineTier = 3;
+                buildSpeed = 1.4f;
+                drag = 0.08f;
+                speed = 7f;
+                rotateSpeed = 8f;
+                accel = 0.09f;
+                itemCapacity = 90;
+                health = 500f;
+                armor = 2f;
+                hitSize = 11f;
+                payloadCapacity = 2f * 2f * tilesize * tilesize;
+                pickupUnits = false;
+                vulnerableWithPayloads = true;
+
+                fogRadius = 0f;
+                targetable = false;
+                hittable = false;
+
+                engineOffset = 7.2f;
+                engineSize = 3.1f;
+
+                setEnginesMirror(
+                    new UnitEngine(25f / 4f, -1f / 4f, 2.4f, 300f)
+                );
+
+                weapons.add(new RepairBeamWeapon() {
+                        {
+                            widthSinMag = 0.11f;
+                            reload = 20f;
+                            x = 0f;
+                            y = 7.5f;
+                            rotate = false;
+                            shootY = 0f;
+                            beamWidth = 0.7f;
+                            aimDst = 0f;
+                            shootCone = 15f;
+                            mirror = false;
+
+                            repairSpeed = 3.3f;
+                            fractionRepairSpeed = 0.06f;
+
+                            targetUnits = false;
+                            targetBuildings = true;
+                            autoTarget = false;
+                            controllable = true;
+                            laserColor = Pal.accent;
+                            healColor = Pal.accent;
+
+                            bullet = new BulletType() {
+                                {
+                                    maxRange = 60f;
+                                }
+                            };
+                        }
+                    });
+
+                drawBuildBeam = false;
+
+                weapons.add(new BuildWeapon("build-weapon") {
+                        {
+                            rotate = true;
+                            rotateSpeed = 7f;
+                            x = 14f / 4f;
+                            y = 15f / 4f;
+                            layerOffset = -0.001f;
+                            shootY = 3f;
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  emanate-r  (埃里克尔 T3 核心无人机)
+        // ============================================================
+        emanateR = new ErekirUnitType("emanate-r") {
+            {
+                constructor = PayloadUnit::create;
+                coreUnitDock = true;
+                controller = u -> new BuilderAI(true, 500f);
+                isEnemy = false;
+                envDisabled = 0;
+
+                range = 65f;
+                faceTarget = true;
+                targetPriority = -2;
+                lowAltitude = false;
+                mineWalls = true;
+                mineFloor = false;
+                mineHardnessScaling = false;
+                flying = true;
+                mineSpeed = 9f;
+                mineTier = 3;
+                buildSpeed = 1.5f;
+                drag = 0.08f;
+                speed = 7.5f;
+                rotateSpeed = 8f;
+                accel = 0.08f;
+                itemCapacity = 110;
+                health = 700f;
+                armor = 3f;
+                hitSize = 12f;
+                buildBeamOffset = 8f;
+                payloadCapacity = 2f * 2f * tilesize * tilesize;
+                pickupUnits = false;
+                vulnerableWithPayloads = true;
+
+                fogRadius = 0f;
+                targetable = false;
+                hittable = false;
+
+                engineOffset = 7.5f;
+                engineSize = 3.4f;
+
+                setEnginesMirror(
+                    new UnitEngine(35f / 4f, -13f / 4f, 2.7f, 315f),
+                    new UnitEngine(28f / 4f, -35f / 4f, 2.7f, 315f)
+                );
+
+                weapons.add(new RepairBeamWeapon() {
+                        {
+                            widthSinMag = 0.11f;
+                            reload = 20f;
+                            x = 19f / 4f;
+                            y = 19f / 4f;
+                            rotate = false;
+                            shootY = 0f;
+                            beamWidth = 0.7f;
+                            aimDst = 0f;
+                            shootCone = 40f;
+                            mirror = true;
+
+                            repairSpeed = 3.6f / 2f;
+                            fractionRepairSpeed = 0.03f;
+
+                            targetUnits = false;
+                            targetBuildings = true;
+                            autoTarget = false;
+                            controllable = true;
+                            laserColor = Pal.accent;
+                            healColor = Pal.accent;
+
+                            bullet = new BulletType() {
+                                {
+                                    maxRange = 65f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+    }
+    private static void loadSerpuloExclusive() {
+        // ============================================================
+        //  stell-serpulo  (塞普罗特供 T1 坦克)
+        // ============================================================
+        stellSerpulo = new TankUnitType("stell-serpulo") {
+            {
+                constructor = TankUnit::create;
+                hitSize = 12f;
+                treadPullOffset = 3;
+                speed = 0.75f;
+                faceTarget = false;
+                omniMovement = false;
+                squareShape = true;
+                rotateMoveFirst = false;
+                rotateSpeed = 3.5f;
+                health = 200f;
+                armor = 1f;
+                itemCapacity = 50;
+                floorMultiplier = 0.95f;
+                treadRects = new Rect[]{
+                    new Rect(-20f, -25f, 14f, 51f) };
+
+                tankMoveVolume = 0.32f;
+                tankMoveSound = Sounds.tankMoveSmall;
+
+                weapons.add(new Weapon("stell-serpulo-weapon") {
+                        {
+                            shootSound = Sounds.shootStell;
+                            layerOffset = 0.0001f;
+                            reload = 50f;
+                            shootY = 4.5f;
+                            recoil = 1f;
+                            rotate = true;
+                            rotateSpeed = 2.2f;
+                            mirror = false;
+                            x = 0f;
+                            y = -0.75f;
+                            heatColor = Color.valueOf("ffa665");
+                            cooldownTime = 30f;
+
+                            bullet = new BasicBulletType(8f, 20) {
+                                {
+                                    sprite = "missile-large";
+                                    smokeEffect = Fx.shootBigSmoke;
+                                    shootEffect = Fx.shootBigColor;
+                                    width = 5f;
+                                    height = 7f;
+                                    lifetime = 20f;
+                                    hitSize = 4f;
+                                    hitColor = backColor = trailColor = Color.valueOf("feb380");
+                                    frontColor = Color.white;
+                                    trailWidth = 1.7f;
+                                    trailLength = 5;
+                                    despawnEffect = hitEffect = Fx.hitBulletColor;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+
+        // ============================================================
+        //  elude-serpulo  (塞普罗特供 T1 悬浮飞艇)
+        // ============================================================
+        eludeSerpulo = new UnitType("elude-serpulo") {
+            {
+                constructor = ElevationMoveUnit::create;
+                hovering = true;
+                canDrown = false;
+                shadowElevation = 0.1f;
+
+                drag = 0.07f;
+                speed = 1.8f;
+                rotateSpeed = 5f;
+                accel = 0.09f;
+                health = 125f;
+                armor = 0f;
+                hitSize = 11f;
+                engineOffset = 7f;
+                engineSize = 2f;
+                itemCapacity = 30;
+                useEngineElevation = false;
+
+                moveSound = Sounds.loopExtract;
+                moveSoundVolume = 0.25f;
+                moveSoundPitchMin = 0.7f;
+                moveSoundPitchMax = 1.5f;
+
+                abilities.add(new MoveEffectAbility() {
+                        {
+                            interval = 4f;
+                            minVelocity = 0.5f;
+                            effect = Fx.missileTrail;
+                            color = Color.valueOf("ffbb64");
+                            x = 0f;
+                            y = -7f;
+                            teamColor = true;
+                        }
+                    });
+
+                // 两对 hover 装饰
+                for (float f : new float[]{
+                        -3f, 3f}) {
+                    final float fy = f;
+                    parts.add(new HoverPart() {
+                            {
+                                x = 3.9f;
+                                y = fy;
+                                mirror = true;
+                                radius = 6f;
+                                phase = 90f;
+                                stroke = 2f;
+                                layerOffset = -0.001f;
+                                color = Color.valueOf("bf92f9");
+                            }
+                        });
+                }
+
+                weapons.add(new Weapon("elude-serpulo-weapon") {
+                        {
+                            shootSound = Sounds.shootElude;
+                            y = -2f;
+                            x = 4f;
+                            top = true;
+                            mirror = true;
+                            reload = 40f;
+                            baseRotation = -35f;
+                            shootCone = 360f;
+                            cooldownTime = 30f;
+                            heatColor = Color.valueOf("bf92f9");
+
+                            shoot = new ShootSpread() {
+                                {
+                                    shots = 2;
+                                    spread = 11f;
+                                }
+                            };
+
+                            bullet = new BasicBulletType(5f, 4) {
+                                {
+                                    homingPower = 0.19f;
+                                    homingDelay = 4f;
+                                    width = 7f;
+                                    height = 12f;
+                                    lifetime = 30f;
+                                    shootEffect = Fx.sparkShoot;
+                                    smokeEffect = Fx.shootBigSmoke;
+                                    hitColor = Color.valueOf("a47aff");
+                                    backColor = Color.valueOf("a47aff");
+                                    trailColor = Color.valueOf("a47aff");
+                                    frontColor = Color.white;
+                                    trailWidth = 1.5f;
+                                    trailLength = 5;
+                                    hitEffect = Fx.hitBulletColor;
                                     despawnEffect = Fx.hitBulletColor;
                                 }
                             };
                         }
                     });
             }
-        }
-    };
+        };
 
-    // ============================================================
-    //  conquer-r
-    // ============================================================
-    conquerR = new TankUnitType("conquer-r") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 46f;
-            treadPullOffset = 1;
-            speed = 0.48f;
-            health = 22000f;
-            armor = 26f;
-            crushDamage = 25f / 5f;
-            rotateSpeed = 0.8f;
-            floorMultiplier = 0.3f;
-            immunities.addAll(StatusEffects.burning, StatusEffects.melting);
+        // ============================================================
+        //  merui-serpulo  (塞普罗特供 T1 多足机甲)
+        // ============================================================
+        meruiSerpulo = new GlowErekirLegsUnitType("merui-serpulo") {
+            {
+                constructor = LegsUnit::create;
+                speed = 0.72f;
+                drag = 0.11f;
+                hitSize = 9f;
+                rotateSpeed = 3f;
+                health = 240f;
+                armor = 2f;
+                legStraightness = 0.3f;
+                stepShake = 0f;
+                stepSound = Sounds.walkerStepTiny;
+                stepSoundVolume = 0.4f;
 
-            tankMoveVolume *= 1.5f;
-            tankMoveSound = Sounds.tankMoveHeavy;
-            crushFragile = true;
+                legCount = 6;
+                legLength = 8f;
+                lockLegBase = true;
+                legContinuousMove = true;
+                legExtension = -2f;
+                legBaseOffset = 3f;
+                legMaxLength = 1.1f;
+                legMinLength = 0.2f;
+                legLengthScl = 0.96f;
+                legForwardScl = 1.1f;
+                legGroupSize = 3;
+                rippleScale = 0.2f;
 
-            float xo = 231f / 2f, yo = 231f / 2f;
-            treadRects = new Rect[]{
-                new Rect(27f - xo, 152f - yo, 56f, 73f),
-                new Rect(24f - xo, 51f - 9f - yo, 29f, 17f),
-                new Rect(59f - xo, 18f - 9f - yo, 39f, 19f)
-            };
+                legMoveSpace = 1f;
+                allowLegStep = true;
+                hovering = true;
+                legPhysicsLayer = false;
 
-            weapons.add(new Weapon("conquer-weapon") {
-                    {
-                        shootSound = Sounds.shootConquer;
-                        layerOffset = 0.1f;
-                        reload = 100f;
-                        shootY = 32.5f;
-                        shake = 5f;
-                        recoil = 5f;
-                        rotate = true;
-                        rotateSpeed = 0.6f;
-                        mirror = false;
-                        x = 0f;
-                        y = -2f;
-                        shadow = 50f;
-                        heatColor = Color.valueOf("f9350f");
-                        shootWarmupSpeed = 0.06f;
-                        cooldownTime = 110f;
-                        minWarmup = 0.9f;
+                shadowElevation = 0.1f;
+                groundLayer = Layer.legUnit - 1f;
+                targetAir = false;
 
-                        bullet = new BasicBulletType(8f, 360f) {
-                            {
-                                sprite = "missile-large";
-                                width = 12f;
-                                height = 20f;
-                                lifetime = 35f;
-                                hitSize = 6f;
-
-                                smokeEffect = Fx.shootSmokeTitan;
-                                pierceCap = 3;
-                                pierce = true;
-                                pierceBuilding = true;
-                                hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                frontColor = Color.white;
-                                trailWidth = 4f;
-                                trailLength = 9;
-                                hitEffect = despawnEffect = Fx.massiveExplosion;
-
-                                shootEffect = new ExplosionEffect() {
-                                    {
-                                        lifetime = 40f;
-                                        waveStroke = 4f;
-                                        waveColor = sparkColor = trailColor;
-                                        waveRad = 15f;
-                                        smokeSize = 5f;
-                                        smokes = 8;
-                                        smokeSizeBase = 0f;
-                                        smokeColor = trailColor;
-                                        sparks = 8;
-                                        sparkRad = 40f;
-                                        sparkLen = 4f;
-                                        sparkStroke = 3f;
-                                    }
-                                };
-
-                                // 6 对子子弹
-                                int count = 6;
-                                for (int j = 0; j < count; j++) {
-                                    int s = j;
-                                    for (int i : Mathf.signs) {
-                                        float fin = 0.05f + (j + 1) / (float) count;
-                                        float spd = speed;
-                                        float life = lifetime / Mathf.lerp(fin, 1f, 0.5f);
-                                        boolean show = j == 0 && i > 0;
-                                        spawnBullets.add(new BasicBulletType(spd * fin, 60) {
-                                                {
-                                                    drag = 0.002f;
-                                                    width = 12f;
-                                                    height = 11f;
-                                                    lifetime = life + 5f;
-                                                    weaveRandom = false;
-                                                    hitSize = 5f;
-                                                    pierceCap = 2;
-                                                    pierce = true;
-                                                    showStats = show;
-                                                    pierceBuilding = true;
-                                                    hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                                    frontColor = Color.white;
-                                                    trailWidth = 2.5f;
-                                                    trailLength = 7;
-                                                    weaveScale = (3f + s / 2f) / 1.2f;
-                                                    weaveMag = i * (4f - fin * 2f);
-
-                                                    splashDamage = 65f;
-                                                    splashDamageRadius = 30f;
-                                                    despawnEffect = Fx.blastExplosion;
-                                                }
-                                            });
-                                    }
-                                }
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
-private static void loadErekirAir() {
-    // ============================================================
-    //  elude-r  (悬浮单位)
-    // ============================================================
-    eludeR = new UnitType("elude-r") {
-        {
-            constructor = ElevationMoveUnit::create;
-            hovering = true;
-            canDrown = false;
-            shadowElevation = 0.1f;
-
-            drag = 0.07f;
-            speed = 1.8f;
-            rotateSpeed = 5f;
-            accel = 0.09f;
-            health = 600f;
-            armor = 1f;
-            hitSize = 11f;
-            engineOffset = 7f;
-            engineSize = 2f;
-            itemCapacity = 0;
-            useEngineElevation = false;
-
-            moveSound = Sounds.loopExtract;
-            moveSoundVolume = 0.25f;
-            moveSoundPitchMin = 0.7f;
-            moveSoundPitchMax = 1.5f;
-
-            abilities.add(new MoveEffectAbility(0f, -7f, Pal.sapBulletBack, Fx.missileTrailShort, 4f) {
-                    {
-                        teamColor = true;
-                    }
-                });
-
-            for (float f : new float[]{
-                    -3f, 3f}) {
-                final float fy = f;
-                parts.add(new HoverPart() {
+                weapons.add(new Weapon("merui-serpulo-weapon") {
                         {
-                            x = 3.9f;
-                            y = fy;
-                            mirror = true;
-                            radius = 6f;
-                            phase = 90f;
-                            stroke = 2f;
-                            layerOffset = -0.001f;
-                            color = Color.valueOf("bf92f9");
-                        }
-                    });
-            }
+                            shootSound = Sounds.shootMerui;
+                            mirror = false;
+                            showStatSprite = false;
+                            x = 0f;
+                            y = 0f;
+                            shootY = 5f;
+                            reload = 63f;
+                            recoil = 0f;
+                            cooldownTime = 42f;
+                            heatColor = Color.valueOf("d1efff");
 
-            weapons.add(new Weapon("elude-weapon") {
-                    {
-                        shootSound = Sounds.shootElude;
-                        y = -2f;
-                        x = 4f;
-                        top = true;
-                        mirror = true;
-                        reload = 40f;
-                        baseRotation = -35f;
-                        shootCone = 360f;
-
-                        shoot = new ShootSpread(2, 11f);
-
-                        bullet = new BasicBulletType(5f, 16) {
-                            {
-                                homingPower = 0.19f;
-                                homingDelay = 4f;
-                                width = 7f;
-                                height = 12f;
-                                lifetime = 30f;
-                                shootEffect = Fx.sparkShoot;
-                                smokeEffect = Fx.shootBigSmoke;
-                                hitColor = backColor = trailColor = Pal.suppress;
-                                frontColor = Color.white;
-                                trailWidth = 1.5f;
-                                trailLength = 5;
-                                hitEffect = despawnEffect = Fx.hitBulletColor;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  avert-r  (战机)
-    // ============================================================
-    avertR = new UnitType("avert-r") {
-        {
-            lowAltitude = false;
-            flying = true;
-            drag = 0.08f;
-            speed = 2f;
-            rotateSpeed = 8f;
-            accel = 0.09f;
-            health = 1100f;
-            armor = 3f;
-            hitSize = 12f;
-            engineSize = 0f;
-            fogRadius = 25f;
-            itemCapacity = 0;
-
-            setEnginesMirror(
-                new UnitEngine(35f / 4f, -38f / 4f, 3f, 315f),
-                new UnitEngine(39f / 4f, -16f / 4f, 3f, 315f)
-            );
-
-            weapons.add(new Weapon("avert-weapon") {
-                    {
-                        shootSound = Sounds.shootAvert;
-                        reload = 35f;
-                        x = 0f;
-                        y = 6.5f;
-                        shootY = 5f;
-                        recoil = 1f;
-                        top = false;
-                        layerOffset = -0.01f;
-                        rotate = false;
-                        mirror = false;
-                        shoot = new ShootHelix();
-
-                        bullet = new BasicBulletType(5f, 22f / 0.75f) {
-                            {
-                                width = 7f;
-                                height = 12f;
-                                lifetime = 18f;
-                                buildingDamageMultiplier = 0.599999f;
-                                blockArmorMultiplier = 0.5f;
-                                shootEffect = Fx.sparkShoot;
-                                smokeEffect = Fx.shootBigSmoke;
-                                hitColor = backColor = trailColor = Pal.suppress;
-                                frontColor = Color.white;
-                                trailWidth = 1.5f;
-                                trailLength = 5;
-                                hitEffect = despawnEffect = new MultiEffect(Fx.hitSquaresColor, Fx.squareWaveEffect);
-
-                                fragOnDespawn = false;
-                                fragBullets = 2;
-
-                                fragBullet = new BasicBulletType(3f, 10) {
-                                    {
-                                        width = 5f;
-                                        height = 8f;
-                                        lifetime = 14f;
-                                        fragVelocityMax = 1f;
-                                        fragVelocityMin = 0.7f;
-                                        hitColor = backColor = trailColor = Pal.suppress;
-                                        frontColor = Color.white;
-                                        trailWidth = 1.2f;
-                                        trailLength = 4;
-                                        hitEffect = despawnEffect = Fx.hitBulletColor;
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  obviate-r  (战机)
-    // ============================================================
-    obviateR = new UnitType("obviate-r") {
-        {
-            flying = true;
-            drag = 0.08f;
-            speed = 1.8f;
-            rotateSpeed = 2.5f;
-            accel = 0.09f;
-            health = 2300f;
-            armor = 6f;
-            hitSize = 25f;
-            engineSize = 4.3f;
-            engineOffset = 54f / 4f;
-            fogRadius = 25f;
-            itemCapacity = 0;
-            lowAltitude = true;
-
-            setEnginesMirror(
-                new UnitEngine(38f / 4f, -46f / 4f, 3.1f, 315f)
-            );
-
-            parts.add(new RegionPart("-blade") {
-                    {
-                        moveRot = -10f;
-                        moveX = -1f;
-                        moves.add(new PartMove(PartProgress.reload, 2f, 1f, -5f));
-                        progress = PartProgress.warmup;
-                        mirror = true;
-
-                        children.add(new RegionPart("-side") {
+                            bullet = new ArtilleryBulletType(6f, 15) {
                                 {
-                                    moveX = 2f;
-                                    moveY = -2f;
-                                    progress = PartProgress.warmup;
-                                    under = true;
-                                    mirror = true;
-                                    moves.add(new PartMove(PartProgress.reload, -2f, 2f, 0f));
-                                }
-                            });
-                    }
-                });
+                                    collidesTiles = true;
+                                    backColor = Color.valueOf("8ca9e8");
+                                    hitColor = Color.valueOf("8ca9e8");
+                                    frontColor = Color.white;
+                                    knockback = 0.8f;
+                                    lifetime = 23f;
+                                    width = 9f;
+                                    height = 9f;
+                                    splashDamageRadius = 19f;
+                                    splashDamage = 25f;
 
-            weapons.add(new Weapon() {
-                    {
-                        shootSound = Sounds.explosionObviate;
-                        x = 0f;
-                        y = -2f;
-                        shootY = 0f;
-                        reload = 140f;
-                        mirror = false;
-                        minWarmup = 0.95f;
-                        shake = 3f;
-                        cooldownTime = reload - 10f;
+                                    trailLength = 27;
+                                    trailWidth = 2.5f;
+                                    trailEffect = Fx.none;
+                                    trailColor = Color.valueOf("8ca9e8");
+                                    trailInterp = Interp.slope;
 
-                        bullet = new BasicBulletType() {
-                            {
-                                shoot = new ShootHelix() {
-                                    {
-                                        mag = 1f;
-                                        scl = 5f;
-                                    }
-                                };
+                                    shrinkX = 0.6f;
+                                    shrinkY = 0.2f;
 
-                                shootEffect = new MultiEffect(Fx.shootTitan, new WaveEffect() {
-                                        {
-                                            colorTo = Pal.sapBulletBack;
-                                            sizeTo = 26f;
-                                            lifetime = 14f;
-                                            strokeFrom = 4f;
-                                        }
-                                    });
-                                smokeEffect = Fx.shootSmokeTitan;
-                                hitColor = Pal.sapBullet;
-                                despawnSound = Sounds.explosionArtilleryShock;
-
-                                sprite = "large-orb";
-                                trailEffect = Fx.missileTrail;
-                                trailInterval = 3f;
-                                trailParam = 4f;
-                                speed = 3f;
-                                damage = 75f;
-                                lifetime = 60f;
-                                width = height = 15f;
-                                backColor = Pal.sapBulletBack;
-                                frontColor = Pal.sapBullet;
-                                shrinkX = shrinkY = 0f;
-                                trailColor = Pal.sapBulletBack;
-                                trailLength = 12;
-                                trailWidth = 2.2f;
-
-                                despawnEffect = hitEffect = new ExplosionEffect() {
-                                    {
-                                        waveColor = Pal.sapBullet;
-                                        smokeColor = Color.gray;
-                                        sparkColor = Pal.sap;
-                                        waveStroke = 4f;
-                                        waveRad = 40f;
-                                    }
-                                };
-
-                                intervalBullet = new LightningBulletType() {
-                                    {
-                                        damage = 16f;
-                                        collidesAir = false;
-                                        ammoMultiplier = 1f;
-                                        lightningColor = Pal.sapBullet;
-                                        lightningLength = 3;
-                                        lightningLengthRand = 6;
-                                        buildingDamageMultiplier = 0.25f;
-
-                                        lightningType = new BulletType(0.0001f, 0f) {
+                                    hitEffect = despawnEffect = new MultiEffect(
+                                        Fx.hitSquaresColor,
+                                        new WaveEffect() {
                                             {
-                                                lifetime = Fx.lightning.lifetime;
-                                                hitEffect = Fx.hitLancer;
-                                                despawnEffect = Fx.none;
-                                                status = StatusEffects.shocked;
-                                                statusDuration = 10f;
-                                                hittable = false;
-                                                lightColor = Color.white;
-                                                buildingDamageMultiplier = 0.25f;
+                                                colorFrom = colorTo = Color.valueOf("8ca9e8");
+                                                sizeTo = 21f;
+                                                lifetime = 9f;
+                                                strokeFrom = 2f;
                                             }
-                                        };
-                                    }
-                                };
-
-                                bulletInterval = 4f;
-
-                                lightningColor = Pal.sapBullet;
-                                lightningDamage = 17f;
-                                lightning = 8;
-                                lightningLength = 2;
-                                lightningLengthRand = 8;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  quell-r  (战机 - 导弹)
-    // ============================================================
-    quellR = new UnitType("quell-r") {
-        {
-            constructor = PayloadUnit::create;
-            lowAltitude = false;
-            flying = true;
-            drag = 0.06f;
-            speed = 1.1f;
-            rotateSpeed = 3.2f;
-            accel = 0.1f;
-            health = 6000f;
-            armor = 4f;
-            hitSize = 36f;
-            payloadCapacity = Mathf.sqr(4f) * tilePayload;
-            targetAir = false;
-            envDisabled = 0;
-
-            engineSize = 4.8f;
-            engineOffset = 61f / 4f;
-            range = 4.3f * 60f * 1.4f;
-
-            loopSoundVolume = 0.85f;
-            loopSound = Sounds.loopHover;
-
-            abilities.add(new SuppressionFieldAbility() {
-                    {
-                        reload = 60f * 8f;
-                        orbRadius = 5.3f;
-                        y = 1f;
-                    }
-                });
-
-            weapons.add(new Weapon("quell-weapon") {
-                    {
-                        shootSound = Sounds.shootMissileSmall;
-                        x = 51f / 4f;
-                        y = 5f / 4f;
-                        rotate = true;
-                        rotateSpeed = 2f;
-                        reload = 55f;
-                        layerOffset = -0.001f;
-                        recoil = 1f;
-                        rotationLimit = 60f;
-
-                        bullet = new BasicBulletType(4.3f, 70f, "missile-large") {
-                            {
-                                shootEffect = Fx.shootBig;
-                                smokeEffect = Fx.shootBigSmoke2;
-                                shake = 1f;
-                                lifetime = 60f * 0.496f;
-                                rangeOverride = 361.2f;
-                                followAimSpeed = 5f;
-
-                                width = 12f;
-                                height = 22f;
-                                hitSize = 7f;
-                                hitColor = backColor = trailColor = Pal.sapBulletBack;
-                                trailWidth = 3f;
-                                trailLength = 12;
-                                hitEffect = despawnEffect = Fx.hitBulletColor;
-
-                                keepVelocity = false;
-                                collidesGround = true;
-                                collidesAir = false;
-
-                                fragRandomSpread = 0f;
-                                fragBullets = 1;
-                                fragVelocityMin = 1f;
-                                fragOffsetMax = 1f;
-
-                                fragBullet = new BulletType() {
-                                    {
-                                        speed = 0f;
-                                        keepVelocity = false;
-                                        collidesAir = false;
-
-                                        spawnUnit = new MissileUnitType("quell-missile") {
-                                            {
-                                                targetAir = false;
-                                                speed = 4.3f;
-                                                maxRange = 6f;
-                                                lifetime = 60f * (1.4f - 0.496f);
-                                                outlineColor = Pal.darkOutline;
-                                                engineColor = trailColor = Pal.sapBulletBack;
-                                                engineLayer = Layer.effect;
-                                                health = 45;
-                                                loopSoundVolume = 0.1f;
-
-                                                weapons.add(new Weapon() {
-                                                        {
-                                                            shootSound = Sounds.none;
-                                                            shootCone = 360f;
-                                                            mirror = false;
-                                                            reload = 1f;
-                                                            shootOnDeath = true;
-                                                            shootOnDeathEffect = Fx.massiveExplosion;
-                                                            bullet = new ExplosionBulletType(110f, 25f) {
-                                                                {
-                                                                    shootEffect = new WrapEffect(Fx.shootQuellPulse, Pal.suppress);
-                                                                    collidesAir = false;
-                                                                }
-                                                            };
-                                                        }
-                                                    });
-                                            }
-                                        };
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-
-            setEnginesMirror(
-                new UnitEngine(62f / 4f, -60f / 4f, 3.9f, 315f),
-                new UnitEngine(72f / 4f, -29f / 4f, 3f, 315f)
-            );
-        }
-    };
-
-    // ============================================================
-    //  disrupt-r  (战机 - 压制)
-    // ============================================================
-    disruptR = new UnitType("disrupt-r") {
-        {
-            constructor = PayloadUnit::create;
-            lowAltitude = false;
-            flying = true;
-            drag = 0.07f;
-            speed = 1f;
-            rotateSpeed = 2f;
-            accel = 0.1f;
-            health = 12000f;
-            armor = 9f;
-            hitSize = 46f;
-            payloadCapacity = Mathf.sqr(6f) * tilePayload;
-            targetAir = false;
-            envDisabled = 0;
-
-            engineSize = 6f;
-            engineOffset = 25.25f;
-
-            loopSound = Sounds.loopHover;
-
-            float orbRad = 5f, partRad = 3f;
-            int parts = 10;
-
-            abilities.add(new SuppressionFieldAbility() {
-                    {
-                        reload = 60f * 15f;
-                        range = 320f;
-                        orbRadius = orbRad;
-                        particleSize = partRad;
-                        y = 10f;
-                        particles = parts;
-                    }
-                });
-
-            for (int i : Mathf.signs) {
-                final int fi = i;
-                abilities.add(new SuppressionFieldAbility() {
-                        {
-                            orbRadius = orbRad;
-                            particleSize = partRad;
-                            y = -32f / 4f;
-                            x = 43f * fi / 4f;
-                            particles = parts;
-                            active = false;
+                                        }
+                                    );
+                                }
+                            };
                         }
                     });
             }
+        };
+    }
+    private static void loadAllotropes() {
+        // ============================================================
+        //  陆军战斗：daggerAT (异构 · 尖刀)
+        // ============================================================
+        daggerAT = new UnitType("dagger-at") {
+            {
+                constructor = MechUnit::create;
+                health = 220f;
+                armor = 1f;
+                speed = 0.8f;
+                hitSize = 8f;
+                stepSoundVolume = 0.4f;
 
-            weapons.add(new Weapon("disrupt-weapon") {
-                    {
-                        shootSound = Sounds.shootMissileLarge;
-                        shootSoundVolume = 0.6f;
-                        x = 78f / 4f;
-                        y = -10f / 4f;
-                        mirror = true;
-                        rotate = true;
-                        rotateSpeed = 0.4f;
-                        reload = 70f;
-                        layerOffset = -20f;
-                        recoil = 1f;
-                        rotationLimit = 22f;
-                        minWarmup = 0.95f;
-                        shootWarmupSpeed = 0.1f;
-                        shootY = 2f;
-                        shootCone = 40f;
+                outlineColor = Color.valueOf("202026");
 
-                        shoot.shots = 3;
-                        shoot.shotDelay = 5f;
-                        inaccuracy = 28f;
-
-                        parts.add(new RegionPart("-blade") {
-                                {
-                                    heatProgress = PartProgress.warmup;
-                                    progress = PartProgress.warmup.blend(PartProgress.reload, 0.15f);
-                                    heatColor = Color.valueOf("9c50ff");
-                                    x = 5f / 4f;
-                                    y = 0f;
-                                    moveRot = -33f;
-                                    moveY = -1f;
-                                    moveX = -1f;
-                                    under = true;
-                                    mirror = true;
-                                }
-                            });
-
-                        bullet = new BulletType() {
-                            {
-                                shootEffect = Fx.sparkShoot;
-                                smokeEffect = Fx.shootSmokeTitan;
-                                hitColor = Pal.suppress;
-                                shake = 1f;
-                                speed = 0f;
-                                keepVelocity = false;
-                                collidesAir = false;
-
-                                spawnUnit = new MissileUnitType("disrupt-missile") {
-                                    {
-                                        targetAir = false;
-                                        speed = 4.6f;
-                                        maxRange = 5f;
-                                        outlineColor = Pal.darkOutline;
-                                        health = 70;
-                                        homingDelay = 10f;
-                                        lowAltitude = true;
-                                        engineSize = 3f;
-                                        engineColor = trailColor = Pal.sapBulletBack;
-                                        engineLayer = Layer.effect;
-                                        deathExplosionEffect = Fx.none;
-                                        loopSoundVolume = 0.1f;
-
-                                        parts.add(new ShapePart() {
-                                                {
-                                                    layer = Layer.effect;
-                                                    circle = true;
-                                                    y = -0.25f;
-                                                    radius = 1.5f;
-                                                    color = Pal.suppress;
-                                                    colorTo = Color.white;
-                                                    progress = PartProgress.life.curve(Interp.pow5In);
-                                                }
-                                            });
-
-                                        parts.add(new RegionPart("-fin") {
-                                                {
-                                                    mirror = true;
-                                                    progress = PartProgress.life.mul(3f).curve(Interp.pow5In);
-                                                    moveRot = 32f;
-                                                    rotation = -6f;
-                                                    moveY = 1.5f;
-                                                    x = 3f / 4f;
-                                                    y = -6f / 4f;
-                                                }
-                                            });
-
-                                        weapons.add(new Weapon() {
-                                                {
-                                                    shootCone = 360f;
-                                                    mirror = false;
-                                                    reload = 1f;
-                                                    shootOnDeath = true;
-                                                    shootOnDeathEffect = Fx.massiveExplosion;
-                                                    bullet = new ExplosionBulletType(140f, 25f) {
-                                                        {
-                                                            collidesAir = false;
-                                                            suppressionRange = 140f;
-                                                            shootEffect = new ExplosionEffect() {
-                                                                {
-                                                                    lifetime = 50f;
-                                                                    waveStroke = 5f;
-                                                                    waveLife = 12f;
-                                                                    waveColor = Pal.sap.cpy().mul(1.8f);
-                                                                    sparkColor = smokeColor = Pal.suppress;
-                                                                    waveRad = 40f;
-                                                                    smokeSize = 4f;
-                                                                    smokes = 7;
-                                                                    smokeSizeBase = 0f;
-                                                                    sparks = 10;
-                                                                    sparkRad = 40f;
-                                                                    sparkLen = 6f;
-                                                                    sparkStroke = 2f;
-                                                                }
-                                                            };
-                                                        }
-                                                    };
-                                                }
-                                            });
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-
-            setEnginesMirror(
-                new UnitEngine(95f / 4f, -56f / 4f, 5f, 330f),
-                new UnitEngine(89f / 4f, -95f / 4f, 4f, 315f)
-            );
-        }
-    };
-}
-private static void loadErekirSpiders() {
-    // ============================================================
-    //  merui-r
-    // ============================================================
-    meruiR = new GlowErekirLegsUnitType("merui-r") {
-        {
-            constructor = LegsUnit::create;
-            speed = 0.72f;
-            drag = 0.11f;
-            hitSize = 9f;
-            rotateSpeed = 3f;
-            health = 680f;
-            armor = 4f;
-            legStraightness = 0.3f;
-            stepShake = 0f;
-            stepSound = Sounds.walkerStepTiny;
-            stepSoundVolume = 0.4f;
-
-            legCount = 6;
-            legLength = 8f;
-            lockLegBase = true;
-            legContinuousMove = true;
-            legExtension = -2f;
-            legBaseOffset = 3f;
-            legMaxLength = 1.1f;
-            legMinLength = 0.2f;
-            legLengthScl = 0.96f;
-            legForwardScl = 1.1f;
-            legGroupSize = 3;
-            rippleScale = 0.2f;
-
-            legMoveSpace = 1f;
-            allowLegStep = true;
-            hovering = true;
-            legPhysicsLayer = false;
-
-            shadowElevation = 0.1f;
-            groundLayer = Layer.legUnit - 1f;
-            targetAir = false;
-
-            weapons.add(new Weapon("merui-weapon") {
-                    {
-                        shootSound = Sounds.shootMerui;
-                        mirror = false;
-                        showStatSprite = false;
-                        x = 0f;
-                        y = 1f;
-                        shootY = 4f;
-                        reload = 63f;
-                        cooldownTime = 42f;
-                        heatColor = Pal.turretHeat;
-
-                        bullet = new ArtilleryBulletType(3f, 40) {
-                            {
-                                shootEffect = new MultiEffect(Fx.shootSmallColor, new Effect(9, e -> {
-                                            color(Color.white, e.color, e.fin());
-                                            stroke(0.7f + e.fout());
-                                            Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
-                                            Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
-                                        }));
-
-                                collidesTiles = true;
-                                backColor = hitColor = Pal.techBlue;
-                                frontColor = Color.white;
-
-                                knockback = 0.8f;
-                                lifetime = 46f;
-                                width = height = 9f;
-                                splashDamageRadius = 19f;
-                                splashDamage = 30f;
-
-                                trailLength = 27;
-                                trailWidth = 2.5f;
-                                trailEffect = Fx.none;
-                                trailColor = backColor;
-                                trailInterp = Interp.slope;
-
-                                shrinkX = 0.6f;
-                                shrinkY = 0.2f;
-
-                                hitEffect = despawnEffect = new MultiEffect(
-                                    Fx.hitSquaresColor,
-                                    new WaveEffect() {
-                                        {
-                                            colorFrom = colorTo = Pal.techBlue;
-                                            sizeTo = splashDamageRadius + 2f;
-                                            lifetime = 9f;
-                                            strokeFrom = 2f;
-                                        }
-                                    }
-                                );
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  cleroi-r
-    // ============================================================
-    cleroiR = new GlowErekirLegsUnitType("cleroi-r") {
-        {
-            constructor = LegsUnit::create;
-            speed = 0.6f;
-            drag = 0.1f;
-            hitSize = 14f;
-            rotateSpeed = 3f;
-            health = 1100f;
-            armor = 5f;
-            stepShake = 0f;
-            stepSound = Sounds.walkerStepSmall;
-
-            legCount = 4;
-            legLength = 14f;
-            lockLegBase = true;
-            legContinuousMove = true;
-            legExtension = -3f;
-            legBaseOffset = 5f;
-            legMaxLength = 1.1f;
-            legMinLength = 0.2f;
-            legLengthScl = 0.95f;
-            legForwardScl = 0.7f;
-
-            legMoveSpace = 1f;
-            hovering = true;
-            shadowElevation = 0.2f;
-            groundLayer = Layer.legUnit - 1f;
-
-            // 5 个 spine 装饰
-            for (int i = 0; i < 5; i++) {
-                int fi = i;
-                parts.add(new RegionPart("-spine") {
+                parts.add(new RegionPart("-glow") {
                         {
-                            y = 21f / 4f - 45f / 4f * fi / 4f;
-                            moveX = 21f / 4f + Mathf.slope(fi / 4f) * 1.25f;
-                            moveRot = 10f - fi * 14f;
-                            float fin = fi / 4f;
-                            progress = PartProgress.reload.inv().mul(1.3f).add(0.1f).sustain(fin * 0.34f, 0.14f, 0.14f);
-                            layerOffset = -0.001f;
-                            mirror = true;
+                            x = 0f;
+                            y = 0f;
+                            color = Color.valueOf("FFA665AA");
+                            colorTo = Color.valueOf("FFA665AA");
+                            outline = false;
+                            blending = Blending.additive;
+                            layerOffset = 0.001f;
+                        }
+                    });
+
+                weapons.add(new Weapon("large-weapon-allotropes") {
+                        {
+                            reload = 10f;
+                            x = 4f;
+                            y = 2f;
+                            rotate = false;
+                            shootY = 4.5f;
+                            top = false;
+                            ejectEffect = Fx.casing1;
+                            cooldownTime = 20f;
+                            heatColor = Color.valueOf("FFA665");
+
+                            shoot = new ShootPattern() {
+                                {
+                                    shots = 2;
+                                    shotDelay = 5f;
+                                }
+                            };
+
+                            bullet = new BasicBulletType(5f, 9) {
+                                {
+                                    width = 7f;
+                                    height = 9f;
+                                    lifetime = 30f;
+                                }
+                            };
                         }
                     });
             }
+        };
 
-            weapons.add(new Weapon("cleroi-weapon") {
-                    {
-                        shootSound = Sounds.shootCleroi;
-                        x = 14f / 4f;
-                        y = 33f / 4f;
-                        reload = 33f;
-                        layerOffset = -0.002f;
-                        alternate = false;
-                        heatColor = Color.red;
-                        cooldownTime = 25f;
-                        smoothReloadSpeed = 0.15f;
-                        recoil = 2f;
+        // ============================================================
+        //  陆军辅助：novaAT (异构 · 新星)
+        // ============================================================
+        novaAT = new UnitType("nova-at") {
+            {
+                constructor = MechUnit::create;
+                canBoost = true;
+                boostMultiplier = 2f;
+                speed = 0.55f;
+                hitSize = 8f;
+                health = 200f;
+                buildSpeed = 0.3f;
+                armor = 2f;
 
-                        bullet = new BasicBulletType(3.5f, 30) {
-                            {
-                                backColor = trailColor = hitColor = Pal.techBlue;
-                                frontColor = Color.white;
-                                width = 7.5f;
-                                height = 10f;
-                                lifetime = 40f;
-                                trailWidth = 2f;
-                                trailLength = 4;
-                                shake = 1f;
-
-                                trailEffect = Fx.missileTrail;
-                                trailParam = 1.8f;
-                                trailInterval = 6f;
-
-                                splashDamageRadius = 30f;
-                                splashDamage = 43f;
-
-                                despawnSound = Sounds.explosionCleroi;
-
-                                hitEffect = despawnEffect = new MultiEffect(
-                                    Fx.hitBulletColor,
-                                    new WaveEffect() {
-                                        {
-                                            colorFrom = colorTo = Pal.techBlue;
-                                            sizeTo = splashDamageRadius + 3f;
-                                            lifetime = 9f;
-                                            strokeFrom = 3f;
-                                        }
-                                    }
-                                );
-
-                                shootEffect = new MultiEffect(Fx.shootBigColor, new Effect(9, e -> {
-                                            color(Color.white, e.color, e.fin());
-                                            stroke(0.7f + e.fout());
-                                            Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
-                                            Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
-                                        }));
-
-                                smokeEffect = Fx.shootSmokeSquare;
-                                ammoMultiplier = 2;
-                            }
-                        };
-                    }
-                });
-
-            weapons.add(new PointDefenseWeapon("cleroi-point-defense") {
-                    {
-                        x = 16f / 4f;
-                        y = -20f / 4f;
-                        reload = 9f;
-                        targetInterval = 9f;
-                        targetSwitchInterval = 12f;
-                        recoil = 0.5f;
-
-                        bullet = new BulletType() {
-                            {
-                                shootSound = Sounds.shootLaser;
-                                shootEffect = Fx.sparkShoot;
-                                hitEffect = Fx.pointHit;
-                                maxRange = 100f;
-                                damage = 38f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  anthicus-r
-    // ============================================================
-    anthicusR = new GlowErekirLegsUnitType("anthicus-r") {
-        {
-            constructor = LegsUnit::create;
-            speed = 0.65f;
-            drag = 0.1f;
-            hitSize = 21f;
-            rotateSpeed = 3f;
-            health = 2700f;
-            armor = 7f;
-            fogRadius = 40f;
-            stepShake = 0f;
-            stepSound = Sounds.walkerStepSmall;
-            stepSoundPitch = 0.78f;
-
-            legCount = 6;
-            legLength = 18f;
-            legGroupSize = 3;
-            lockLegBase = true;
-            legContinuousMove = true;
-            legExtension = -3f;
-            legBaseOffset = 7f;
-            legMaxLength = 1.1f;
-            legMinLength = 0.2f;
-            legLengthScl = 0.95f;
-            legForwardScl = 0.9f;
-
-            legMoveSpace = 1f;
-            hovering = true;
-            shadowElevation = 0.2f;
-            groundLayer = Layer.legUnit - 1f;
-
-            // 3 对 blade 装饰
-            for (int j = 0; j < 3; j++) {
-                int i = j;
-                parts.add(new RegionPart("-blade") {
+                abilities.add(new RepairFieldAbility() {
                         {
-                            layerOffset = -0.01f;
-                            heatLayerOffset = 0.005f;
-                            x = 2f;
-                            moveX = 6f + i * 1.9f;
-                            moveY = 8f + -4f * i;
-                            moveRot = 40f - i * 25f;
-                            mirror = true;
-                            progress = PartProgress.warmup.delay(i * 0.2f);
-                            heatProgress = p -> Mathf.absin(Time.time + i * 14f, 7f, 1f);
-                            heatColor = Pal.techBlue;
+                            amount = 30f;
+                            reload = 120f;
+                            range = 60f;
                         }
                     });
-            }
 
-            weapons.add(new Weapon("anthicus-weapon") {
-                    {
-                        shootSound = Sounds.shootMissileLarge;
-                        shootSoundVolume = 0.5f;
-                        x = 29f / 4f;
-                        y = -11f / 4f;
-                        shootY = 1.5f;
-                        showStatSprite = false;
-                        reload = 130f;
-                        layerOffset = 0.01f;
-                        heatColor = Color.red;
-                        cooldownTime = 60f;
-                        smoothReloadSpeed = 0.15f;
-                        shootWarmupSpeed = 0.05f;
-                        minWarmup = 0.9f;
-                        rotationLimit = 70f;
-                        rotateSpeed = 2f;
-                        inaccuracy = 20f;
-                        shootStatus = StatusEffects.slow;
-                        alwaysShootWhenMoving = true;
-                        rotate = true;
+                outlineColor = Color.valueOf("202026");
 
-                        shoot = new ShootPattern() {
-                            {
-                                shots = 2;
-                                shotDelay = 6f;
-                            }
-                        };
+                parts.add(new RegionPart("-glow") {
+                        {
+                            x = 0f;
+                            y = 0f;
+                            color = Color.valueOf("84F491FF");
+                            colorTo = Color.valueOf("84F491FF");
+                            outline = false;
+                            blending = Blending.additive;
+                            layerOffset = 0.001f;
+                        }
+                    });
 
-                        // 两个 blade 装饰
-                        parts.add(new RegionPart("-blade") {
-                                {
-                                    mirror = true;
-                                    moveRot = -25f;
-                                    under = true;
-                                    moves.add(new PartMove(PartProgress.reload, 1f, 0f, 0f));
-                                    heatColor = Color.red;
-                                    cooldownTime = 60f;
-                                }
-                            });
+                weapons.add(new Weapon("heal-weapon-allotropes") {
+                        {
+                            reload = 7f;
+                            x = 4.5f;
+                            shootY = 2f;
+                            top = false;
+                            inaccuracy = 0f;
+                            alternate = true;
+                            ejectEffect = Fx.none;
+                            recoil = 2f;
+                            shootSound = Sounds.shootLaser;
+                            cooldownTime = 20f;
+                            heatColor = Color.valueOf("84F491");
 
-                        parts.add(new RegionPart("-blade") {
-                                {
-                                    mirror = true;
-                                    moveRot = -50f;
-                                    moveY = -2f;
-                                    moves.add(new PartMove(PartProgress.reload.shorten(0.5f), 1f, 0f, -15f));
-                                    under = true;
-                                    heatColor = Color.red;
-                                    cooldownTime = 60f;
-                                }
-                            });
-
-                        bullet = new BulletType() {
-                            {
-                                shootEffect = new MultiEffect(
-                                    Fx.shootBigColor,
-                                    new Effect(9, e -> {
-                                            color(Color.white, e.color, e.fin());
-                                            stroke(0.7f + e.fout());
-                                            Lines.square(e.x, e.y, e.fin() * 5f, e.rotation + 45f);
-                                            Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f);
-                                        }),
-                                    new WaveEffect() {
-                                        {
-                                            colorFrom = colorTo = Pal.techBlue;
-                                            sizeTo = 15f;
-                                            lifetime = 12f;
-                                            strokeFrom = 3f;
-                                        }
-                                    }
-                                );
-
-                                smokeEffect = Fx.shootBigSmoke2;
-                                shake = 2f;
-                                speed = 0f;
-                                keepVelocity = false;
-                                inaccuracy = 2f;
-
-                                spawnUnit = new MissileUnitType("anthicus-missile") {
+                            parts.add(new RegionPart("-glow") {
                                     {
-                                        trailColor = engineColor = Pal.techBlue;
-                                        engineSize = 1.75f;
-                                        engineLayer = Layer.effect;
-                                        speed = 3.35f;
-                                        maxRange = 6f;
-                                        lifetime = 60f * 1.66f;
-                                        outlineColor = Pal.darkOutline;
-                                        health = 55f;
-                                        lowAltitude = true;
-
-                                        parts.add(new FlarePart() {
-                                                {
-                                                    progress = PartProgress.life.slope().curve(Interp.pow2In);
-                                                    radius = 0f;
-                                                    radiusTo = 35f;
-                                                    stroke = 3f;
-                                                    rotation = 45f;
-                                                    y = -5f;
-                                                    followRotation = true;
-                                                }
-                                            });
-
-                                        weapons.add(new Weapon() {
-                                                {
-                                                    shootSound = Sounds.none;
-                                                    shootCone = 360f;
-                                                    mirror = false;
-                                                    reload = 1f;
-                                                    shootOnDeath = true;
-                                                    shootOnDeathEffect = Fx.massiveExplosion;
-
-                                                    bullet = new ExplosionBulletType(140f, 25f) {
-                                                        {
-                                                            shootEffect = new MultiEffect(
-                                                                new WrapEffect(Fx.dynamicSpikes, Pal.techBlue, 24f),
-                                                                new WaveEffect() {
-                                                                    {
-                                                                        colorFrom = colorTo = Pal.techBlue;
-                                                                        sizeTo = 40f;
-                                                                        lifetime = 12f;
-                                                                        strokeFrom = 4f;
-                                                                    }
-                                                                }
-                                                            );
-                                                        }
-                                                    };
-                                                }
-                                            });
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  tecta-r
-    // ============================================================
-    tectaR = new GlowErekirLegsUnitType("tecta-r") {
-        {
-            constructor = LegsUnit::create;
-            drag = 0.1f;
-            speed = 0.6f;
-            hitSize = 30f;
-            health = 6500f;
-            armor = 5f;
-
-            lockLegBase = true;
-            legContinuousMove = true;
-            legGroupSize = 3;
-            legStraightness = 0.4f;
-            baseLegStraightness = 0.5f;
-            legMaxLength = 1.3f;
-
-            stepSound = Sounds.walkerStep;
-            stepSoundVolume = 1f;
-            stepSoundPitch = 1f;
-
-            abilities.add(new ShieldArcAbility() {
-                    {
-                        region = "tecta-shield";
-                        radius = 45f;
-                        angle = 82f;
-                        regen = 45f / 60f;
-                        cooldown = 60f * 8f;
-                        max = 2500f;
-                        y = -20f;
-                        width = 8f;
-                        whenShooting = false;
-                        chanceDeflect = 1f;
-                    }
-                });
-
-            rotateSpeed = 2.1f;
-
-            legCount = 6;
-            legLength = 15f;
-            legForwardScl = 0.45f;
-            legMoveSpace = 1.4f;
-            rippleScale = 2f;
-            stepShake = 0.5f;
-            legExtension = -5f;
-            legBaseOffset = 5f;
-
-            legSplashDamage = 32;
-            legSplashRange = 30;
-            drownTimeMultiplier = 0.5f;
-
-            hovering = true;
-            shadowElevation = 0.4f;
-            groundLayer = Layer.legUnit;
-
-            weapons.add(new Weapon("tecta-weapon") {
-                    {
-                        shootSound = Sounds.shootMalign;
-                        mirror = true;
-                        top = false;
-                        x = 62f / 4f;
-                        y = 1f;
-                        shootY = 47f / 4f;
-                        recoil = 3f;
-                        reload = 40f;
-                        shake = 3f;
-                        cooldownTime = 40f;
-
-                        shoot.shots = 3;
-                        inaccuracy = 3f;
-                        velocityRnd = 0.33f;
-                        heatColor = Color.red;
-
-                        bullet = new MissileBulletType(4.2f, 51) {
-                            {
-                                homingPower = 0.2f;
-                                weaveMag = 4;
-                                weaveScale = 4;
-                                lifetime = 55f;
-                                shootEffect = Fx.shootBig2;
-                                smokeEffect = Fx.shootSmokeTitan;
-                                splashDamage = 60f;
-                                splashDamageRadius = 30f;
-                                frontColor = Color.white;
-                                hitSound = Sounds.none;
-                                width = height = 10f;
-
-                                lightColor = trailColor = backColor = Pal.techBlue;
-                                lightRadius = 40f;
-                                lightOpacity = 0.7f;
-
-                                trailWidth = 2.8f;
-                                trailLength = 20;
-                                trailChance = -1f;
-                                despawnSound = Sounds.explosionDull;
-
-                                despawnEffect = Fx.none;
-                                hitEffect = new ExplosionEffect() {
-                                    {
-                                        lifetime = 20f;
-                                        waveStroke = 2f;
-                                        waveColor = sparkColor = trailColor;
-                                        waveRad = 12f;
-                                        smokeSize = 0f;
-                                        smokeSizeBase = 0f;
-                                        sparks = 10;
-                                        sparkRad = 35f;
-                                        sparkLen = 4f;
-                                        sparkStroke = 1.5f;
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  collaris-r
-    // ============================================================
-    collarisR = new GlowErekirLegsUnitType("collaris-r") {
-        {
-            constructor = LegsUnit::create;
-            drag = 0.1f;
-            speed = 1.1f;
-            hitSize = 44f;
-            health = 18000f;
-            armor = 9f;
-            rotateSpeed = 1.6f;
-            lockLegBase = true;
-            legContinuousMove = true;
-            legStraightness = 0.6f;
-            baseLegStraightness = 0.5f;
-
-            stepSound = Sounds.walkerStep;
-            stepSoundVolume = 1.1f;
-            stepSoundPitch = 0.9f;
-
-            legCount = 8;
-            legLength = 30f;
-            legForwardScl = 2.1f;
-            legMoveSpace = 1.05f;
-            rippleScale = 1.2f;
-            stepShake = 0.5f;
-            legGroupSize = 2;
-            legExtension = -6f;
-            legBaseOffset = 19f;
-            legStraightLength = 0.9f;
-            legMaxLength = 1.2f;
-
-            legSplashDamage = 32;
-            legSplashRange = 32;
-            drownTimeMultiplier = 0.5f;
-
-            hovering = true;
-            shadowElevation = 0.4f;
-            groundLayer = Layer.legUnit;
-
-            targetAir = false;
-            alwaysShootWhenMoving = true;
-
-            weapons.add(new Weapon("collaris-weapon") {
-                    {
-                        shootSound = Sounds.shootCollaris;
-                        mirror = true;
-                        rotationLimit = 30f;
-                        rotateSpeed = 0.4f;
-                        rotate = true;
-
-                        x = 48f / 4f;
-                        y = -28f / 4f;
-                        shootY = 64f / 4f;
-                        recoil = 4f;
-                        reload = 130f;
-                        cooldownTime = reload * 1.2f;
-                        shake = 7f;
-                        layerOffset = 0.02f;
-                        shadow = 10f;
-
-                        shootStatus = StatusEffects.slow;
-                        shootStatusDuration = reload + 170f;
-
-                        shoot.shots = 1;
-                        heatColor = Color.red;
-
-                        for (int i = 0; i < 5; i++) {
-                            int fi = i;
-                            parts.add(new RegionPart("-blade") {
-                                    {
-                                        under = true;
-                                        layerOffset = -0.001f;
-                                        heatColor = Pal.techBlue;
-                                        heatProgress = PartProgress.heat.add(0.2f).min(PartProgress.warmup);
-                                        progress = PartProgress.warmup.blend(PartProgress.reload, 0.1f);
-                                        x = 13.5f / 4f;
-                                        y = 10f / 4f - fi * 2f;
-                                        moveY = 1f - fi * 1f;
-                                        moveX = fi * 0.3f;
-                                        moveRot = -45f - fi * 17f;
-
-                                        moves.add(new PartMove(
-                                                PartProgress.reload.inv().mul(1.8f).inv().curve(fi / 5f, 0.2f),
-                                                0f, 0f, 36f));
+                                        x = 0f;
+                                        y = 0f;
+                                        color = Color.valueOf("84F491AA");
+                                        colorTo = Color.valueOf("84F49133");
+                                        outline = false;
+                                        blending = Blending.additive;
+                                        progress = PartProgress.reload;
+                                        layerOffset = 0.001f;
                                     }
                                 });
-                        }
 
-                        bullet = new ArtilleryBulletType(5.5f, 260) {
-                            {
-                                collidesTiles = collides = true;
-                                lifetime = 60f;
-                                shootEffect = Fx.shootBigColor;
-                                smokeEffect = Fx.shootSmokeSquareBig;
-                                frontColor = Color.white;
-                                trailEffect = new MultiEffect(Fx.artilleryTrail, Fx.artilleryTrailSmoke);
-                                hitSound = Sounds.none;
-                                width = 18f;
-                                height = 24f;
-                                rangeOverride = 385f;
-
-                                lightColor = trailColor = hitColor = backColor = Pal.techBlue;
-                                lightRadius = 40f;
-                                lightOpacity = 0.7f;
-
-                                trailWidth = 4.5f;
-                                trailLength = 19;
-                                trailChance = -1f;
-
-                                despawnEffect = Fx.none;
-                                despawnSound = Sounds.explosionDull;
-
-                                hitEffect = despawnEffect = new ExplosionEffect() {
-                                    {
-                                        lifetime = 50f;
-                                        waveStroke = 5f;
-                                        waveColor = sparkColor = trailColor;
-                                        waveRad = 45f;
-                                        smokeSize = 0f;
-                                        smokeSizeBase = 0f;
-                                        sparks = 10;
-                                        sparkRad = 25f;
-                                        sparkLen = 8f;
-                                        sparkStroke = 3f;
-                                    }
-                                };
-
-                                splashDamage = 120f;
-                                splashDamageRadius = 36f;
-
-                                fragBullets = 15;
-                                fragVelocityMin = 0.5f;
-                                fragRandomSpread = 130f;
-                                fragLifeMin = 0.3f;
-                                despawnShake = 5f;
-
-                                fragBullet = new BasicBulletType(5.5f, 37) {
-                                    {
-                                        pierceCap = 2;
-                                        pierceBuilding = true;
-
-                                        homingPower = 0.09f;
-                                        homingRange = 150f;
-
-                                        lifetime = 40f;
-                                        shootEffect = Fx.shootBigColor;
-                                        smokeEffect = Fx.shootSmokeSquareBig;
-                                        frontColor = Color.white;
-                                        hitSound = Sounds.none;
-                                        width = 12f;
-                                        height = 20f;
-
-                                        lightColor = trailColor = hitColor = backColor = Pal.techBlue;
-                                        lightRadius = 40f;
-                                        lightOpacity = 0.7f;
-
-                                        trailWidth = 2.2f;
-                                        trailLength = 7;
-                                        trailChance = -1f;
-
-                                        collidesAir = false;
-
-                                        despawnEffect = Fx.none;
-                                        splashDamage = 35f;
-                                        splashDamageRadius = 30f;
-
-                                        hitEffect = despawnEffect = new MultiEffect(
-                                            new ExplosionEffect() {
-                                                {
-                                                    lifetime = 30f;
-                                                    waveStroke = 2f;
-                                                    waveColor = sparkColor = trailColor;
-                                                    waveRad = 5f;
-                                                    smokeSize = 0f;
-                                                    smokeSizeBase = 0f;
-                                                    sparks = 5;
-                                                    sparkRad = 20f;
-                                                    sparkLen = 6f;
-                                                    sparkStroke = 2f;
-                                                }
-                                            },
-                                            Fx.blastExplosion
-                                        );
-                                    }
-                                };
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
-private static void loadCargoAndAssembly() {
-    // ============================================================
-    //  manifold-r  (货运无人机)
-    //  由 unit-cargo-loader 自动派出，负责埃里克尔的自动物流。
-    //  玩家看不见、无法控制，只在物流系统中出现。
-    // ============================================================
-    manifoldR = new ErekirUnitType("manifold-r") {
-        {
-            constructor = BuildingTetherPayloadUnit::create;
-            controller = u -> new CargoAI();
-            isEnemy = false;
-            allowedInPayloads = false;
-            logicControllable = false;
-            playerControllable = false;
-            envDisabled = 0;
-            payloadCapacity = 0f;
-
-            lowAltitude = false;
-            flying = true;
-            drag = 0.06f;
-            speed = 3.5f;
-            rotateSpeed = 9f;
-            accel = 0.1f;
-            itemCapacity = 100;
-            health = 200f;
-            hitSize = 11f;
-            engineSize = 2.3f;
-            engineOffset = 6.5f;
-            hidden = true;
-            targetable = false;
-
-            setEnginesMirror(
-                new UnitEngine(24f / 4f, -24f / 4f, 2.3f, 315f)
-            );
-        }
-    };
-
-    // ============================================================
-    //  assembly-drone-r  (装配无人机)
-    //  由 UnitAssembler 自动派出，负责向组装厂运送部件。
-    //  内部单位，不显示在数据库中。
-    // ============================================================
-    assemblyDroneR = new ErekirUnitType("assembly-drone-r") {
-        {
-            constructor = BuildingTetherPayloadUnit::create;
-            controller = u -> new AssemblerAI();
-
-            flying = true;
-            drag = 0.06f;
-            accel = 0.11f;
-            speed = 1.3f;
-            health = 90f;
-            engineSize = 2f;
-            engineOffset = 6.5f;
-            payloadCapacity = 0f;
-            targetable = false;
-            bounded = false;
-
-            outlineColor = Pal.darkOutline;
-            isEnemy = false;
-            hidden = true;
-            useUnitCap = false;
-            logicControllable = false;
-            playerControllable = false;
-            allowedInPayloads = false;
-            createWreck = false;
-            envEnabled = Env.any;
-            envDisabled = Env.none;
-        }
-    };
-}
-private static void loadCoreUnits() {
-    // ============================================================
-    //  alpha-r  (塞普罗 T1 核心无人机)
-    // ============================================================
-    alphaR = new UnitType("alpha-r") {
-        {
-            controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
-            isEnemy = false;
-
-            targetBuildingsMobile = false;
-            lowAltitude = true;
-            flying = true;
-            mineSpeed = 6.5f;
-            mineTier = 1;
-            buildSpeed = 0.5f;
-            drag = 0.05f;
-            speed = 3f;
-            rotateSpeed = 15f;
-            accel = 0.1f;
-            fogRadius = 0f;
-            itemCapacity = 30;
-            health = 150f;
-            engineOffset = 6f;
-            hitSize = 8f;
-            alwaysUnlocked = true;
-            wreckSoundVolume = 0.8f;
-            deathSoundVolume = 0.7f;
-
-            weapons.add(new Weapon("small-basic-weapon") {
-                    {
-                        reload = 17f;
-                        x = 2.75f;
-                        y = 1f;
-                        top = false;
-                        shootSound = Sounds.shootAlpha;
-
-                        bullet = new LaserBoltBulletType(2.5f, 11) {
-                            {
-                                scaleKeepVelocity = true;
-                                width = 1.5f;
-                                height = 4.5f;
-                                hitEffect = despawnEffect = Fx.hitBulletColor;
-                                trailWidth = 1.2f;
-                                trailLength = 3;
-                                shootEffect = Fx.shootSmallColor;
-                                smokeEffect = Fx.hitLaserColor;
-                                backColor = trailColor = Pal.yellowBoltFront;
-                                hitColor = Pal.yellowBoltFront;
-                                frontColor = Color.white;
-                                lightColor = Pal.yellowBoltFront;
-
-                                lifetime = 60f;
-                                buildingDamageMultiplier = 0f;
-                                homingPower = 0.02f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  beta-r  (塞普罗 T2 核心无人机)
-    // ============================================================
-    betaR = new UnitType("beta-r") {
-        {
-            controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
-            isEnemy = false;
-
-            targetBuildingsMobile = false;
-            flying = true;
-            mineSpeed = 7f;
-            mineTier = 1;
-            buildSpeed = 0.75f;
-            drag = 0.05f;
-            speed = 3.3f;
-            rotateSpeed = 17f;
-            accel = 0.1f;
-            fogRadius = 0f;
-            itemCapacity = 50;
-            health = 170f;
-            engineOffset = 6f;
-            hitSize = 9f;
-            lowAltitude = true;
-
-            weapons.add(new Weapon("small-mount-weapon") {
-                    {
-                        top = false;
-                        reload = 20f;
-                        x = 3f;
-                        y = 1f;
-                        recoil = 1f;
-                        shootSound = Sounds.shootAlpha;
-
-                        shoot.shots = 2;
-                        shoot.shotDelay = 4f;
-
-                        bullet = new LaserBoltBulletType(3f, 11) {
-                            {
-                                scaleKeepVelocity = true;
-                                width = 1.5f;
-                                height = 4.5f;
-                                hitEffect = despawnEffect = Fx.hitBulletColor;
-                                trailWidth = 1.2f;
-                                trailLength = 3;
-                                shootEffect = Fx.shootSmallColor;
-                                smokeEffect = Fx.hitLaserColor;
-                                backColor = trailColor = Pal.yellowBoltFront;
-                                hitColor = Pal.yellowBoltFront;
-                                frontColor = Color.white;
-                                lightColor = Pal.yellowBoltFront;
-
-                                lifetime = 60f;
-                                buildingDamageMultiplier = 0f;
-                                homingPower = 0.03f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  gamma-r  (塞普罗 T3 核心无人机)
-    // ============================================================
-    gammaR = new UnitType("gamma-r") {
-        {
-            controller = u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI();
-            isEnemy = false;
-
-            targetBuildingsMobile = false;
-            lowAltitude = true;
-            flying = true;
-            mineSpeed = 8f;
-            mineTier = 2;
-            buildSpeed = 1f;
-            drag = 0.05f;
-            speed = 3.55f;
-            rotateSpeed = 19f;
-            accel = 0.11f;
-            fogRadius = 0f;
-            itemCapacity = 70;
-            health = 220f;
-            engineOffset = 6f;
-            hitSize = 11f;
-
-            weapons.add(new Weapon("small-mount-weapon") {
-                    {
-                        top = false;
-                        reload = 15f;
-                        x = 1f;
-                        y = 2f;
-                        inaccuracy = 3f;
-                        shootSound = Sounds.shootAlpha;
-
-                        shoot = new ShootSpread() {
-                            {
-                                shots = 2;
-                                shotDelay = 3f;
-                                spread = 2f;
-                            }
-                        };
-
-                        bullet = new LaserBoltBulletType(3.5f, 11) {
-                            {
-                                scaleKeepVelocity = true;
-                                width = 1.5f;
-                                height = 5f;
-                                hitEffect = despawnEffect = Fx.hitBulletColor;
-                                trailWidth = 1.2f;
-                                trailLength = 4;
-                                shootEffect = Fx.shootSmallColor;
-                                smokeEffect = Fx.hitLaserColor;
-                                backColor = trailColor = Pal.yellowBoltFront;
-                                hitColor = Pal.yellowBoltFront;
-                                frontColor = Color.white;
-                                lightColor = Pal.yellowBoltFront;
-
-                                lifetime = 70f;
-                                buildingDamageMultiplier = 0f;
-                                homingPower = 0.04f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  evoke-r  (埃里克尔 T1 核心无人机)
-    // ============================================================
-    evokeR = new ErekirUnitType("evoke-r") {
-        {
-            constructor = PayloadUnit::create;
-            coreUnitDock = true;
-            controller = u -> new BuilderAI(true, 500f);
-            isEnemy = false;
-            envDisabled = 0;
-
-            range = 60f;
-            faceTarget = true;
-            targetPriority = -2;
-            lowAltitude = false;
-            mineWalls = true;
-            mineFloor = false;
-            mineHardnessScaling = false;
-            flying = true;
-            mineSpeed = 6f;
-            mineTier = 3;
-            buildSpeed = 1.2f;
-            drag = 0.08f;
-            speed = 5.6f;
-            rotateSpeed = 7f;
-            accel = 0.09f;
-            itemCapacity = 60;
-            health = 300f;
-            armor = 1f;
-            hitSize = 9f;
-            engineSize = 0f;
-            payloadCapacity = 2f * 2f * tilesize * tilesize;
-            pickupUnits = false;
-            vulnerableWithPayloads = true;
-
-            fogRadius = 0f;
-            targetable = false;
-            hittable = false;
-
-            setEnginesMirror(
-                new UnitEngine(21f / 4f, 19f / 4f, 2.2f, 45f),
-                new UnitEngine(23f / 4f, -22f / 4f, 2.2f, 315f)
-            );
-
-            weapons.add(new RepairBeamWeapon() {
-                    {
-                        widthSinMag = 0.11f;
-                        reload = 20f;
-                        x = 0f;
-                        y = 6.5f;
-                        rotate = false;
-                        shootY = 0f;
-                        beamWidth = 0.7f;
-                        repairSpeed = 3.1f;
-                        fractionRepairSpeed = 0.06f;
-                        aimDst = 0f;
-                        shootCone = 15f;
-                        mirror = false;
-
-                        targetUnits = false;
-                        targetBuildings = true;
-                        autoTarget = false;
-                        controllable = true;
-                        laserColor = Pal.accent;
-                        healColor = Pal.accent;
-
-                        bullet = new BulletType() {
-                            {
-                                maxRange = 60f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  incite-r  (埃里克尔 T2 核心无人机)
-    // ============================================================
-    inciteR = new ErekirUnitType("incite-r") {
-        {
-            constructor = PayloadUnit::create;
-            coreUnitDock = true;
-            controller = u -> new BuilderAI(true, 500f);
-            isEnemy = false;
-            envDisabled = 0;
-
-            range = 60f;
-            targetPriority = -2;
-            lowAltitude = false;
-            faceTarget = true;
-            mineWalls = true;
-            mineFloor = false;
-            mineHardnessScaling = false;
-            flying = true;
-            mineSpeed = 8f;
-            mineTier = 3;
-            buildSpeed = 1.4f;
-            drag = 0.08f;
-            speed = 7f;
-            rotateSpeed = 8f;
-            accel = 0.09f;
-            itemCapacity = 90;
-            health = 500f;
-            armor = 2f;
-            hitSize = 11f;
-            payloadCapacity = 2f * 2f * tilesize * tilesize;
-            pickupUnits = false;
-            vulnerableWithPayloads = true;
-
-            fogRadius = 0f;
-            targetable = false;
-            hittable = false;
-
-            engineOffset = 7.2f;
-            engineSize = 3.1f;
-
-            setEnginesMirror(
-                new UnitEngine(25f / 4f, -1f / 4f, 2.4f, 300f)
-            );
-
-            weapons.add(new RepairBeamWeapon() {
-                    {
-                        widthSinMag = 0.11f;
-                        reload = 20f;
-                        x = 0f;
-                        y = 7.5f;
-                        rotate = false;
-                        shootY = 0f;
-                        beamWidth = 0.7f;
-                        aimDst = 0f;
-                        shootCone = 15f;
-                        mirror = false;
-
-                        repairSpeed = 3.3f;
-                        fractionRepairSpeed = 0.06f;
-
-                        targetUnits = false;
-                        targetBuildings = true;
-                        autoTarget = false;
-                        controllable = true;
-                        laserColor = Pal.accent;
-                        healColor = Pal.accent;
-
-                        bullet = new BulletType() {
-                            {
-                                maxRange = 60f;
-                            }
-                        };
-                    }
-                });
-
-            drawBuildBeam = false;
-
-            weapons.add(new BuildWeapon("build-weapon") {
-                    {
-                        rotate = true;
-                        rotateSpeed = 7f;
-                        x = 14f / 4f;
-                        y = 15f / 4f;
-                        layerOffset = -0.001f;
-                        shootY = 3f;
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  emanate-r  (埃里克尔 T3 核心无人机)
-    // ============================================================
-    emanateR = new ErekirUnitType("emanate-r") {
-        {
-            constructor = PayloadUnit::create;
-            coreUnitDock = true;
-            controller = u -> new BuilderAI(true, 500f);
-            isEnemy = false;
-            envDisabled = 0;
-
-            range = 65f;
-            faceTarget = true;
-            targetPriority = -2;
-            lowAltitude = false;
-            mineWalls = true;
-            mineFloor = false;
-            mineHardnessScaling = false;
-            flying = true;
-            mineSpeed = 9f;
-            mineTier = 3;
-            buildSpeed = 1.5f;
-            drag = 0.08f;
-            speed = 7.5f;
-            rotateSpeed = 8f;
-            accel = 0.08f;
-            itemCapacity = 110;
-            health = 700f;
-            armor = 3f;
-            hitSize = 12f;
-            buildBeamOffset = 8f;
-            payloadCapacity = 2f * 2f * tilesize * tilesize;
-            pickupUnits = false;
-            vulnerableWithPayloads = true;
-
-            fogRadius = 0f;
-            targetable = false;
-            hittable = false;
-
-            engineOffset = 7.5f;
-            engineSize = 3.4f;
-
-            setEnginesMirror(
-                new UnitEngine(35f / 4f, -13f / 4f, 2.7f, 315f),
-                new UnitEngine(28f / 4f, -35f / 4f, 2.7f, 315f)
-            );
-
-            weapons.add(new RepairBeamWeapon() {
-                    {
-                        widthSinMag = 0.11f;
-                        reload = 20f;
-                        x = 19f / 4f;
-                        y = 19f / 4f;
-                        rotate = false;
-                        shootY = 0f;
-                        beamWidth = 0.7f;
-                        aimDst = 0f;
-                        shootCone = 40f;
-                        mirror = true;
-
-                        repairSpeed = 3.6f / 2f;
-                        fractionRepairSpeed = 0.03f;
-
-                        targetUnits = false;
-                        targetBuildings = true;
-                        autoTarget = false;
-                        controllable = true;
-                        laserColor = Pal.accent;
-                        healColor = Pal.accent;
-
-                        bullet = new BulletType() {
-                            {
-                                maxRange = 65f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
-private static void loadSerpuloExclusive() {
-    // ============================================================
-    //  stell-serpulo  (塞普罗特供 T1 坦克)
-    // ============================================================
-    stellSerpulo = new TankUnitType("stell-serpulo") {
-        {
-            constructor = TankUnit::create;
-            hitSize = 12f;
-            treadPullOffset = 3;
-            speed = 0.75f;
-            faceTarget = false;
-            omniMovement = false;
-            squareShape = true;
-            rotateMoveFirst = false;
-            rotateSpeed = 3.5f;
-            health = 200f;
-            armor = 1f;
-            itemCapacity = 50;
-            floorMultiplier = 0.95f;
-            treadRects = new Rect[]{
-                new Rect(-20f, -25f, 14f, 51f) };
-
-            tankMoveVolume = 0.32f;
-            tankMoveSound = Sounds.tankMoveSmall;
-
-            weapons.add(new Weapon("stell-serpulo-weapon") {
-                    {
-                        shootSound = Sounds.shootStell;
-                        layerOffset = 0.0001f;
-                        reload = 50f;
-                        shootY = 4.5f;
-                        recoil = 1f;
-                        rotate = true;
-                        rotateSpeed = 2.2f;
-                        mirror = false;
-                        x = 0f;
-                        y = -0.75f;
-                        heatColor = Color.valueOf("ffa665");
-                        cooldownTime = 30f;
-
-                        bullet = new BasicBulletType(8f, 20) {
-                            {
-                                sprite = "missile-large";
-                                smokeEffect = Fx.shootBigSmoke;
-                                shootEffect = Fx.shootBigColor;
-                                width = 5f;
-                                height = 7f;
-                                lifetime = 20f;
-                                hitSize = 4f;
-                                hitColor = backColor = trailColor = Color.valueOf("feb380");
-                                frontColor = Color.white;
-                                trailWidth = 1.7f;
-                                trailLength = 5;
-                                despawnEffect = hitEffect = Fx.hitBulletColor;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  elude-serpulo  (塞普罗特供 T1 悬浮飞艇)
-    // ============================================================
-    eludeSerpulo = new UnitType("elude-serpulo") {
-        {
-            constructor = ElevationMoveUnit::create;
-            hovering = true;
-            canDrown = false;
-            shadowElevation = 0.1f;
-
-            drag = 0.07f;
-            speed = 1.8f;
-            rotateSpeed = 5f;
-            accel = 0.09f;
-            health = 125f;
-            armor = 0f;
-            hitSize = 11f;
-            engineOffset = 7f;
-            engineSize = 2f;
-            itemCapacity = 30;
-            useEngineElevation = false;
-
-            moveSound = Sounds.loopExtract;
-            moveSoundVolume = 0.25f;
-            moveSoundPitchMin = 0.7f;
-            moveSoundPitchMax = 1.5f;
-
-            abilities.add(new MoveEffectAbility() {
-                    {
-                        interval = 4f;
-                        minVelocity = 0.5f;
-                        effect = Fx.missileTrail;
-                        color = Color.valueOf("ffbb64");
-                        x = 0f;
-                        y = -7f;
-                        teamColor = true;
-                    }
-                });
-
-            // 两对 hover 装饰
-            for (float f : new float[]{
-                    -3f, 3f}) {
-                final float fy = f;
-                parts.add(new HoverPart() {
-                        {
-                            x = 3.9f;
-                            y = fy;
-                            mirror = true;
-                            radius = 6f;
-                            phase = 90f;
-                            stroke = 2f;
-                            layerOffset = -0.001f;
-                            color = Color.valueOf("bf92f9");
+                            bullet = new LaserBoltBulletType(10.4f, 7) {
+                                {
+                                    frontColor = Color.white;
+                                    backColor = Color.valueOf("98ffa9");
+                                    healPercent = 5f;
+                                    collidesTeam = true;
+                                    lifetime = 15f;
+                                    status = StatusEffects.electrified;
+                                    statusDuration = 15f;
+                                }
+                            };
                         }
                     });
             }
+        };
 
-            weapons.add(new Weapon("elude-serpulo-weapon") {
-                    {
-                        shootSound = Sounds.shootElude;
-                        y = -2f;
-                        x = 4f;
-                        top = true;
-                        mirror = true;
-                        reload = 40f;
-                        baseRotation = -35f;
-                        shootCone = 360f;
-                        cooldownTime = 30f;
-                        heatColor = Color.valueOf("bf92f9");
+        // ============================================================
+        //  空军战斗：flareAT (异构 · 星辉)
+        // ============================================================
+        flareAT = new UnitType("flare-at") {
+            {
+                flying = true;
+                health = 150f;
+                rotateSpeed = 5f;
+                omniMovement = true;
+                speed = 5f;
+                accel = 0.08f;
+                drag = 0.04f;
+                engineOffset = 5.75f;
+                engineSize = 2f;
+                hitSize = 9f;
+                itemCapacity = 20;
+                circleTarget = true;
+                circleTargetRadius = 60f;
+                wreckSoundVolume = 0.7f;
+                faceTarget = false;
 
-                        shoot = new ShootSpread() {
-                            {
-                                shots = 2;
-                                spread = 11f;
-                            }
-                        };
+                moveSound = Sounds.loopThruster;
+                moveSoundPitchMin = 0.3f;
+                moveSoundPitchMax = 1.5f;
+                moveSoundVolume = 0.2f;
 
-                        bullet = new BasicBulletType(5f, 4) {
-                            {
-                                homingPower = 0.19f;
-                                homingDelay = 4f;
-                                width = 7f;
-                                height = 12f;
-                                lifetime = 30f;
-                                shootEffect = Fx.sparkShoot;
-                                smokeEffect = Fx.shootBigSmoke;
-                                hitColor = Color.valueOf("a47aff");
-                                backColor = Color.valueOf("a47aff");
-                                trailColor = Color.valueOf("a47aff");
-                                frontColor = Color.white;
-                                trailWidth = 1.5f;
-                                trailLength = 5;
-                                hitEffect = Fx.hitBulletColor;
-                                despawnEffect = Fx.hitBulletColor;
-                            }
-                        };
-                    }
-                });
-        }
-    };
+                outlineColor = Color.valueOf("202026");
+                trailLength = 3;
 
-    // ============================================================
-    //  merui-serpulo  (塞普罗特供 T1 多足机甲)
-    // ============================================================
-    meruiSerpulo = new GlowErekirLegsUnitType("merui-serpulo") {
-        {
-            constructor = LegsUnit::create;
-            speed = 0.72f;
-            drag = 0.11f;
-            hitSize = 9f;
-            rotateSpeed = 3f;
-            health = 240f;
-            armor = 2f;
-            legStraightness = 0.3f;
-            stepShake = 0f;
-            stepSound = Sounds.walkerStepTiny;
-            stepSoundVolume = 0.4f;
+                parts.add(new RegionPart("-glow") {
+                        {
+                            x = 0f;
+                            y = 0f;
+                            color = Color.valueOf("FFA665AA");
+                            colorTo = Color.valueOf("FFA665AA");
+                            outline = false;
+                            blending = Blending.additive;
+                            layerOffset = 0.001f;
+                        }
+                    });
 
-            legCount = 6;
-            legLength = 8f;
-            lockLegBase = true;
-            legContinuousMove = true;
-            legExtension = -2f;
-            legBaseOffset = 3f;
-            legMaxLength = 1.1f;
-            legMinLength = 0.2f;
-            legLengthScl = 0.96f;
-            legForwardScl = 1.1f;
-            legGroupSize = 3;
-            rippleScale = 0.2f;
+                weapons.add(new Weapon() {
+                        {
+                            y = 0f;
+                            x = 0f;
+                            shootY = 1f;
+                            layerOffset = -0.001f;
+                            shootCone = 20f;
+                            reload = 20f;
+                            rotate = false;
+                            rotateSpeed = 25f;
+                            mirror = false;
+                            ejectEffect = Fx.casing1;
+                            shootSound = Sounds.shootSalvo;
 
-            legMoveSpace = 1f;
-            allowLegStep = true;
-            hovering = true;
-            legPhysicsLayer = false;
-
-            shadowElevation = 0.1f;
-            groundLayer = Layer.legUnit - 1f;
-            targetAir = false;
-
-            weapons.add(new Weapon("merui-serpulo-weapon") {
-                    {
-                        shootSound = Sounds.shootMerui;
-                        mirror = false;
-                        showStatSprite = false;
-                        x = 0f;
-                        y = 0f;
-                        shootY = 5f;
-                        reload = 63f;
-                        recoil = 0f;
-                        cooldownTime = 42f;
-                        heatColor = Color.valueOf("d1efff");
-
-                        bullet = new ArtilleryBulletType(6f, 15) {
-                            {
-                                collidesTiles = true;
-                                backColor = Color.valueOf("8ca9e8");
-                                hitColor = Color.valueOf("8ca9e8");
-                                frontColor = Color.white;
-                                knockback = 0.8f;
-                                lifetime = 23f;
-                                width = 9f;
-                                height = 9f;
-                                splashDamageRadius = 19f;
-                                splashDamage = 25f;
-
-                                trailLength = 27;
-                                trailWidth = 2.5f;
-                                trailEffect = Fx.none;
-                                trailColor = Color.valueOf("8ca9e8");
-                                trailInterp = Interp.slope;
-
-                                shrinkX = 0.6f;
-                                shrinkY = 0.2f;
-
-                                hitEffect = despawnEffect = new MultiEffect(
-                                    Fx.hitSquaresColor,
-                                    new WaveEffect() {
-                                        {
-                                            colorFrom = colorTo = Color.valueOf("8ca9e8");
-                                            sizeTo = 21f;
-                                            lifetime = 9f;
-                                            strokeFrom = 2f;
-                                        }
-                                    }
-                                );
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
-private static void loadAllotropes() {
-    // ============================================================
-    //  陆军战斗：daggerAT (异构 · 尖刀)
-    // ============================================================
-    daggerAT = new UnitType("dagger-at") {
-        {
-            constructor = MechUnit::create;
-            health = 220f;
-            armor = 1f;
-            speed = 0.8f;
-            hitSize = 8f;
-            stepSoundVolume = 0.4f;
-
-            outlineColor = Color.valueOf("202026");
-
-            parts.add(new RegionPart("-glow") {
-                    {
-                        x = 0f;
-                        y = 0f;
-                        color = Color.valueOf("FFA665AA");
-                        colorTo = Color.valueOf("FFA665AA");
-                        outline = false;
-                        blending = Blending.additive;
-                        layerOffset = 0.001f;
-                    }
-                });
-
-            weapons.add(new Weapon("large-weapon-allotropes") {
-                    {
-                        reload = 10f;
-                        x = 4f;
-                        y = 2f;
-                        rotate = false;
-                        shootY = 4.5f;
-                        top = false;
-                        ejectEffect = Fx.casing1;
-                        cooldownTime = 20f;
-                        heatColor = Color.valueOf("FFA665");
-
-                        shoot = new ShootPattern() {
-                            {
-                                shots = 2;
-                                shotDelay = 5f;
-                            }
-                        };
-
-                        bullet = new BasicBulletType(5f, 9) {
-                            {
-                                width = 7f;
-                                height = 9f;
-                                lifetime = 30f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  陆军辅助：novaAT (异构 · 新星)
-    // ============================================================
-    novaAT = new UnitType("nova-at") {
-        {
-            constructor = MechUnit::create;
-            canBoost = true;
-            boostMultiplier = 2f;
-            speed = 0.55f;
-            hitSize = 8f;
-            health = 200f;
-            buildSpeed = 0.3f;
-            armor = 2f;
-
-            abilities.add(new RepairFieldAbility() {
-                    {
-                        amount = 30f;
-                        reload = 120f;
-                        range = 60f;
-                    }
-                });
-
-            outlineColor = Color.valueOf("202026");
-
-            parts.add(new RegionPart("-glow") {
-                    {
-                        x = 0f;
-                        y = 0f;
-                        color = Color.valueOf("84F491FF");
-                        colorTo = Color.valueOf("84F491FF");
-                        outline = false;
-                        blending = Blending.additive;
-                        layerOffset = 0.001f;
-                    }
-                });
-
-            weapons.add(new Weapon("heal-weapon-allotropes") {
-                    {
-                        reload = 7f;
-                        x = 4.5f;
-                        shootY = 2f;
-                        top = false;
-                        inaccuracy = 0f;
-                        alternate = true;
-                        ejectEffect = Fx.none;
-                        recoil = 2f;
-                        shootSound = Sounds.shootLaser;
-                        cooldownTime = 20f;
-                        heatColor = Color.valueOf("84F491");
-
-                        parts.add(new RegionPart("-glow") {
+                            shoot = new ShootSpread() {
                                 {
-                                    x = 0f;
-                                    y = 0f;
-                                    color = Color.valueOf("84F491AA");
-                                    colorTo = Color.valueOf("84F49133");
-                                    outline = false;
-                                    blending = Blending.additive;
-                                    progress = PartProgress.reload;
-                                    layerOffset = 0.001f;
+                                    shots = 3;
+                                    shotDelay = 5f;
                                 }
-                            });
+                            };
 
-                        bullet = new LaserBoltBulletType(10.4f, 7) {
-                            {
-                                frontColor = Color.white;
-                                backColor = Color.valueOf("98ffa9");
-                                healPercent = 5f;
-                                collidesTeam = true;
-                                lifetime = 15f;
-                                status = StatusEffects.electrified;
-                                statusDuration = 15f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
+                            bullet = new BasicBulletType(20f, 5) {
+                                {
+                                    buildingDamageMultiplier = 0.5f;
+                                    width = 3f;
+                                    height = 30f;
+                                    lifetime = 7f;
+                                    shootEffect = Fx.shootSmall;
+                                    smokeEffect = Fx.shootSmallSmoke;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+    }
+    private static void loadTestUnits() {
+        // ============================================================
+        //  test-1  (测试导弹 T1)
+        // ============================================================
+        test1 = new MissileUnitType("test-1") {
+            {
+                allowedInPayloads = true;
+                logicControllable = true;
+                lifetime = 480f;
+                engineSize = 3f;
+                speed = 3f;
+                armor = 5f;
+                rotateSpeed = 2f;
+                maxRange = -1f;
+                health = 700f;
+                lowAltitude = true;
+                missileAccelTime = 0f;
+                hidden = true;
+                alwaysUnlocked = true;
+                outlineColor = Color.valueOf("565666");
+                engineOffset = 12f;
+                engineLayer = Layer.effect;
+                engineColor = Color.valueOf("ffbb64");
+                trailLength = 10;
+                trailColor = Color.valueOf("ffbb64");
+                fogRadius = 0f;
+                deathExplosionEffect = Fx.smokeCloud;
+                lightColor = Color.valueOf("ffbb64");
+                drawCell = true;
+                envDisabled = 0;
+                deathSound = Sounds.explosionAfflict;
 
-    // ============================================================
-    //  空军战斗：flareAT (异构 · 星辉)
-    // ============================================================
-    flareAT = new UnitType("flare-at") {
-        {
-            flying = true;
-            health = 150f;
-            rotateSpeed = 5f;
-            omniMovement = true;
-            speed = 5f;
-            accel = 0.08f;
-            drag = 0.04f;
-            engineOffset = 5.75f;
-            engineSize = 2f;
-            hitSize = 9f;
-            itemCapacity = 20;
-            circleTarget = true;
-            circleTargetRadius = 60f;
-            wreckSoundVolume = 0.7f;
-            faceTarget = false;
+                weapons.add(new Weapon("zenith-missiles") {
+                        {
+                            reload = 50f;
+                            x = 7f;
+                            rotate = true;
+                            shake = 1f;
+                            inaccuracy = 5f;
+                            velocityRnd = 0.2f;
+                            shootSound = Sounds.shootMissileLong;
 
-            moveSound = Sounds.loopThruster;
-            moveSoundPitchMin = 0.3f;
-            moveSoundPitchMax = 1.5f;
-            moveSoundVolume = 0.2f;
+                            shoot.shots = 3;
 
-            outlineColor = Color.valueOf("202026");
-            trailLength = 3;
+                            bullet = new MissileBulletType(3f, 14) {
+                                {
+                                    width = 8f;
+                                    height = 8f;
+                                    shrinkY = 0f;
+                                    drag = -0.003f;
+                                    homingRange = 60f;
+                                    scaleKeepVelocity = true;
+                                    splashDamageRadius = 25f;
+                                    splashDamage = 15f;
+                                    lifetime = 75f;
+                                    trailColor = Color.valueOf("d06b53");
+                                    backColor = Color.valueOf("d06b53");
+                                    frontColor = Color.valueOf("ffa665");
+                                    hitEffect = Fx.blastExplosion;
+                                    despawnEffect = Fx.blastExplosion;
+                                    weaveScale = 6f;
+                                    weaveMag = -1f;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
 
-            parts.add(new RegionPart("-glow") {
-                    {
-                        x = 0f;
-                        y = 0f;
-                        color = Color.valueOf("FFA665AA");
-                        colorTo = Color.valueOf("FFA665AA");
-                        outline = false;
-                        blending = Blending.additive;
-                        layerOffset = 0.001f;
-                    }
-                });
+        // ============================================================
+        //  test-3  (测试导弹 T3，比 test-1 更小更快)
+        // ============================================================
+        test3 = new MissileUnitType("test-3") {
+            {
+                allowedInPayloads = true;
+                logicControllable = true;
+                lifetime = 600f;
+                engineSize = 3f;
+                speed = 5f;
+                armor = 0f;
+                rotateSpeed = 2f;
+                maxRange = -1f;
+                health = 70f;
+                lowAltitude = true;
+                missileAccelTime = 0f;
+                hidden = true;
+                alwaysUnlocked = true;
+                outlineColor = Color.valueOf("565666");
+                engineOffset = 5.75f;
+                engineLayer = Layer.effect;
+                engineColor = Color.valueOf("ffbb64");
+                trailLength = 10;
+                trailColor = Color.valueOf("ffbb64");
+                fogRadius = 0f;
+                deathExplosionEffect = Fx.smokeCloud;
+                lightColor = Color.valueOf("ffbb64");
+                drawCell = true;
+                envDisabled = 0;
+                deathSound = Sounds.explosionAfflict;
 
-            weapons.add(new Weapon() {
-                    {
-                        y = 0f;
-                        x = 0f;
-                        shootY = 1f;
-                        layerOffset = -0.001f;
-                        shootCone = 20f;
-                        reload = 20f;
-                        rotate = false;
-                        rotateSpeed = 25f;
-                        mirror = false;
-                        ejectEffect = Fx.casing1;
-                        shootSound = Sounds.shootSalvo;
+                // 沿用 flare 的武器：高速小弹
+                weapons.add(new Weapon() {
+                        {
+                            y = 0f;
+                            x = 2f;
+                            layerOffset = -0.001f;
+                            shootCone = 360f;
+                            reload = 2f;
+                            alternate = true;
+                            rotate = true;
+                            rotateSpeed = 25f;
+                            mirror = true;
+                            ejectEffect = Fx.casing1;
+                            shootSound = Sounds.shootSalvo;
 
-                        shoot = new ShootSpread() {
-                            {
-                                shots = 3;
-                                shotDelay = 5f;
-                            }
-                        };
+                            bullet = new BasicBulletType(20f, 1) {
+                                {
+                                    buildingDamageMultiplier = 0.5f;
+                                    width = 3f;
+                                    height = 30f;
+                                    lifetime = 7f;
+                                    shootEffect = Fx.shootSmall;
+                                    smokeEffect = Fx.shootSmallSmoke;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
 
-                        bullet = new BasicBulletType(20f, 5) {
-                            {
-                                buildingDamageMultiplier = 0.5f;
-                                width = 3f;
-                                height = 30f;
-                                lifetime = 7f;
-                                shootEffect = Fx.shootSmall;
-                                smokeEffect = Fx.shootSmallSmoke;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
-private static void loadTestUnits() {
-    // ============================================================
-    //  test-1  (测试导弹 T1)
-    // ============================================================
-    test1 = new MissileUnitType("test-1") {
-        {
-            allowedInPayloads = true;
-            logicControllable = true;
-            lifetime = 480f;
-            engineSize = 3f;
-            speed = 3f;
-            armor = 5f;
-            rotateSpeed = 2f;
-            maxRange = -1f;
-            health = 700f;
-            lowAltitude = true;
-            missileAccelTime = 0f;
-            hidden = true;
-            alwaysUnlocked = true;
-            outlineColor = Color.valueOf("565666");
-            engineOffset = 12f;
-            engineLayer = Layer.effect;
-            engineColor = Color.valueOf("ffbb64");
-            trailLength = 10;
-            trailColor = Color.valueOf("ffbb64");
-            fogRadius = 0f;
-            deathExplosionEffect = Fx.smokeCloud;
-            lightColor = Color.valueOf("ffbb64");
-            drawCell = true;
-            envDisabled = 0;
-            deathSound = Sounds.explosionAfflict;
+        // ============================================================
+        //  test-2  (测试母机：发射 test-1 和 test-3)
+        // ============================================================
+        test2 = new UnitType("test-2") {
+            {
+                flying = true;
+                health = 10000f;
+                speed = 1.8f;
+                armor = 1f;
 
-            weapons.add(new Weapon("zenith-missiles") {
-                    {
-                        reload = 50f;
-                        x = 7f;
-                        rotate = true;
-                        shake = 1f;
-                        inaccuracy = 5f;
-                        velocityRnd = 0.2f;
-                        shootSound = Sounds.shootMissileLong;
+                weapons.add(new Weapon() {
+                        {
+                            name = "none";
+                            reload = 600f;
+                            x = 0f;
+                            y = 0f;
+                            mirror = false;
+                            ejectEffect = Fx.casing1;
+                            shootSound = Sounds.shoot;
 
-                        shoot.shots = 3;
+                            shoot = new ShootSpread() {
+                                {
+                                    shots = 2;
+                                    shotDelay = 6f;
+                                    spread = 15f;
+                                }
+                            };
 
-                        bullet = new MissileBulletType(3f, 14) {
-                            {
-                                width = 8f;
-                                height = 8f;
-                                shrinkY = 0f;
-                                drag = -0.003f;
-                                homingRange = 60f;
-                                scaleKeepVelocity = true;
-                                splashDamageRadius = 25f;
-                                splashDamage = 15f;
-                                lifetime = 75f;
-                                trailColor = Color.valueOf("d06b53");
-                                backColor = Color.valueOf("d06b53");
-                                frontColor = Color.valueOf("ffa665");
-                                hitEffect = Fx.blastExplosion;
-                                despawnEffect = Fx.blastExplosion;
-                                weaveScale = 6f;
-                                weaveMag = -1f;
-                            }
-                        };
-                    }
-                });
-        }
-    };
+                            bullet = new BulletType() {
+                                {
+                                    keepVelocity = false;
+                                    speed = 0f;
+                                    shootEffect = Fx.none;
+                                    smokeEffect = Fx.shootSmallFlame;
+                                    spawnUnit = test1;
+                                }
+                            };
+                        }
+                    });
 
-    // ============================================================
-    //  test-3  (测试导弹 T3，比 test-1 更小更快)
-    // ============================================================
-    test3 = new MissileUnitType("test-3") {
-        {
-            allowedInPayloads = true;
-            logicControllable = true;
-            lifetime = 600f;
-            engineSize = 3f;
-            speed = 5f;
-            armor = 0f;
-            rotateSpeed = 2f;
-            maxRange = -1f;
-            health = 70f;
-            lowAltitude = true;
-            missileAccelTime = 0f;
-            hidden = true;
-            alwaysUnlocked = true;
-            outlineColor = Color.valueOf("565666");
-            engineOffset = 5.75f;
-            engineLayer = Layer.effect;
-            engineColor = Color.valueOf("ffbb64");
-            trailLength = 10;
-            trailColor = Color.valueOf("ffbb64");
-            fogRadius = 0f;
-            deathExplosionEffect = Fx.smokeCloud;
-            lightColor = Color.valueOf("ffbb64");
-            drawCell = true;
-            envDisabled = 0;
-            deathSound = Sounds.explosionAfflict;
+                weapons.add(new Weapon() {
+                        {
+                            name = "none";
+                            reload = 600f;
+                            x = 0f;
+                            y = 0f;
+                            mirror = false;
+                            ejectEffect = Fx.casing1;
+                            shootSound = Sounds.shoot;
 
-            // 沿用 flare 的武器：高速小弹
-            weapons.add(new Weapon() {
-                    {
-                        y = 0f;
-                        x = 2f;
-                        layerOffset = -0.001f;
-                        shootCone = 360f;
-                        reload = 2f;
-                        alternate = true;
-                        rotate = true;
-                        rotateSpeed = 25f;
-                        mirror = true;
-                        ejectEffect = Fx.casing1;
-                        shootSound = Sounds.shootSalvo;
+                            shoot = new ShootSpread() {
+                                {
+                                    shots = 3;
+                                    shotDelay = 30f;
+                                    spread = 4f;
+                                }
+                            };
 
-                        bullet = new BasicBulletType(20f, 1) {
-                            {
-                                buildingDamageMultiplier = 0.5f;
-                                width = 3f;
-                                height = 30f;
-                                lifetime = 7f;
-                                shootEffect = Fx.shootSmall;
-                                smokeEffect = Fx.shootSmallSmoke;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-
-    // ============================================================
-    //  test-2  (测试母机：发射 test-1 和 test-3)
-    // ============================================================
-    test2 = new UnitType("test-2") {
-        {
-            flying = true;
-            health = 10000f;
-            speed = 1.8f;
-            armor = 1f;
-
-            weapons.add(new Weapon() {
-                    {
-                        name = "none";
-                        reload = 600f;
-                        x = 0f;
-                        y = 0f;
-                        mirror = false;
-                        ejectEffect = Fx.casing1;
-                        shootSound = Sounds.shoot;
-
-                        shoot = new ShootSpread() {
-                            {
-                                shots = 2;
-                                shotDelay = 6f;
-                                spread = 15f;
-                            }
-                        };
-
-                        bullet = new BulletType() {
-                            {
-                                keepVelocity = false;
-                                speed = 0f;
-                                shootEffect = Fx.none;
-                                smokeEffect = Fx.shootSmallFlame;
-                                spawnUnit = test1;
-                            }
-                        };
-                    }
-                });
-
-            weapons.add(new Weapon() {
-                    {
-                        name = "none";
-                        reload = 600f;
-                        x = 0f;
-                        y = 0f;
-                        mirror = false;
-                        ejectEffect = Fx.casing1;
-                        shootSound = Sounds.shoot;
-
-                        shoot = new ShootSpread() {
-                            {
-                                shots = 3;
-                                shotDelay = 30f;
-                                spread = 4f;
-                            }
-                        };
-
-                        bullet = new BulletType() {
-                            {
-                                keepVelocity = false;
-                                speed = 0f;
-                                shootEffect = Fx.none;
-                                smokeEffect = Fx.shootSmallFlame;
-                                spawnUnit = test3;
-                            }
-                        };
-                    }
-                });
-        }
-    };
-}
+                            bullet = new BulletType() {
+                                {
+                                    keepVelocity = false;
+                                    speed = 0f;
+                                    shootEffect = Fx.none;
+                                    smokeEffect = Fx.shootSmallFlame;
+                                    spawnUnit = test3;
+                                }
+                            };
+                        }
+                    });
+            }
+        };
+    }
 }
