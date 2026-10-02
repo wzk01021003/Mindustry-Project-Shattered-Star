@@ -82,7 +82,9 @@ public class AttachedAI extends AIController {
         float searchR = range * engageRangeMul;
 
         retargetTimer -= Time.delta;
-        if (retargetTimer <= 0f || target == null || !target.isValid()) {
+        if (retargetTimer <= 0f
+            || target == null
+            || Units.invalidateTarget(target, unit.team, unit.x, unit.y, searchR)) {
             target = Units.closestTarget(unit.team, unit.x, unit.y, searchR,
                 u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
                 b -> unit.type.targetGround);
