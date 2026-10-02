@@ -6,8 +6,6 @@ import mindustry.ai.types.CommandAI;
 import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.Units;
-import mindustry.gen.Legsc;
-import mindustry.gen.Mechc;
 import mindustry.gen.Unit;
 import project.content.units.CarrierManager;
 import project.content.units.CarrierUnitType;
@@ -98,18 +96,11 @@ public class AttachedAI extends CommandAI {
         }
     }
 
-    /** 重置走路累积计时，防止尘土/水花/脚印。 */
+    /** 反射方式重置 walkTime，绕过版本差异。 */
     private static void suppressWalkEffects(Unit unit) {
         try {
-            if (unit instanceof Mechc) {
-                ((Mechc) unit).walkTime(0f);
-            }
-        } catch (Throwable ignored) {}
-
-        try {
-            if (unit instanceof Legsc) {
-                ((Legsc) unit).walkTime(0f);
-            }
+            java.lang.reflect.Field f = unit.getClass().getField("walkTime");
+            f.setFloat(unit, 0f);
         } catch (Throwable ignored) {}
 
         try {
