@@ -2,8 +2,7 @@ package project.content.units;
 
 import arc.math.Mathf;
 import arc.struct.Seq;
-import mindustry.ai.types.FlyingAI;
-import mindustry.ai.types.GroundAI;
+import mindustry.ai.types.CommandAI;
 import mindustry.gen.Unit;
 
 public class TransportUnloadHandler {
@@ -27,13 +26,13 @@ public class TransportUnloadHandler {
             p.y = host.y + Mathf.sinDeg(ang) * unloadRadius;
             p.rotation = host.rotation;
 
-            // 清空指挥状态，防止往旧命令点跑
-            try {
-                p.command().targetPos = null;
-                p.command().attackTarget = null;
-            } catch (Throwable ignored) {}
+            // ★ 换成 CommandAI，玩家能立即用指挥模式控制
+            CommandAI cai = new CommandAI();
+            cai.unit(p);
+            cai.targetPos = null;
+            cai.attackTarget = null;
+            p.controller(cai);
 
-            p.controller(p.type.flying ? new FlyingAI() : new GroundAI());
             CarrierManager.detach(p);
         }
     }

@@ -24,17 +24,25 @@ public class EnterTransportAI extends CommandAI {
         return unit.type.flying ? flySmoothing : groundSmoothing;
     }
 
+    /** 完全接管，绕过 CommandAI 的自动处理逻辑。 */
+    @Override
+    public void updateUnit() {
+        updateMovement();
+        updateTargeting();
+    }
+
     @Override
     public void updateMovement() {
-        Vec2 targetPos = unit.command().targetPos;
+        Vec2 targetPos = unit.command() != null ? unit.command().targetPos : null;
         if (targetPos == null) return;
 
         // 索敌
         Teamc enemy = null;
         if (!unit.type.weapons.isEmpty()) {
+            float range = unit.range();
             if (retarget() || target == null
-                || Units.invalidateTarget(target, unit.team, unit.x, unit.y, unit.range() * engageRangeMul)) {
-                target = Units.closestTarget(unit.team, unit.x, unit.y, unit.range() * engageRangeMul,
+                || Units.invalidateTarget(target, unit.team, unit.x, unit.y, range * engageRangeMul)) {
+                target = Units.closestTarget(unit.team, unit.x, unit.y, range * engageRangeMul,
                     u -> u.checkTarget(unit.type.targetAir, unit.type.targetGround),
                     b -> unit.type.targetGround);
             }

@@ -17,14 +17,19 @@ public class AttachedAI extends CommandAI {
 
     public static float retargetInterval = 20f;
     public static float engageRangeMul = 1.2f;
-
-    /** 挂载单位角度跟随速度。1f = 瞬间对齐（推荐），0.1f = 慢慢转。 */
     public static float rotationFollowSpeed = 1f;
 
     private float retargetTimer = 0f;
 
     public AttachedAI(Unit host) {
         this.host = host;
+    }
+
+    /** 完全接管，绕过 CommandAI 的自动处理逻辑。 */
+    @Override
+    public void updateUnit() {
+        updateMovement();
+        updateTargeting();
     }
 
     @Override
@@ -43,33 +48,22 @@ public class AttachedAI extends CommandAI {
 
         Slot s = ct.slots.get(idx);
 
-        // ============ 位置 ============
+        // 位置：直接 set，紧贴载具
         float ang = host.rotation - 90f;
         float cos = Mathf.cosDeg(ang);
         float sin = Mathf.sinDeg(ang);
         float wx = host.x + s.x * cos - s.y * sin;
         float wy = host.y + s.x * sin + s.y * cos;
 
-        // 位置直接 set，紧贴载具
         unit.x = wx;
         unit.y = wy;
         unit.vel.setZero();
 
-        // ============ 角度 ============
-        // absoluteRotation = true → 固定角度，不跟载具转
-        // absoluteRotation = false → 相对载具的角度
-        float targetRot;
-        if (s.absoluteRotation) {
-            targetRot = s.rotation;
-        } else {
-            targetRot = host.rotation + s.rotation;
-        }
-
+        // 角度
+        float targetRot = s.absoluteRotation ? s.rotation : host.rotation + s.rotation;
         if (rotationFollowSpeed >= 1f) {
-            // 瞬间对齐（默认）
             unit.rotation = targetRot;
         } else {
-            // 平滑跟随
             unit.rotation = Mathf.slerpDelta(unit.rotation, targetRot, rotationFollowSpeed);
         }
 
@@ -77,7 +71,7 @@ public class AttachedAI extends CommandAI {
             unit.elevation = host.elevation;
         }
 
-        // ============ 开火 ============
+        // 开火
         boolean canShoot = s.canShootWhenAttached != null
             ? s.canShootWhenAttached
             : ct.defaultCanShootWhenAttached;
@@ -120,6 +114,6 @@ public class AttachedAI extends CommandAI {
 
     @Override
     public void updateTargeting() {
-        // 屏蔽原版索敌
+        // 空实现
     }
 }
