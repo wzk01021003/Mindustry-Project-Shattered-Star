@@ -28,7 +28,7 @@ public class TransportPayloadUI {
 
     private static void rebuild() {
         if (Vars.headless) return;
-        if (Core.scene == null || Core.scene.root == null) return;
+        if (Core.scene == null) return;
         if (Vars.player == null) return;
 
         Unit unit = Vars.player.unit();
@@ -53,7 +53,7 @@ public class TransportPayloadUI {
             table = new Table();
             table.background(Styles.black6);
             table.margin(6f);
-            Core.scene.root.add(table);
+            Core.scene.add(table);
         }
 
         table.clearChildren();
