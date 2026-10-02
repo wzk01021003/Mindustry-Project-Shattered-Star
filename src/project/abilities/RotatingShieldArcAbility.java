@@ -32,9 +32,9 @@ public class RotatingShieldArcAbility extends Ability {
             rotateOffset = (Time.time * paramField.rotateSpeed) % 360;
         }
         if(b.team != paramUnit.team && b.type.absorbable && paramField.data > 0 &&
-                !(b.within(paramPos, paramField.actualRadius - paramField.width) && paramPos.within(b.x - b.deltaX, b.y - b.deltaY, paramField.actualRadius - paramField.width)) &&
-                (Tmp.v1.set(b).add(b.deltaX, b.deltaY).within(paramPos, paramField.actualRadius + paramField.width) || b.within(paramPos, paramField.actualRadius + paramField.width)) &&
-                (Angles.within(paramPos.angleTo(b), rotateOffset + paramField.angleOffset, paramField.angle / 2f) || Angles.within(paramPos.angleTo(b.x + b.deltaX, b.y + b.deltaY), rotateOffset + paramField.angleOffset, paramField.angle / 2f))){
+            !(b.within(paramPos, paramField.actualRadius - paramField.width) && paramPos.within(b.x - b.deltaX, b.y - b.deltaY, paramField.actualRadius - paramField.width)) &&
+            (Tmp.v1.set(b).add(b.deltaX, b.deltaY).within(paramPos, paramField.actualRadius + paramField.width) || b.within(paramPos, paramField.actualRadius + paramField.width)) &&
+            (Angles.within(paramPos.angleTo(b), rotateOffset + paramField.angleOffset, paramField.angle / 2f) || Angles.within(paramPos.angleTo(b.x + b.deltaX, b.y + b.deltaY), rotateOffset + paramField.angleOffset, paramField.angle / 2f))){
 
             if(paramField.chanceDeflect > 0f && b.vel.len() >= 0.1f && (b.type.reflectable || paramField.perfectDeflect) && Mathf.chance(paramField.chanceDeflect)){
 
@@ -97,9 +97,9 @@ public class RotatingShieldArcAbility extends Ability {
             rotateOffset = (Time.time * paramField.rotateSpeed) % 360;
         }
         if(paramField.data > 0 && unit.targetable(paramUnit.team) &&
-                !(unit.within(paramPos, paramField.actualRadius - paramField.width) && paramPos.within(unit.x - unit.deltaX, unit.y - unit.deltaY, paramField.actualRadius - paramField.width)) &&
-                (Tmp.v1.set(unit).add(unit.deltaX, unit.deltaY).within(paramPos, paramField.actualRadius + paramField.width) || unit.within(paramPos, paramField.actualRadius + paramField.width)) &&
-                (Angles.within(paramPos.angleTo(unit), rotateOffset + paramField.angleOffset, paramField.angle / 2f) || Angles.within(paramPos.angleTo(unit.x + unit.deltaX, unit.y + unit.deltaY), rotateOffset + paramField.angleOffset, paramField.angle / 2f))){
+            !(unit.within(paramPos, paramField.actualRadius - paramField.width) && paramPos.within(unit.x - unit.deltaX, unit.y - unit.deltaY, paramField.actualRadius - paramField.width)) &&
+            (Tmp.v1.set(unit).add(unit.deltaX, unit.deltaY).within(paramPos, paramField.actualRadius + paramField.width) || unit.within(paramPos, paramField.actualRadius + paramField.width)) &&
+            (Angles.within(paramPos.angleTo(unit), rotateOffset + paramField.angleOffset, paramField.angle / 2f) || Angles.within(paramPos.angleTo(unit.x + unit.deltaX, unit.y + unit.deltaY), rotateOffset + paramField.angleOffset, paramField.angle / 2f))){
 
             if(unit.isMissile() && paramField.missileUnitMultiplier >= 0f){
                 Call.unitSafeDeath(unit);
@@ -315,35 +315,36 @@ public class RotatingShieldArcAbility extends Ability {
         AtomicReference<Float> distanceTest = new AtomicReference<>(0f);
         AtomicReference<Float> distanceTestTotal = new AtomicReference<>(0f);
         float additionalRadius = 0f;
-        final int[] sameUnitCount = {0};
+        final int[] sameUnitCount = {
+            0};
 
         distanceTest.set(0f);
         Units.nearby(unit.team, unit.x, unit.y, detectRadius + extraDetectRadius, other -> {
-            if((other != unit) && ((other.type != unit.type) || detectSame) && !other.isMissile() && ((other.isFlying() && detectAir) || (!other.isFlying() && detectGround))){
-                distanceTest.set(12f + other.hitSize * 1.25f + getDistance(other.x, other.y, unit.x, unit.y));
-                if(getDistance(other.x, other.y, unit.x, unit.y) > detectRadius) {
-                    distanceTest.set(12f + other.hitSize * 1.25f + detectRadius);
-                }
-                if(angleRelated){
-                    float shieldRot = unit.rotation + angleOffset;
-                    if(rotateSpeed != 0f) {
-                        shieldRot = (Time.time * rotateSpeed) % 360 + angleOffset;
+                if((other != unit) && ((other.type != unit.type) || detectSame) && !other.isMissile() && ((other.isFlying() && detectAir) || (!other.isFlying() && detectGround))){
+                    distanceTest.set(12f + other.hitSize * 1.25f + getDistance(other.x, other.y, unit.x, unit.y));
+                    if(getDistance(other.x, other.y, unit.x, unit.y) > detectRadius) {
+                        distanceTest.set(12f + other.hitSize * 1.25f + detectRadius);
                     }
-                    float otherAngle = Mathf.radiansToDegrees * Mathf.atan2(other.x - unit.x, other.y - unit.y);
-                    float angleWeight = Mathf.sqrt(Mathf.clamp((180f - Angles.angleDist(otherAngle, shieldRot)) / 180f));
-                    //Log.info(other.type.localizedName + " " + otherAngle + " " + angleWeight);
-                    distanceTest.set(angleWeight * distanceTest.get());
+                    if(angleRelated){
+                        float shieldRot = unit.rotation + angleOffset;
+                        if(rotateSpeed != 0f) {
+                            shieldRot = (Time.time * rotateSpeed) % 360 + angleOffset;
+                        }
+                        float otherAngle = Mathf.radiansToDegrees * Mathf.atan2(other.x - unit.x, other.y - unit.y);
+                        float angleWeight = Mathf.sqrt(Mathf.clamp((180f - Angles.angleDist(otherAngle, shieldRot)) / 180f));
+                        //Log.info(other.type.localizedName + " " + otherAngle + " " + angleWeight);
+                        distanceTest.set(angleWeight * distanceTest.get());
+                    }
+                    if(distanceTest.get() > distanceTestTotal.get()){
+                        distanceTestTotal.set(distanceTest.get());
+                    }
                 }
-                if(distanceTest.get() > distanceTestTotal.get()){
-                    distanceTestTotal.set(distanceTest.get());
-                }
-            }
-        });
+            });
         Units.nearby(unit.team, unit.x, unit.y, sameUnitRadius, other -> {
-            if(other.type == unit.type && other != unit){
-                sameUnitCount[0] = sameUnitCount[0] + 1;
-            }
-        });
+                if(other.type == unit.type && other != unit){
+                    sameUnitCount[0] = sameUnitCount[0] + 1;
+                }
+            });
 
 
         if(distanceTestTotal.get() - radius > 0){
@@ -444,7 +445,7 @@ public class RotatingShieldArcAbility extends Ability {
             }
             if(sameUnitBoost){
                 bars.add(new Bar(() -> Core.bundle.format("bar.sameunitcount",
-                        sameUnitCountOut, maxSameUnit), () -> Pal.techBlue,
+                            sameUnitCountOut, maxSameUnit), () -> Pal.techBlue,
                         () -> (float) sameUnitCountOut / maxSameUnit)).row();
             }
         }

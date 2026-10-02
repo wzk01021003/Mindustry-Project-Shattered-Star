@@ -16,12 +16,12 @@ import project.content.ProtectModes;
 import static mindustry.Vars.*;
 
 /**
- * 保护 AI：
- *  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
- *  - 无 kiting（不后退控距），无分离力
- *  - 位置行为：按槽位（黄金角分布）环绕锚点
- *  - 有敌人：靠近并开火；无敌人：回自己的槽位
- */
+* 保护 AI：
+*  - 玩家点"保护"命令 + 点友方目标 → 单位去保护它
+*  - 无 kiting（不后退控距），无分离力
+*  - 位置行为：按槽位（黄金角分布）环绕锚点
+*  - 有敌人：靠近并开火；无敌人：回自己的槽位
+*/
 public class ProtectAI extends AIController {
 
     public static float engageRange = 220f;
@@ -56,7 +56,9 @@ public class ProtectAI extends AIController {
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
 
-    protected boolean isFlying() { return unit.type.flying; }
+    protected boolean isFlying() {
+        return unit.type.flying;
+    }
 
     protected void ensureInit() {
         if (initialized) return;
@@ -72,7 +74,7 @@ public class ProtectAI extends AIController {
     protected void getSlotPos(float cx, float cy, Vec2 out) {
         float ang = slotAngle();
         out.set(cx + Angles.trnsx(ang, slotRadius),
-                cy + Angles.trnsy(ang, slotRadius));
+            cy + Angles.trnsy(ang, slotRadius));
     }
 
     protected void refreshAnchor() {
@@ -130,11 +132,15 @@ public class ProtectAI extends AIController {
         Teamc enemy = target;
 
         switch (mode) {
-            case PUSH:    doPush(enemy);    break;
-            case SHIELD:  doShield(enemy);  break;
-            case PASSIVE: doPassive();      break;
+            case PUSH:    doPush(enemy);
+            break;
+            case SHIELD:  doShield(enemy);
+            break;
+            case PASSIVE: doPassive();
+            break;
             case ATTACK:
-            default:      doAttack(enemy);  break;
+            default:      doAttack(enemy);
+            break;
         }
 
         if (!isFlying() && unit.type.canBoost && unit.elevation > 0.001f && !unit.onSolid()) {
@@ -189,7 +195,10 @@ public class ProtectAI extends AIController {
 
     /** 攻击：靠近敌人（不后退、不横移），靠近后停下开火 */
     protected void doAttack(Teamc enemy) {
-        if (!hasWeapons) { doPassive(); return; }
+        if (!hasWeapons) {
+            doPassive();
+            return;
+        }
 
         if (enemy != null) {
             float dst = unit.dst(enemy);
@@ -245,7 +254,11 @@ public class ProtectAI extends AIController {
     protected void antiStuck() {
         if (unit == null || !unit.isAdded()) return;
 
-        if (Float.isNaN(lastX)) { lastX = unit.x; lastY = unit.y; return; }
+        if (Float.isNaN(lastX)) {
+            lastX = unit.x;
+            lastY = unit.y;
+            return;
+        }
 
         float moved = Mathf.dst(unit.x, unit.y, lastX, lastY);
         boolean wantsToMove = unit.vel.len2() > 0.01f;

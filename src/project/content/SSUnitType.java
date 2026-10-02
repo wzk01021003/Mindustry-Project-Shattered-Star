@@ -92,6 +92,7 @@ import mindustry.world.meta.Env;
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
+import project.content.units.CarrierUnitType;
 
 import static arc.graphics.g2d.Draw.color;
 import static arc.graphics.g2d.Lines.stroke;
@@ -120,6 +121,8 @@ public class SSUnitType {
     public static UnitType rissoR, minkeR, brydeR, seiR, omuraR;
     // 辅助海军
     public static UnitType retusaR, oxynoeR, cyerceR, aegiresR, navanaxR;
+    // 运输单位
+    public static UnitType transportLandR;
     // 埃里克尔坦克
     public static TankUnitType stellR, locusR, preceptR, vanquishR, conquerR;
     // 埃里克尔空军
@@ -177,6 +180,7 @@ public class SSUnitType {
         // daggerAT, novaAT, flareAT
         loadTestUnits();
         // test1, test2, test3
+        loadTransportUnits();
     }
 
     // 每个类别一个空方法，下面几个消息里逐个填
@@ -6459,5 +6463,55 @@ public class SSUnitType {
                     });
             }
         };
+    }
+    private static void loadTransportUnits() {
+
+        transportLandR = new CarrierUnitType("transport-land-r") {
+            {
+                constructor = PayloadUnit::create;
+                speed = 0.65f;
+                hitSize = 40f;
+                health = 3000f;
+                armor = 12f;
+                itemCapacity = 0;
+                payloadCapacity = 0f;
+
+                outlineColor = Pal.darkOutline;
+
+                targetAir = false;
+                targetGround = false;
+
+                trailLength = 12;
+                trailScl = 1.5f;
+            }
+        };
+
+        CarrierUnitType cLand = (CarrierUnitType) transportLandR;
+
+        cLand.filter(project.content.units.UnitFilters.category("ground"));
+
+        cLand.slot(  20f, -60f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.category("mech"))
+        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
+
+        cLand.slot(  20f,   0f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.category("mech"))
+        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
+
+        cLand.slot(  20f,  60f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.category("mech"))
+        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
+
+        cLand.slot( -60f, -60f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.name("dagger-r"))
+        .layer(project.content.units.Slot.LAYER_GROUND);
+
+        cLand.slot( -60f,   0f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.name("dagger-r"))
+        .layer(project.content.units.Slot.LAYER_GROUND);
+
+        cLand.slot( -60f,  60f, 0f).smooth(0.10f)
+        .filter(project.content.units.UnitFilters.name("dagger-r"))
+        .layer(project.content.units.Slot.LAYER_GROUND);
     }
 }

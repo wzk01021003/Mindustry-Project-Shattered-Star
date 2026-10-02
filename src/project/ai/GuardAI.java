@@ -16,13 +16,13 @@ import mindustry.world.Tile;
 import static mindustry.Vars.*;
 
 /**
- * 定点防御 AI：
- *  - 玩家点位置 → 单位以该点为圆心随机巡逻
- *  - 巡逻半径 = 单位最大武器射程 × 0.5
- *  - 索敌半径 = 单位最大武器射程
- *  - 用 ControlPathfinder 拿下一跳，绕墙前进
- *  - IDLE 时缓慢转向锚点方向（有生命感，但不摇头）
- */
+* 定点防御 AI：
+*  - 玩家点位置 → 单位以该点为圆心随机巡逻
+*  - 巡逻半径 = 单位最大武器射程 × 0.5
+*  - 索敌半径 = 单位最大武器射程
+*  - 用 ControlPathfinder 拿下一跳，绕墙前进
+*  - IDLE 时缓慢转向锚点方向（有生命感，但不摇头）
+*/
 public class GuardAI extends AIController {
 
     // ============ 行为参数 ============
@@ -57,7 +57,8 @@ public class GuardAI extends AIController {
     public static float rescueSpeedMul = 1.5f;
 
     // ============ 状态 ============
-    public enum State { IDLE, MOVING, COMBAT }
+    public enum State {
+        IDLE, MOVING, COMBAT }
     public State state = State.IDLE;
 
     public float anchorX, anchorY;
@@ -81,8 +82,12 @@ public class GuardAI extends AIController {
     protected float lastX = Float.NaN, lastY = Float.NaN;
     protected float stuckTimer = 0f;
 
-    protected boolean isFlying() { return unit.type.flying; }
-    protected boolean isOmni() { return unit.type.omniMovement; }
+    protected boolean isFlying() {
+        return unit.type.flying;
+    }
+    protected boolean isOmni() {
+        return unit.type.omniMovement;
+    }
 
     // ================================================================
     //  武器射程
@@ -356,7 +361,11 @@ public class GuardAI extends AIController {
 
     protected void antiStuck() {
         if (unit == null || !unit.isAdded()) return;
-        if (Float.isNaN(lastX)) { lastX = unit.x; lastY = unit.y; return; }
+        if (Float.isNaN(lastX)) {
+            lastX = unit.x;
+            lastY = unit.y;
+            return;
+        }
 
         float moved = Mathf.dst(unit.x, unit.y, lastX, lastY);
         boolean wantsToMove = unit.vel.len2() > 0.01f;

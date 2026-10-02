@@ -9,6 +9,7 @@ import mindustry.type.UnitType;
 import project.ai.GuardAI;
 import project.ai.HuntAI;
 import project.ai.ProtectAI;
+import project.ai.UnloadAI;
 import project.blocks.MultiAssembler;
 import project.content.ProtectModeRegistry;
 import project.content.SSPlanets;
@@ -22,6 +23,8 @@ public class ShatteredStarMod extends Mod {
     public static UnitCommand huntCommand;
     public static UnitCommand protectCommand;
     public static UnitCommand guardCommand;
+    public static UnitCommand enterTransportCommand;
+    public static UnitCommand unloadCommand;
 
     public static UnitCommand globalFactoryCommand = null;
     public static boolean globalFactoryCommandEnabled = false;
@@ -34,16 +37,9 @@ public class ShatteredStarMod extends Mod {
     public void loadContent() {
         Log.info("Loading content.");
 
-        // ============ 星球 ============
         SSPlanets.load();
-
-        // ============ 保护模式注册表 ============
         ProtectModeRegistry.load();
-
-        // ============ 多单位组装厂 ============
         new MultiAssembler("multi-assembler");
-
-        // ============ 单位 ============
         SSUnitType.load();
     }
 
@@ -51,11 +47,20 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
-        // ============ 0. 实验性渲染 ============
+        // 0. 实验性渲染（你已完成）
         SSSettings.load();
         DistortionRenderer.init();
 
-        // ============ 1. 指令 ============
+        // 0.5. 载荷 UI
+        project.ui.TransportPayloadUI.init();
+
+        // 0.7. 挂载单位渲染
+        project.render.AttachedUnitRenderer.init();
+
+        // 0.8. 挂载蜘蛛腿折叠
+        project.content.units.LegShrinkHandler.init();
+
+        // 1. 指令
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());
         huntCommand.drawTarget = false;
         huntCommand.switchToMove = false;
@@ -76,16 +81,31 @@ public class ShatteredStarMod extends Mod {
         guardCommand.exactArrival = false;
         guardCommand.snapToBuilding = false;
 
-        // ============ 2. 注册到 content ============
+        enterTransportCommand = new UnitCommand("ss-enter-transport", "upOpen",
+            u -> new project.ai.EnterTransportAI());
+        enterTransportCommand.drawTarget = true;
+        enterTransportCommand.switchToMove = false;
+        enterTransportCommand.resetTarget = false;
+        enterTransportCommand.exactArrival = false;
+
+        unloadCommand = new UnitCommand("ss-unload", "downOpen", u -> new UnloadAI());
+        unloadCommand.drawTarget = false;
+        unloadCommand.switchToMove = false;
+        unloadCommand.resetTarget = false;
+        unloadCommand.exactArrival = false;
+
+        // 2. 注册
         try {
             register(huntCommand);
             register(protectCommand);
             register(guardCommand);
+            register(enterTransportCommand);
+            register(unloadCommand);
         } catch (Throwable t) {
             Log.err("Failed to register commands", t);
         }
 
-        // ============ 3. 给所有支持指挥的单位加上指令 ============
+        // 3. 给单位加指令
         int count = 0;
         for (UnitType type : content.units()) {
             if (type == null) continue;
@@ -97,11 +117,22 @@ public class ShatteredStarMod extends Mod {
             }
             if (!type.commands.contains(protectCommand)) type.commands.add(protectCommand);
             if (!type.commands.contains(guardCommand)) type.commands.add(guardCommand);
+
+            if (!type.flying && !type.commands.contains(enterTransportCommand)) {
+                type.commands.add(enterTransportCommand);
+            }
+
+            if (type instanceof project.content.units.CarrierUnitType) {
+                if (!type.commands.contains(unloadCommand)) {
+                    type.commands.add(unloadCommand);
+                }
+            }
+
             count++;
         }
         Log.info("Registered commands to " + count + " unit types.");
 
-        // ============ 4. 全局出厂指令给予 ============
+        // 4. 全局出厂指令
         Events.on(UnitCreateEvent.class, e -> {
                 if (!globalFactoryCommandEnabled) return;
                 if (globalFactoryCommand == null) return;

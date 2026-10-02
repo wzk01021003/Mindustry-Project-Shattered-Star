@@ -6,10 +6,10 @@ import mindustry.entities.units.AIController;
 import mindustry.gen.Unit;
 
 /**
- * 狩猎 AI：完全委托原版 AI。
- * 飞行 → FlyingAI，其他 → GroundAI。
- * 不做任何自定义。
- */
+* 狩猎 AI：完全委托原版 AI。
+* 飞行 → FlyingAI，其他 → GroundAI。
+* 不做任何自定义。
+*/
 public class HuntAI extends AIController {
 
     protected AIController delegate;
