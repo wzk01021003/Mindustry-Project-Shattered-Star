@@ -28,7 +28,7 @@ public class TransportPayloadUI {
 
     private static void rebuild() {
         if (Vars.headless) return;
-        if (Vars.ui == null || Vars.ui.hudGroup == null) return;
+        if (Core.scene == null || Core.scene.root == null) return;
         if (Vars.player == null) return;
 
         Unit unit = Vars.player.unit();
@@ -53,7 +53,7 @@ public class TransportPayloadUI {
             table = new Table();
             table.background(Styles.black6);
             table.margin(6f);
-            Vars.ui.hudGroup.add(table);
+            Core.scene.root.add(table);
         }
 
         table.clearChildren();
@@ -68,12 +68,12 @@ public class TransportPayloadUI {
             } catch (Throwable ignored) {}
         }
 
-        // 手动定位到屏幕右下角
         table.pack();
         table.setPosition(
             Core.graphics.getWidth() - padRight,
             padBottom,
             Align.bottomRight
         );
+        table.toFront();
     }
 }
