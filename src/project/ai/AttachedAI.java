@@ -2,23 +2,24 @@ package project.ai;
 
 import arc.math.Mathf;
 import arc.util.Time;
+import mindustry.ai.types.CommandAI;
 import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.Units;
-import mindustry.entities.units.AIController;
 import mindustry.gen.Unit;
 import project.content.units.CarrierManager;
 import project.content.units.CarrierUnitType;
 import project.content.units.Slot;
 
-public class AttachedAI extends AIController {
+public class AttachedAI extends CommandAI {
 
     public Unit host;
 
-    /** 索敌间隔（帧）。 */
     public static float retargetInterval = 20f;
-    /** 索敌半径倍率（相对 unit.range()）。 */
     public static float engageRangeMul = 1.2f;
+
+    /** 挂载单位角度跟随速度。1f = 瞬间对齐（推荐），0.1f = 慢慢转。 */
+    public static float rotationFollowSpeed = 1f;
 
     private float retargetTimer = 0f;
 
@@ -42,31 +43,44 @@ public class AttachedAI extends AIController {
 
         Slot s = ct.slots.get(idx);
 
-        // ============ 位置和角度：跟载具槽位 ============
+        // ============ 位置 ============
         float ang = host.rotation - 90f;
         float cos = Mathf.cosDeg(ang);
         float sin = Mathf.sinDeg(ang);
         float wx = host.x + s.x * cos - s.y * sin;
         float wy = host.y + s.x * sin + s.y * cos;
 
-        unit.x = Mathf.lerpDelta(unit.x, wx, s.smoothSpeed);
-        unit.y = Mathf.lerpDelta(unit.y, wy, s.smoothSpeed);
+        // 位置直接 set，紧贴载具
+        unit.x = wx;
+        unit.y = wy;
         unit.vel.setZero();
 
-        float targetRot = s.absoluteRotation ? s.rotation : host.rotation + s.rotation;
-        unit.rotation = Mathf.slerpDelta(unit.rotation, targetRot, s.smoothSpeed);
+        // ============ 角度 ============
+        // absoluteRotation = true → 固定角度，不跟载具转
+        // absoluteRotation = false → 相对载具的角度
+        float targetRot;
+        if (s.absoluteRotation) {
+            targetRot = s.rotation;
+        } else {
+            targetRot = host.rotation + s.rotation;
+        }
+
+        if (rotationFollowSpeed >= 1f) {
+            // 瞬间对齐（默认）
+            unit.rotation = targetRot;
+        } else {
+            // 平滑跟随
+            unit.rotation = Mathf.slerpDelta(unit.rotation, targetRot, rotationFollowSpeed);
+        }
 
         if (host.type.flying) {
             unit.elevation = host.elevation;
         }
 
-        // ============ 开火逻辑 ============
-        boolean canShoot;
-        if (s.canShootWhenAttached != null) {
-            canShoot = s.canShootWhenAttached;
-        } else {
-            canShoot = ct.defaultCanShootWhenAttached;
-        }
+        // ============ 开火 ============
+        boolean canShoot = s.canShootWhenAttached != null
+            ? s.canShootWhenAttached
+            : ct.defaultCanShootWhenAttached;
 
         if (canShoot && !unit.type.weapons.isEmpty()) {
             updateShooting();
@@ -106,6 +120,6 @@ public class AttachedAI extends AIController {
 
     @Override
     public void updateTargeting() {
-        // 屏蔽原版自动索敌，由 updateMovement 里的 updateShooting 接管
+        // 屏蔽原版索敌
     }
 }

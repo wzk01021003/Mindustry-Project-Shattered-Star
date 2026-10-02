@@ -13,10 +13,14 @@ import mindustry.type.UnitType;
 
 public class LegShrinkHandler {
 
+    /** 收缩速度。 */
     public static float shrinkSpeed = 0.10f;
-    public static float kneeOut = 0.55f;
-    public static float footIn = 0.15f;
-    public static float spreadScl = 0.6f;
+
+    /** 收缩后腿长相对原长比例。0.4 = 保留 40%。 */
+    public static float shrinkTo = 0.4f;
+
+    /** 腿张开角度系数。0 = 全在中线，1 = 均分 ±90°。 */
+    public static float spreadScl = 0.5f;
 
     private static final ObjectMap<Unit, Float> progress = new ObjectMap<>();
     private static boolean installed = false;
@@ -30,7 +34,7 @@ public class LegShrinkHandler {
     private static void tick() {
         for (Unit host : CarrierManager.carried.keys()) {
             for (Unit p : CarrierManager.getCarried(host)) {
-                fold(p);
+                shrink(p);
             }
         }
 
@@ -41,7 +45,7 @@ public class LegShrinkHandler {
         for (Unit u : stale) progress.remove(u);
     }
 
-    private static void fold(Unit unit) {
+    private static void shrink(Unit unit) {
         if (!(unit instanceof Legsc)) return;
         Leg[] legs = ((Legsc) unit).legs();
         if (legs == null || legs.length == 0) return;
@@ -52,25 +56,21 @@ public class LegShrinkHandler {
 
         UnitType type = unit.type;
         float ang = unit.rotation - 90f;
-        float len = type.legLength;
+        float len = type.legLength * shrinkTo;
         int count = legs.length;
+        float totalSpread = 180f * spreadScl;
 
         for (int i = 0; i < count; i++) {
             Leg leg = legs[i];
 
-            boolean isFront = i < count / 2f;
-            float dir = isFront ? 1f : -1f;
+            float frac = count == 1 ? 0f : (i / (float)(count - 1) - 0.5f);
+            float rel = frac * totalSpread;
+            float legAng = ang + rel;
 
-            float sideFrac = (count == 1) ? 0f
-            : ((i % 2 == 0) ? -1f : 1f) * ((i / 2f) / Math.max(1f, count / 2f)) * spreadScl;
-
-            float foldAng = ang + dir * 90f + sideFrac * 90f;
-
-            float jx = unit.x + Angles.trnsx(foldAng, len * kneeOut);
-            float jy = unit.y + Angles.trnsy(foldAng, len * kneeOut);
-
-            float bx = unit.x + Angles.trnsx(foldAng, len * footIn);
-            float by = unit.y + Angles.trnsy(foldAng, len * footIn);
+            float jx = unit.x + Angles.trnsx(legAng, len * 0.5f);
+            float jy = unit.y + Angles.trnsy(legAng, len * 0.5f);
+            float bx = unit.x + Angles.trnsx(legAng, len);
+            float by = unit.y + Angles.trnsy(legAng, len);
 
             leg.joint.x = Mathf.lerp(leg.joint.x, jx, p);
             leg.joint.y = Mathf.lerp(leg.joint.y, jy, p);

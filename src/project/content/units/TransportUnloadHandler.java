@@ -27,6 +27,13 @@ public class TransportUnloadHandler {
             p.y = host.y + Mathf.sinDeg(ang) * unloadRadius;
             p.rotation = host.rotation;
 
+            // ★ 清空指挥状态，防止往旧命令点跑
+            if (p.isCommandable()) {
+                p.command().targetPos = null;
+                p.command().attackTarget = null;
+                p.command().command(UnitCommand.moveCommand);  // 重置为默认移动
+            }
+
             p.controller(p.type.flying ? new FlyingAI() : new GroundAI());
             CarrierManager.detach(p);
         }
