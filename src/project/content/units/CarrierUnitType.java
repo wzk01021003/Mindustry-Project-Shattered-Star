@@ -13,14 +13,16 @@ public class CarrierUnitType extends UnitType {
         super(name);
     }
 
-    public CarrierUnitType slot(float x, float y, float rotation) {
-        slots.add(new Slot(x, y, rotation));
-        return this;
+    /** 返回新建的 Slot，方便链式调用。 */
+    public Slot slot(float x, float y, float rotation) {
+        Slot s = new Slot(x, y, rotation);
+        slots.add(s);
+        return s;
     }
 
-    public CarrierUnitType slot(Slot s) {
+    public Slot slot(Slot s) {
         slots.add(s);
-        return this;
+        return s;
     }
 
     public CarrierUnitType filter(Boolf<UnitType> f) {

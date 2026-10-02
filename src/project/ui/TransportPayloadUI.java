@@ -32,9 +32,8 @@ public class TransportPayloadUI {
         Unit unit = Vars.player.unit();
         boolean shouldShow = false;
 
-        if (unit != null && unit.isValid()) {
-            if (unit.type != null
-                && (onlyUnitPrefix == null || unit.type.name.startsWith(onlyUnitPrefix))
+        if (unit != null && unit.isValid() && unit.type != null) {
+            if ((onlyUnitPrefix == null || unit.type.name.startsWith(onlyUnitPrefix))
                 && CarrierManager.getCarried(unit).size > 0) {
                 shouldShow = true;
             }
@@ -52,12 +51,12 @@ public class TransportPayloadUI {
             table = new Table();
             table.background(Styles.black6);
             table.margin(6f);
-            Vars.ui.hudGroup.add(table)
-            .name("ss-transport-payload-ui")
-            .right()
-            .bottom()
-            .padRight(padRight)
-            .padBottom(padBottom);
+            Vars.ui.hudGroup.add(table);
+            table.name = "ss-transport-payload-ui";
+            table.right();
+            table.bottom();
+            table.padRight(padRight);
+            table.padBottom(padBottom);
         }
 
         table.clearChildren();

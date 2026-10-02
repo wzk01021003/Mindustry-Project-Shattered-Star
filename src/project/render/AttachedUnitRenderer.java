@@ -1,11 +1,11 @@
 package project.render;
 
 import arc.Events;
+import arc.graphics.g2d.Draw;
 import arc.struct.ObjectMap;
 import arc.struct.Seq;
 import mindustry.game.EventType.Trigger;
 import mindustry.gen.Unit;
-import mindustry.graphics.Draw;
 import project.content.units.CarrierManager;
 import project.content.units.CarrierUnitType;
 import project.content.units.Slot;
@@ -36,7 +36,7 @@ public class AttachedUnitRenderer {
                 if (idx == null || idx < 0 || idx >= ct.slots.size) continue;
                 final Slot s = ct.slots.get(idx);
 
-                Draw.draw(s.drawLayer, () -> p.type.draw(p));
+                Draw.draw(s.drawLayer, p::draw);
             }
         }
     }
