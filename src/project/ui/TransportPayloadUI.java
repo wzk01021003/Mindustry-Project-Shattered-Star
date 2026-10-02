@@ -1,7 +1,9 @@
 package project.ui;
 
+import arc.Core;
 import arc.Events;
 import arc.scene.ui.layout.Table;
+import arc.util.Align;
 import mindustry.Vars;
 import mindustry.game.EventType.Trigger;
 import mindustry.gen.Unit;
@@ -52,11 +54,6 @@ public class TransportPayloadUI {
             table.background(Styles.black6);
             table.margin(6f);
             Vars.ui.hudGroup.add(table);
-            table.name = "ss-transport-payload-ui";
-            table.right();
-            table.bottom();
-            table.padRight(padRight);
-            table.padBottom(padBottom);
         }
 
         table.clearChildren();
@@ -70,5 +67,13 @@ public class TransportPayloadUI {
                 if (i % perRow == 0) table.row();
             } catch (Throwable ignored) {}
         }
+
+        // 手动定位到屏幕右下角
+        table.pack();
+        table.setPosition(
+            Core.graphics.getWidth() - padRight,
+            padBottom,
+            Align.bottomRight
+        );
     }
 }
