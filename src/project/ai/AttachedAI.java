@@ -6,8 +6,8 @@ import mindustry.ai.types.CommandAI;
 import mindustry.ai.types.FlyingAI;
 import mindustry.ai.types.GroundAI;
 import mindustry.entities.Units;
-import mindustry.gen.LegsUnit;
-import mindustry.gen.MechUnit;
+import mindustry.gen.Legsc;
+import mindustry.gen.Mechc;
 import mindustry.gen.Unit;
 import project.content.units.CarrierManager;
 import project.content.units.CarrierUnitType;
@@ -63,7 +63,7 @@ public class AttachedAI extends CommandAI {
         unit.y = Mathf.lerpDelta(unit.y, wy, positionLerpSpeed);
         unit.vel.setZero();
 
-        // ============ 抑制走路特效（尘土/水花）============
+        // ============ 抑制走路特效 ============
         suppressWalkEffects(unit);
 
         // ============ 防溺水 ============
@@ -101,22 +101,17 @@ public class AttachedAI extends CommandAI {
     /** 重置走路累积计时，防止尘土/水花/脚印。 */
     private static void suppressWalkEffects(Unit unit) {
         try {
-            if (unit instanceof MechUnit) {
-                MechUnit m = (MechUnit) unit;
-                m.walkTime = 0f;
-                // 有的版本还有扩展
-                try { m.walkExtensionTime = 0f; } catch (Throwable ignored) {}
+            if (unit instanceof Mechc) {
+                ((Mechc) unit).walkTime(0f);
             }
         } catch (Throwable ignored) {}
 
         try {
-            if (unit instanceof LegsUnit) {
-                LegsUnit l = (LegsUnit) unit;
-                l.walkTime = 0f;
+            if (unit instanceof Legsc) {
+                ((Legsc) unit).walkTime(0f);
             }
         } catch (Throwable ignored) {}
 
-        // 有的单位不用 walkTime，用 unit.speed() 触发，需要把速度重置
         try {
             unit.elevation = Math.min(unit.elevation, 0f);
         } catch (Throwable ignored) {}
