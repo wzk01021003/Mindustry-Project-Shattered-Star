@@ -9,6 +9,9 @@ public class CarrierUnitType extends UnitType {
     public final Seq<Slot> slots = new Seq<>();
     public Boolf<UnitType> globalFilter = null;
 
+    /** 挂载单位的默认开火规则。槽位没写 canShootWhenAttached 时用这个。 */
+    public boolean defaultCanShootWhenAttached = false;
+
     public CarrierUnitType(String name) {
         super(name);
     }
@@ -27,6 +30,11 @@ public class CarrierUnitType extends UnitType {
 
     public CarrierUnitType filter(Boolf<UnitType> f) {
         this.globalFilter = f;
+        return this;
+    }
+
+    public CarrierUnitType defaultShoot(boolean v) {
+        this.defaultCanShootWhenAttached = v;
         return this;
     }
 }

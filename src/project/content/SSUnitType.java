@@ -6466,52 +6466,57 @@ public class SSUnitType {
     }
     private static void loadTransportUnits() {
 
-        transportLandR = new CarrierUnitType("transport-land-r") {
-            {
-                constructor = PayloadUnit::create;
-                speed = 0.65f;
-                hitSize = 40f;
-                health = 3000f;
-                armor = 12f;
-                itemCapacity = 0;
-                payloadCapacity = 0f;
+    // ============================================================
+    //  运输车 transport-land-r
+    //  坦克底盘，4 槽：前排 2 + 后排 2
+    // ============================================================
+    transportLandR = new CarrierUnitType("transport-land-r") {
+        {
+            constructor = TankUnit::create;
+            speed = 0.7f;
+            hitSize = 40f;
+            health = 3000f;
+            armor = 12f;
+            itemCapacity = 0;
+            payloadCapacity = 0f;
 
-                outlineColor = Pal.darkOutline;
+            treadPullOffset = 4;
+            treadRects = new Rect[]{
+                new Rect(15f - 80f, 10f - 80f, 22f, 140f)
+            };
+            tankMoveVolume = 0.5f;
+            tankMoveSound = Sounds.tankMove;
 
-                targetAir = false;
-                targetGround = false;
+            outlineColor = Pal.darkOutline;
+            targetAir = false;
+            targetGround = false;
+        }
+    };
 
-                trailLength = 12;
-                trailScl = 1.5f;
-            }
-        };
+    CarrierUnitType cLand = (CarrierUnitType) transportLandR;
 
-        CarrierUnitType cLand = (CarrierUnitType) transportLandR;
+    // 全局筛选：只收地面单位（飞行单位上不了车）
+    cLand.filter(project.content.units.UnitFilters.category("ground"));
 
-        cLand.filter(project.content.units.UnitFilters.category("ground"));
+    // 默认禁止开火
+    cLand.defaultCanShootWhenAttached = false;
 
-        cLand.slot(  20f, -60f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.category("mech"))
+    // 前排 2 槽
+    cLand.slot( 30f, -45f, 0f).smooth(0.10f)
+        .canShoot(true)
         .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
 
-        cLand.slot(  20f,   0f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.category("mech"))
+    cLand.slot( 30f,  45f, 0f).smooth(0.10f)
+        .canShoot(true)
         .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
 
-        cLand.slot(  20f,  60f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.category("mech"))
+    // 后排 2 槽
+    cLand.slot(-40f, -45f, 0f).smooth(0.10f)
+        .canShoot(false)
         .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
 
-        cLand.slot( -60f, -60f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.name("dagger-r"))
-        .layer(project.content.units.Slot.LAYER_GROUND);
-
-        cLand.slot( -60f,   0f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.name("dagger-r"))
-        .layer(project.content.units.Slot.LAYER_GROUND);
-
-        cLand.slot( -60f,  60f, 0f).smooth(0.10f)
-        .filter(project.content.units.UnitFilters.name("dagger-r"))
-        .layer(project.content.units.Slot.LAYER_GROUND);
-    }
+    cLand.slot(-40f,  45f, 0f).smooth(0.10f)
+        .canShoot(false)
+        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
+}
 }

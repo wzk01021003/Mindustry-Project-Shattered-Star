@@ -13,6 +13,9 @@ public class Slot {
     public float drawLayer = Layer.overlayUI - 2f;
     public Boolf<UnitType> filter = null;
 
+    /** 挂载时是否允许开火。null = 跟随载具默认，true = 允许，false = 禁止。 */
+    public Boolean canShootWhenAttached = null;
+
     public Slot(float x, float y, float rotation) {
         this.x = x;
         this.y = y;
@@ -36,6 +39,12 @@ public class Slot {
 
     public Slot filter(Boolf<UnitType> f) {
         this.filter = f;
+        return this;
+    }
+
+    /** 显式设置此槽位是否允许开火。 */
+    public Slot canShoot(boolean v) {
+        this.canShootWhenAttached = v;
         return this;
     }
 
