@@ -52,22 +52,22 @@ public class UnitFilters {
     private static boolean computeCategory(UnitType t, String cat) {
         switch (cat) {
             case "mech":
-            if (t.flying || t.legCount > 0) return false;
-            return instanceOf(t, Mechc.class);
+                if (t.flying || t.legCount > 0) return false;
+                return instanceOf(t, Mechc.class);
             case "legs":
-            return t.legCount > 0;
+                return t.legCount > 0;
             case "tank":
-            return instanceOf(t, Tankc.class);
+                return instanceOf(t, Tankc.class);
             case "naval":
-            return instanceOf(t, WaterMovec.class);
+                return instanceOf(t, WaterMovec.class);
             case "hover":
-            return instanceOf(t, ElevationMovec.class);
+                return instanceOf(t, ElevationMovec.class);
             case "flying":
-            return t.flying;
+                return t.flying;
             case "ground":
-            return !t.flying;
+                return !t.flying;
             default:
-            return false;
+                return false;
         }
     }
 

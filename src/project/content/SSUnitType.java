@@ -80,6 +80,7 @@ import mindustry.type.UnitType.UnitEngine;
 import mindustry.graphics.Drawf;
 import mindustry.graphics.Layer;
 import mindustry.graphics.Pal;
+import mindustry.type.Item;
 import mindustry.type.UnitType;
 import mindustry.type.Weapon;
 import mindustry.type.unit.ErekirUnitType;
@@ -96,10 +97,19 @@ import project.content.units.CarrierUnitType;
 
 import static arc.graphics.g2d.Draw.color;
 import static arc.graphics.g2d.Lines.stroke;
+import static mindustry.Vars.content;
 import static mindustry.Vars.tilePayload;
 import static mindustry.Vars.tilesize;
 
 public class SSUnitType {
+
+    // ============================================================
+    //  数据库分类 tag
+    // ============================================================
+    /** 新赛普罗（-r 后缀的塞普罗系单位）分类。 */
+    public static Item serpuloRTag;
+    /** 埃里克尔（-r 后缀的埃里克尔系单位）分类。 */
+    public static Item erekirRTag;
 
     // ============================================================
     //  声明区
@@ -147,40 +157,57 @@ public class SSUnitType {
     public static UnitType test2;
 
     // ============================================================
-    //  load() —— 按类别顺序填充
+    //  load()
     // ============================================================
     public static void load() {
+        // ★ 先建 tag
+        serpuloRTag = new Item("ss-serpulo-r-tag", Color.valueOf("7d4dff")) {{
+            hidden = true;
+            alwaysUnlocked = true;
+        }};
+
+        erekirRTag = new Item("ss-erekir-r-tag", Color.valueOf("ffa665")) {{
+            hidden = true;
+            alwaysUnlocked = true;
+        }};
+
+        // ============ 原有单位加载 ============
         loadSerpuloGroundCombat();
-        // daggerR, maceR, fortressR, scepterR, reignR
         loadSerpuloGroundSupport();
-        // novaR, pulsarR, quasarR, velaR, corvusR
         loadSerpuloCrawlers();
-        // crawlerR, atraxR, spiroctR, arkyidR, toxopidR
         loadSerpuloAirCombat();
-        // flareR, horizonR, zenithR, antumbraR, eclipseR
         loadSerpuloAirSupport();
-        // monoR, polyR, megaR, quadR, octR
         loadSerpuloNavalCombat();
-        // rissoR, minkeR, brydeR, seiR, omuraR
         loadSerpuloNavalSupport();
-        // retusaR, oxynoeR, cyerceR, aegiresR, navanaxR
         loadErekirTanks();
-        // stellR, locusR, preceptR, vanquishR, conquerR
         loadErekirAir();
-        // eludeR, avertR, obviateR, quellR, disruptR
         loadErekirSpiders();
-        // meruiR, cleroiR, anthicusR, tectaR, collarisR
         loadCargoAndAssembly();
-        // manifoldR, assemblyDroneR
         loadCoreUnits();
-        // alphaR, betaR, gammaR, evokeR, inciteR, emanateR
         loadSerpuloExclusive();
-        // stellSerpulo, eludeSerpulo, meruiSerpulo
         loadAllotropes();
-        // daggerAT, novaAT, flareAT
         loadTestUnits();
-        // test1, test2, test3
         loadTransportUnits();
+
+        // ★ 最后打 tag
+        applyDatabaseTags();
+    }
+
+    // ============================================================
+    //  只给 -r 后缀分类
+    // ============================================================
+    private static void applyDatabaseTags() {
+        for (UnitType type : content.units()) {
+            if (type == null || type.name == null) continue;
+            if (!type.name.endsWith("-r")) continue;
+
+            boolean isErekir =
+                type instanceof ErekirUnitType
+                || type instanceof TankUnitType
+                || type instanceof GlowErekirLegsUnitType;
+
+            type.databaseTag = isErekir ? erekirRTag : serpuloRTag;
+        }
     }
 
     // 每个类别一个空方法，下面几个消息里逐个填
@@ -6466,10 +6493,6 @@ public class SSUnitType {
     }
     private static void loadTransportUnits() {
 
-    // ============================================================
-    //  运输车 transport-land-r
-    //  坦克底盘，4 槽：前排 2 + 后排 2
-    // ============================================================
     transportLandR = new CarrierUnitType("transport-land-r") {
         {
             constructor = TankUnit::create;
@@ -6479,6 +6502,19 @@ public class SSUnitType {
             armor = 12f;
             itemCapacity = 0;
             payloadCapacity = 0f;
+
+            // ★ 容量
+            carrierCapacity = 80f;
+
+            // ★ 出口：车尾，朝后
+            exitX = -60f;   // 相对车中心向后
+            exitY = 0f;
+            exitRotation = 180f;   // 出口朝向"后方"
+
+            // ★ 释放节奏
+            releaseInterval = 15f;    // 每 15 帧放一个（0.25 秒）
+            releaseSpeed = 3f;         // 弹出速度
+            releaseDistance = 55f;     // 弹出 55 像素后交给玩家控制
 
             treadPullOffset = 4;
             treadRects = new Rect[]{
@@ -6495,28 +6531,6 @@ public class SSUnitType {
 
     CarrierUnitType cLand = (CarrierUnitType) transportLandR;
 
-    // 全局筛选：只收地面单位（飞行单位上不了车）
     cLand.filter(project.content.units.UnitFilters.category("ground"));
-
-    // 默认禁止开火
-    cLand.defaultCanShootWhenAttached = false;
-
-    // 前排 2 槽
-    cLand.slot( 30f, -45f, 0f).smooth(0.10f)
-        .canShoot(true)
-        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
-
-    cLand.slot( 30f,  45f, 0f).smooth(0.10f)
-        .canShoot(true)
-        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
-
-    // 后排 2 槽
-    cLand.slot(-40f, -45f, 0f).smooth(0.10f)
-        .canShoot(false)
-        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
-
-    cLand.slot(-40f,  45f, 0f).smooth(0.10f)
-        .canShoot(false)
-        .layer(project.content.units.Slot.LAYER_ABOVE_TURRET);
 }
 }

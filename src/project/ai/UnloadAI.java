@@ -1,32 +1,31 @@
 package project.ai;
 
 import mindustry.ai.types.CommandAI;
+import project.content.units.CarrierReleaseHandler;
 import project.content.units.TransportUnloadHandler;
 
 public class UnloadAI extends CommandAI {
 
-    private boolean executed = false;
+    private boolean triggered = false;
 
     @Override
     public void updateUnit() {
-        if (!executed) {
-            executed = true;
+        if (!triggered) {
+            triggered = true;
             TransportUnloadHandler.unloadAll(unit);
         }
 
-        // 卸载后交还给 CommandAI（清空目标，等玩家指挥）
+        // 释放还在进行 → 保持这个 AI 不做别的
+        if (CarrierReleaseHandler.isReleasing(unit)) {
+            return;
+        }
+
+        // 释放完成 → 交还控制
         CommandAI cai = new CommandAI();
         cai.unit(unit);
         cai.targetPos = null;
         cai.attackTarget = null;
         unit.controller(cai);
-
-        try {
-            if (unit.command() != null) {
-                unit.command().targetPos = null;
-                unit.command().attackTarget = null;
-            }
-        } catch (Throwable ignored) {}
     }
 
     @Override

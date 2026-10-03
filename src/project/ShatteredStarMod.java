@@ -47,18 +47,15 @@ public class ShatteredStarMod extends Mod {
     public void init() {
         Log.info("Initializing ShatteredStarMod.");
 
-        // 0. 实验性渲染（你已完成）
+        // 0. 实验性渲染
         SSSettings.load();
         DistortionRenderer.init();
 
         // 0.5. 载荷 UI
         project.ui.TransportPayloadUI.init();
 
-        // 0.7. 挂载单位渲染
-        project.render.AttachedUnitRenderer.init();
-
-        // 0.8. 挂载蜘蛛腿折叠
-        project.content.units.LegShrinkHandler.init();
+        // 0.8. 挂载单位更新（载具死亡释放）
+        project.content.units.AttachedUpdateHandler.init();
 
         // 1. 指令
         huntCommand = new UnitCommand("ss-hunt", "right", u -> new HuntAI());

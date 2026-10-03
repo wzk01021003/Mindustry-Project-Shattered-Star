@@ -24,7 +24,6 @@ public class EnterTransportAI extends CommandAI {
         return unit.type.flying ? flySmoothing : groundSmoothing;
     }
 
-    /** 完全接管，绕过 CommandAI 的自动处理逻辑。 */
     @Override
     public void updateUnit() {
         updateMovement();
@@ -36,7 +35,6 @@ public class EnterTransportAI extends CommandAI {
         Vec2 targetPos = unit.command() != null ? unit.command().targetPos : null;
         if (targetPos == null) return;
 
-        // 索敌
         Teamc enemy = null;
         if (!unit.type.weapons.isEmpty()) {
             float range = unit.range();
@@ -49,7 +47,6 @@ public class EnterTransportAI extends CommandAI {
             enemy = target;
         }
 
-        // 找车
         Unit transport = Units.closest(unit.team, targetPos.x, targetPos.y, transportFindRange,
             u -> u != unit
                 && u.isValid()
@@ -64,9 +61,8 @@ public class EnterTransportAI extends CommandAI {
         } else {
             float dst = unit.dst(transport);
             if (dst <= boardRange) {
-                if (CarrierManager.tryAttach(transport, unit)) {
-                    unit.controller(new AttachedAI(transport));
-                }
+                // 挂载成功时单位会被 remove()，什么都别做
+                CarrierManager.tryAttach(transport, unit);
                 return;
             }
             Tmp.v1.set(transport.x, transport.y);

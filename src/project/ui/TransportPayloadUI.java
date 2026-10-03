@@ -3,6 +3,7 @@ package project.ui;
 import arc.Core;
 import arc.Events;
 import arc.scene.ui.layout.Table;
+import arc.struct.ObjectMap;
 import arc.util.Align;
 import mindustry.Vars;
 import mindustry.game.EventType.Trigger;
@@ -60,9 +61,9 @@ public class TransportPayloadUI {
 
         int perRow = 4;
         int i = 0;
-        for (Unit p : CarrierManager.getCarried(unit)) {
+        for (ObjectMap.Entry<Integer, Unit> e : CarrierManager.getCarried(unit)) {
             try {
-                table.image(p.type.uiIcon).size(iconSize).padRight(4f);
+                table.image(e.value.type.uiIcon).size(iconSize).padRight(4f);
                 i++;
                 if (i % perRow == 0) table.row();
             } catch (Throwable ignored) {}
