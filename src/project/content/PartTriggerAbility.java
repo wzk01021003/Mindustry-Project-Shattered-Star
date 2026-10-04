@@ -25,7 +25,7 @@ public class PartTriggerAbility extends Ability {
 
     @Override
     public void update(Unit unit) {
-        if (unit == null || unit.type == null) return;
+        if (unit == null || unit.type == null || unit.type.weapons == null) return;
 
         for (Rule r : rules) {
             Weapon w = findWeapon(unit, r.weaponName);
@@ -59,14 +59,34 @@ public class PartTriggerAbility extends Ability {
         return null;
     }
 
+    /** 用反射读 Weapon 的进度字段，找不到就返回 0。 */
     private static float getProgress(Weapon w, String type) {
-        if (type == null) return w.warmup;
-        switch (type.toLowerCase()) {
-            case "warmup":  return w.warmup;
-            case "recoil":  return w.recoil;
-            case "heat":    return w.heat;
-            case "reload":  return w.reload <= 0f ? 0f : 1f - w.reloadCounter / w.reload;
-            default:        return w.warmup;
+        String field = null;
+        if (type == null) field = "warmup";
+        else switch (type.toLowerCase()) {
+            case "warmup": field = "warmup"; break;
+            case "recoil": field = "recoil"; break;
+            case "heat":   field = "heat";   break;
+            case "reload": {
+                try {
+                    java.lang.reflect.Field fR = w.getClass().getField("reload");
+                    java.lang.reflect.Field fC = w.getClass().getField("reloadCounter");
+                    float reload = fR.getFloat(w);
+                    float counter = fC.getFloat(w);
+                    if (reload <= 0f) return 0f;
+                    return 1f - Math.max(0f, Math.min(1f, counter / reload));
+                } catch (Throwable t) {
+                    return 0f;
+                }
+            }
+            default: field = "warmup";
+        }
+
+        try {
+            java.lang.reflect.Field f = w.getClass().getField(field);
+            return f.getFloat(w);
+        } catch (Throwable t) {
+            return 0f;
         }
     }
 }

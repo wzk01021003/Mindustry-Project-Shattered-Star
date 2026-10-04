@@ -152,7 +152,6 @@ public class DistortionConfig {
                 switch (trig) {
                     case "hit":     w.bullet.hitEffect    = wrap(w.bullet.hitEffect, fx); break;
                     case "shoot":   w.bullet.shootEffect  = wrap(w.bullet.shootEffect, fx); break;
-                    case "spawn":   w.bullet.spawnEffect  = wrap(w.bullet.spawnEffect, fx); break;
                     case "despawn": w.bullet.despawnEffect= wrap(w.bullet.despawnEffect, fx); break;
                     case "trail":   w.bullet.trailEffect  = wrap(w.bullet.trailEffect, fx); break;
                 }

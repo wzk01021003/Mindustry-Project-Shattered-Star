@@ -161,15 +161,19 @@ public class SSUnitType {
     // ============================================================
     public static void load() {
         // ★ 先建 tag
-        serpuloRTag = new Item("ss-serpulo-r-tag", Color.valueOf("7d4dff")) {{
-            hidden = true;
-            alwaysUnlocked = true;
-        }};
+        serpuloRTag = new Item("ss-serpulo-r-tag", Color.valueOf("7d4dff")) {
+            {
+                hidden = true;
+                alwaysUnlocked = true;
+            }
+        };
 
-        erekirRTag = new Item("ss-erekir-r-tag", Color.valueOf("ffa665")) {{
-            hidden = true;
-            alwaysUnlocked = true;
-        }};
+        erekirRTag = new Item("ss-erekir-r-tag", Color.valueOf("ffa665")) {
+            {
+                hidden = true;
+                alwaysUnlocked = true;
+            }
+        };
 
         // ============ 原有单位加载 ============
         loadSerpuloGroundCombat();
@@ -202,11 +206,15 @@ public class SSUnitType {
             if (!type.name.endsWith("-r")) continue;
 
             boolean isErekir =
-                type instanceof ErekirUnitType
-                || type instanceof TankUnitType
-                || type instanceof GlowErekirLegsUnitType;
+            type instanceof ErekirUnitType
+            || type instanceof TankUnitType
+            || type instanceof GlowErekirLegsUnitType;
 
-            type.databaseTag = isErekir ? erekirRTag : serpuloRTag;
+            if (isErekir) {
+                type.databaseTag = erekirRTag;
+            } else {
+                type.databaseTag = serpuloRTag;
+            }
         }
     }
 
@@ -6493,44 +6501,49 @@ public class SSUnitType {
     }
     private static void loadTransportUnits() {
 
-    transportLandR = new CarrierUnitType("transport-land-r") {
-        {
-            constructor = TankUnit::create;
-            speed = 0.7f;
-            hitSize = 40f;
-            health = 3000f;
-            armor = 12f;
-            itemCapacity = 0;
-            payloadCapacity = 0f;
+        transportLandR = new CarrierUnitType("transport-land-r") {
+            {
+                constructor = TankUnit::create;
+                speed = 0.7f;
+                hitSize = 40f;
+                health = 3000f;
+                armor = 12f;
+                itemCapacity = 0;
+                payloadCapacity = 0f;
 
-            // ★ 容量
-            carrierCapacity = 80f;
+                // ★ 容量
+                carrierCapacity = 80f;
 
-            // ★ 出口：车尾，朝后
-            exitX = -60f;   // 相对车中心向后
-            exitY = 0f;
-            exitRotation = 180f;   // 出口朝向"后方"
+                // ★ 出口：车尾，朝后
+                exitX = -60f;
+                // 相对车中心向后
+                exitY = 0f;
+                exitRotation = 180f;
+                // 出口朝向"后方"
 
-            // ★ 释放节奏
-            releaseInterval = 15f;    // 每 15 帧放一个（0.25 秒）
-            releaseSpeed = 3f;         // 弹出速度
-            releaseDistance = 55f;     // 弹出 55 像素后交给玩家控制
+                // ★ 释放节奏
+                releaseInterval = 15f;
+                // 每 15 帧放一个（0.25 秒）
+                releaseSpeed = 3f;
+                // 弹出速度
+                releaseDistance = 55f;
+                // 弹出 55 像素后交给玩家控制
 
-            treadPullOffset = 4;
-            treadRects = new Rect[]{
-                new Rect(15f - 80f, 10f - 80f, 22f, 140f)
-            };
-            tankMoveVolume = 0.5f;
-            tankMoveSound = Sounds.tankMove;
+                treadPullOffset = 4;
+                treadRects = new Rect[]{
+                    new Rect(15f - 80f, 10f - 80f, 22f, 140f)
+                };
+                tankMoveVolume = 0.5f;
+                tankMoveSound = Sounds.tankMove;
 
-            outlineColor = Pal.darkOutline;
-            targetAir = false;
-            targetGround = false;
-        }
-    };
+                outlineColor = Pal.darkOutline;
+                targetAir = false;
+                targetGround = false;
+            }
+        };
 
-    CarrierUnitType cLand = (CarrierUnitType) transportLandR;
+        CarrierUnitType cLand = (CarrierUnitType) transportLandR;
 
-    cLand.filter(project.content.units.UnitFilters.category("ground"));
-}
+        cLand.filter(project.content.units.UnitFilters.category("ground"));
+    }
 }

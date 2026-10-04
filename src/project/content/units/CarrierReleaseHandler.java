@@ -11,18 +11,16 @@ import mindustry.gen.Unit;
 
 public class CarrierReleaseHandler {
 
-    /** 一个"已释放但还在滑行"的单位。 */
     private static class FlyingUnit {
         Unit unit;
-        float angle;      // 弧度
+        float angle;
         float travel;
         boolean controlGiven;
     }
 
-    /** 一个载具的释放状态。 */
     private static class Queue {
-        Seq<Unit> pending = new Seq<>();    // 还没放出来的
-        Seq<FlyingUnit> flying = new Seq<>(); // 已放出、正在滑行
+        Seq<Unit> pending = new Seq<>();
+        Seq<FlyingUnit> flying = new Seq<>();
         float timer = 0f;
     }
 
@@ -35,20 +33,19 @@ public class CarrierReleaseHandler {
         Events.run(Trigger.update, CarrierReleaseHandler::tick);
     }
 
-    /** 开始释放。 */
     public static void startRelease(Unit host) {
         if (!(host.type instanceof CarrierUnitType)) return;
         if (queues.containsKey(host)) return;
 
-        Seq<Unit> list = CarrierManager.getCarried(host);
-        if (list.isEmpty()) return;
+        ObjectMap<Integer, Unit> carried = CarrierManager.getCarried(host);
+        if (carried.isEmpty()) return;
 
         Queue q = new Queue();
-        for (Unit p : new Seq<>(list)) {
-            if (p != null) q.pending.add(p);
+        for (ObjectMap.Entry<Integer, Unit> e : carried) {
+            if (e.value != null) q.pending.add(e.value);
         }
 
-        list.clear();
+        carried.clear();
         CarrierManager.carried.remove(host);
         queues.put(host, q);
     }
@@ -63,7 +60,6 @@ public class CarrierReleaseHandler {
             Queue q = entry.value;
 
             if (!(host.type instanceof CarrierUnitType) || !host.isValid()) {
-                // 载具没了 → 剩下的直接丢在原地
                 for (Unit p : q.pending) {
                     if (p == null) continue;
                     p.x = host.x;
@@ -77,7 +73,6 @@ public class CarrierReleaseHandler {
 
             CarrierUnitType ct = (CarrierUnitType) host.type;
 
-            // ============ 计算出口世界坐标和朝向 ============
             float hostAng = host.rotation - 90f;
             float cos = Mathf.cosDeg(hostAng);
             float sin = Mathf.sinDeg(hostAng);
@@ -86,7 +81,6 @@ public class CarrierReleaseHandler {
             float worldAngleDeg = ct.exitRotation + hostAng;
             float worldAngleRad = worldAngleDeg * Mathf.degRad;
 
-            // ============ 释放计时 ============
             q.timer -= Time.delta;
             if (q.timer <= 0f && q.pending.size > 0) {
                 q.timer = ct.releaseInterval;
@@ -107,7 +101,6 @@ public class CarrierReleaseHandler {
                 }
             }
 
-            // ============ 滑行中的单位 ============
             float speedPerFrame = ct.releaseSpeed / 60f;
             for (int i = q.flying.size - 1; i >= 0; i--) {
                 FlyingUnit f = q.flying.get(i);
@@ -117,11 +110,8 @@ public class CarrierReleaseHandler {
                     continue;
                 }
 
-                float dx = Mathf.cos(f.angle) * speedPerFrame * Time.delta;
-                float dy = Mathf.sin(f.angle) * speedPerFrame * Time.delta;
-
-                p.x += dx;
-                p.y += dy;
+                p.x += Mathf.cos(f.angle) * speedPerFrame * Time.delta;
+                p.y += Mathf.sin(f.angle) * speedPerFrame * Time.delta;
                 f.travel += speedPerFrame * Time.delta;
 
                 if (!f.controlGiven && f.travel >= ct.releaseDistance) {
@@ -131,7 +121,6 @@ public class CarrierReleaseHandler {
                 }
             }
 
-            // ============ 全部完成 ============
             if (q.pending.isEmpty() && q.flying.isEmpty()) {
                 toRemove.add(host);
             }
