@@ -51,7 +51,7 @@ public class CarrierReleaseHandler {
     }
 
     private static void tick() {
-        if (queues.isEmpty) return;
+        if (queues.isEmpty()) return;
 
         Seq<Unit> toRemove = new Seq<>();
 

@@ -211,9 +211,9 @@ public class SSUnitType {
             || type instanceof GlowErekirLegsUnitType;
 
             if (isErekir) {
-                type.databaseTag = erekirRTag;
+                type.databaseTag = erekirRTag.name;
             } else {
-                type.databaseTag = serpuloRTag;
+                type.databaseTag = serpuloRTag.name;
             }
         }
     }
