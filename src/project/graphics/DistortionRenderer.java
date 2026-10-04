@@ -322,7 +322,10 @@ public class DistortionRenderer {
 
         Data data = new Data();
         data.position.set(x, y);
-        data.maxRadius = data.radius = radius;
+        data.maxRadius = radius;
+        // 初始半径 = 按 interp(0) 算出的起始值，跟后续 updateActive 公式一致
+        float initialCurve = interp.apply(0f);
+        data.radius = radius * Mathf.lerp(radiusFrom, radiusTo, initialCurve);
         data.strength = strength;
         data.lifetime = lifetime;
         data.elapsed = 0f;
