@@ -19,12 +19,13 @@ public class CarrierManager {
 
         ObjectMap<Integer, Unit> map = carried.get(host, ObjectMap::new);
 
+        float used = usedCapacity(host);
+        float cost = ct.payloadCost(passenger.type);
+        if (used + cost > ct.carrierCapacity + 0.001f) return false;
+
         int chosen = -1;
-        for (int i = 0; i < ct.slots.size; i++) {
-            if (map.containsKey(i)) continue;
-            if (!ct.slots.get(i).accepts(passenger.type)) continue;
-            chosen = i;
-            break;
+        for (int i = 0; i < 100; i++) {
+            if (!map.containsKey(i)) { chosen = i; break; }
         }
         if (chosen < 0) return false;
 
@@ -36,7 +37,6 @@ public class CarrierManager {
     public static void detach(Unit passenger) {
         Unit host = getHost(passenger);
         if (host == null) return;
-
         ObjectMap<Integer, Unit> map = carried.get(host);
         if (map != null) {
             Integer key = null;
@@ -61,19 +61,33 @@ public class CarrierManager {
         return carried.get(host, ObjectMap::new);
     }
 
+    public static float usedCapacity(Unit host) {
+        if (!(host.type instanceof CarrierUnitType)) return 0f;
+        CarrierUnitType ct = (CarrierUnitType) host.type;
+        float sum = 0f;
+        for (Unit u : carried.get(host, ObjectMap::new).values()) {
+            sum += ct.payloadCost(u.type);
+        }
+        return sum;
+    }
+
+    public static float remainingCapacity(Unit host) {
+        if (!(host.type instanceof CarrierUnitType)) return 0f;
+        CarrierUnitType ct = (CarrierUnitType) host.type;
+        return ct.carrierCapacity - usedCapacity(host);
+    }
+
     public static boolean isFull(Unit host) {
         if (!(host.type instanceof CarrierUnitType)) return true;
         CarrierUnitType ct = (CarrierUnitType) host.type;
-        return carried.get(host, ObjectMap::new).size >= ct.slots.size;
+        return usedCapacity(host) >= ct.carrierCapacity - 0.001f;
     }
 
     public static boolean accepts(Unit host, UnitType passengerType) {
         if (!(host.type instanceof CarrierUnitType)) return false;
         CarrierUnitType ct = (CarrierUnitType) host.type;
         if (ct.globalFilter != null && !ct.globalFilter.get(passengerType)) return false;
-        for (int i = 0; i < ct.slots.size; i++) {
-            if (ct.slots.get(i).accepts(passengerType)) return true;
-        }
-        return false;
+        float cost = ct.payloadCost(passengerType);
+        return usedCapacity(host) + cost <= ct.carrierCapacity + 0.001f;
     }
 }

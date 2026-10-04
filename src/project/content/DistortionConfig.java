@@ -9,7 +9,6 @@ import arc.struct.Seq;
 import arc.util.Log;
 import mindustry.Vars;
 import mindustry.entities.effect.MultiEffect;
-import mindustry.game.EventType.UnitCreateEvent;
 import mindustry.game.EventType.UnitDestroyEvent;
 import mindustry.io.JsonIO;
 import mindustry.mod.Mods.LoadedMod;
@@ -20,9 +19,6 @@ import project.graphics.DistortionRenderer;
 
 public class DistortionConfig {
 
-    // ============================================================
-    //  JSON 结构
-    // ============================================================
     public static class Preset {
         public float radius = 100f;
         public float strength = 1f;
@@ -34,30 +30,27 @@ public class DistortionConfig {
         public String interp = "pow2Out";
     }
 
-    /** 基础条目：unit + weapon（可选）+ preset */
     public static class Entry {
         public String unit;
         public String weapon;
         public String preset;
     }
 
-    /** 特效挂载点条目：preset + 挂在哪 */
     public static class EffectEntry {
         public String unit;
         public String weapon;
         public String preset;
-        public String trigger;   // "hit" / "shoot" / "spawn" / "despawn" / "death"
+        public String trigger = "hit";
     }
 
-    /** Part 触发器：进度阈值触发 */
-    public static class PartTrigger {
+    public static class PartTriggerEntry {
         public String unit;
         public String weapon;
         public String preset;
-        public String progress = "warmup";   // "warmup" / "recoil" / "reload" / "heat"
+        public String progress = "warmup";
         public float threshold = 0.95f;
-        public boolean once = true;           // true=每次循环一次，false=只触发一次
-        public float offsetX = 0f;            // 相对单位的炮口偏移
+        public boolean once = true;
+        public float offsetX = 0f;
         public float offsetY = 0f;
     }
 
@@ -66,37 +59,27 @@ public class DistortionConfig {
         public ObjectMap<String, Preset> presets = new ObjectMap<>();
         public Seq<Entry> unitDeaths = new Seq<>();
         public Seq<EffectEntry> weaponEffects = new Seq<>();
-        public Seq<PartTrigger> partTriggers = new Seq<>();
+        public Seq<PartTriggerEntry> partTriggers = new Seq<>();
     }
 
-    // ============================================================
-    //  运行时
-    // ============================================================
     private static final ObjectMap<String, DistortionFx> presetCache = new ObjectMap<>();
     private static Config cfg = new Config();
 
-    // ============================================================
-    //  加载
-    // ============================================================
     public static void load() {
         cfg = new Config();
-
-        // 1. 自己的配置
         mergeFromFile(Core.files.internal("configs/ss-distortions.json"));
 
-        // 2. 其他模组的配置（依赖你模组的）
         if (Vars.mods != null && Vars.mods.list() != null) {
             for (LoadedMod mod : Vars.mods.list()) {
                 if (mod == null || mod.root == null) continue;
                 Fi f = mod.root.child("assets").child("ss-distortion.json");
                 if (f.exists()) {
-                    Log.info("[ss-distortion] loading from mod: " + mod.name);
+                    Log.info("[ss-distortion] loading: " + mod.name);
                     mergeFromFile(f);
                 }
             }
         }
 
-        // 3. 建预设
         presetCache.clear();
         for (ObjectMap.Entry<String, Preset> e : cfg.presets) {
             presetCache.put(e.key, buildFx(e.value));
@@ -147,9 +130,6 @@ public class DistortionConfig {
         }
     }
 
-    // ============================================================
-    //  应用
-    // ============================================================
     public static void apply() {
         applyWeaponEffects();
         applyUnitDeaths();
@@ -168,7 +148,8 @@ public class DistortionConfig {
                 if (e.weapon != null && !e.weapon.isEmpty() && !e.weapon.equals(w.name)) continue;
                 if (w.bullet == null) continue;
 
-                switch (e.trigger == null ? "hit" : e.trigger) {
+                String trig = e.trigger == null ? "hit" : e.trigger;
+                switch (trig) {
                     case "hit":     w.bullet.hitEffect    = wrap(w.bullet.hitEffect, fx); break;
                     case "shoot":   w.bullet.shootEffect  = wrap(w.bullet.shootEffect, fx); break;
                     case "spawn":   w.bullet.spawnEffect  = wrap(w.bullet.spawnEffect, fx); break;
@@ -198,18 +179,17 @@ public class DistortionConfig {
     }
 
     private static void applyPartTriggers() {
-        // 按 unit 分组，给每个 UnitType 加一个 PartTriggerAbility
-        ObjectMap<String, Seq<PartTrigger>> byUnit = new ObjectMap<>();
-        for (PartTrigger t : cfg.partTriggers) {
+        ObjectMap<String, Seq<PartTriggerEntry>> byUnit = new ObjectMap<>();
+        for (PartTriggerEntry t : cfg.partTriggers) {
             byUnit.get(t.unit, Seq::new).add(t);
         }
 
-        for (ObjectMap.Entry<String, Seq<PartTrigger>> entry : byUnit) {
+        for (ObjectMap.Entry<String, Seq<PartTriggerEntry>> entry : byUnit) {
             UnitType type = Vars.content.unit(entry.key);
             if (type == null) { Log.warn("[ss-distortion] unknown unit: " + entry.key); continue; }
 
             PartTriggerAbility ab = new PartTriggerAbility();
-            for (PartTrigger t : entry.value) {
+            for (PartTriggerEntry t : entry.value) {
                 DistortionFx fx = presetCache.get(t.preset);
                 if (fx == null) { Log.warn("[ss-distortion] unknown preset: " + t.preset); continue; }
 
