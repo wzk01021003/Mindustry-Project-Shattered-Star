@@ -21,6 +21,8 @@ public class DistortionFx extends Effect {
     public final float radiusFrom;
     public final float radiusTo;
     public final float ringWidth;
+    /** 切向涡旋强度：0 = 纯径向，正值逆时针，负值顺时针 */
+    public final float swirl;
     public final Interp interp;
 
     // ============================================================
@@ -37,13 +39,18 @@ public class DistortionFx extends Effect {
 
     public DistortionFx(float radius, float strength, float life, int type,
         float radiusFrom, float radiusTo, Interp interp) {
-        this(radius, strength, life, type, radiusFrom, radiusTo, 0f, interp);
+        this(radius, strength, life, type, radiusFrom, radiusTo, 0f, interp, 0f);
     }
 
     public DistortionFx(float radius, float strength, float life, int type,
         float radiusFrom, float radiusTo, float ringWidth, Interp interp) {
+        this(radius, strength, life, type, radiusFrom, radiusTo, ringWidth, interp, 0f);
+    }
+
+    public DistortionFx(float radius, float strength, float life, int type,
+        float radiusFrom, float radiusTo, float ringWidth, Interp interp, float swirl) {
         super(life, new CooldownRenderer(radius, strength, life, type,
-                radiusFrom, radiusTo, ringWidth, interp));
+                radiusFrom, radiusTo, ringWidth, interp, swirl));
         this.radius = radius;
         this.strength = strength;
         this.life = life;
@@ -51,6 +58,7 @@ public class DistortionFx extends Effect {
         this.radiusFrom = radiusFrom;
         this.radiusTo = radiusTo;
         this.ringWidth = ringWidth;
+        this.swirl = swirl;
         this.interp = interp;
     }
 
@@ -62,13 +70,12 @@ public class DistortionFx extends Effect {
     private static class CooldownRenderer implements Cons<EffectContainer> {
         final float radius, strength, life;
         final int type;
-        final float radiusFrom, radiusTo, ringWidth;
+        final float radiusFrom, radiusTo, ringWidth, swirl;
         final Interp interp;
-        long lastFrame = -1L;
 
         CooldownRenderer(float radius, float strength, float life, int type,
             float radiusFrom, float radiusTo, float ringWidth,
-            Interp interp) {
+            Interp interp, float swirl) {
             this.radius = radius;
             this.strength = strength;
             this.life = life;
@@ -76,21 +83,22 @@ public class DistortionFx extends Effect {
             this.radiusFrom = radiusFrom;
             this.radiusTo = radiusTo;
             this.ringWidth = ringWidth;
+            this.swirl = swirl;
             this.interp = interp;
         }
 
         @Override
         public void get(EffectContainer e) {
-            // ① 只在 Effect 的第一帧触发（e.time 从 0 开始，每帧 += Time.delta）
+            // 只在 Effect 的第一帧触发（e.time 从 0 开始，每帧 += Time.delta）
             if (e.time > Time.delta * 1.5f) return;
 
-            // ② 同一帧内多个 Effect 实例只触发一次
-            long fid = Core.graphics.getFrameId();
-            if (fid == lastFrame) return;
-            lastFrame = fid;
-
+            // 注：旧版这里还有一层「同一帧多实例只触发一次」的帧级去重，
+            // 但 lastFrame 存在共享的 renderer 实例上，导致同帧两个单位
+            // 触发同一预设时第二个被直接吞掉。并发限量由
+            // DistortionRenderer.addDistortion 内的 maxPerFrame 负责，
+            // 这里不再重复去重。
             DistortionRenderer.addDistortion(e.x, e.y, radius, strength, life, type,
-                radiusFrom, radiusTo, ringWidth, interp);
+                radiusFrom, radiusTo, ringWidth, interp, swirl);
         }
     }
 
@@ -136,4 +144,32 @@ public class DistortionFx extends Effect {
     /** 龙王 EMP：急速外扩 + 收尾减速。 */
     public static final DistortionFx reignImpact =
     new DistortionFx(280f, 2.0f, 55f, TYPE_OUTWARD, 0f, 1f, 0.15f, Interp.pow2Out);
+
+    // ============================================================
+    //  铁锈战争 1.15 shader 效果风格预设
+    //  （teleport / water ripples / nuke shockwaves + 未来科技等离子审美）
+    // ============================================================
+
+    /**
+     * 传送：空间折叠。强吸入 + 强涡旋，末端内爆收拢，
+     * 观感类似铁锈传送门把画面「拧」进去。
+     */
+    public static final DistortionFx rwTeleport =
+    new DistortionFx(150f, 1.8f, 35f, TYPE_INWARD, 1f, 0f, 0f, Interp.pow3In, 2.2f);
+
+    /** 水波纹：大范围弱外扩环 + 轻涡旋，缓慢柔和，适合持续能量场。 */
+    public static final DistortionFx rwWaterRipple =
+    new DistortionFx(240f, 1.0f, 70f, TYPE_OUTWARD, 0f, 1f, 0.3f, Interp.pow2Out, 0.4f);
+
+    /** 核弹冲击波：高速外扩锐环，强度高、寿命短，到达即巅峰。 */
+    public static final DistortionFx rwNukeShockwave =
+    new DistortionFx(320f, 2.4f, 40f, TYPE_OUTWARD, 0f, 1f, 0.15f, Interp.pow2Out);
+
+    /** 未来科技等离子命中：外扩 + 中涡旋 + 短促，配合色散有能量炸开感。 */
+    public static final DistortionFx rwPlasmaImpact =
+    new DistortionFx(170f, 1.5f, 30f, TYPE_OUTWARD, 0f, 1f, 0.1f, Interp.pow3Out, 1.2f);
+
+    /** 量子坍缩： inward 涡旋 + 回弹，收招有明显「拧紧再弹开」的层次。 */
+    public static final DistortionFx rwQuantumCollapse =
+    new DistortionFx(200f, 1.6f, 50f, TYPE_INWARD_BOUNCE, 1f, 0f, 0.2f, Interp.pow2In, 1.6f);
 }

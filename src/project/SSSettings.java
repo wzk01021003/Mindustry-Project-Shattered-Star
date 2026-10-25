@@ -12,6 +12,7 @@ public class SSSettings {
     public static final String KEY_CULL         = "ss-render-cull";
     public static final String KEY_AUTO_DISABLE = "ss-render-autodisable";
     public static final String KEY_DEBUG        = "ss-render-debug";
+    public static final String KEY_CHROMA       = "ss-render-chroma";
 
     public static final int LEVEL_OFF = 0, LEVEL_LOW = 1, LEVEL_MEDIUM = 2, LEVEL_HIGH = 3;
 
@@ -41,6 +42,8 @@ public class SSSettings {
         table.checkPref(KEY_CULL, true);
         table.checkPref(KEY_AUTO_DISABLE, true);
         table.checkPref(KEY_DEBUG, false);
+        // 色散：扭曲边缘 RGB 分离，能量场/等离子观感，关掉可省 2 次纹理采样
+        table.checkPref(KEY_CHROMA, true);
 
         // 等级：用官方 sliderPref，0=关 1=低 2=中 3=高
         table.sliderPref(KEY_LEVEL, LEVEL_MEDIUM, LEVEL_OFF, LEVEL_HIGH, 1, SSSettings::levelName);
@@ -83,6 +86,11 @@ public class SSSettings {
         return Core.settings.getBool(KEY_DEBUG, false);
     }
 
+    /** 色散开关：扭曲越强 RGB 分离越明显，默认开 */
+    public static boolean chromatic() {
+        return Core.settings.getBool(KEY_CHROMA, true);
+    }
+
     public static int getLevel() {
         int l = Core.settings.getInt(KEY_LEVEL, LEVEL_MEDIUM);
         return (l < 0 || l > 3) ? LEVEL_MEDIUM : l;
@@ -90,7 +98,7 @@ public class SSSettings {
 
     public static int maxConcurrent() {
         switch (getLevel()) {
-            case LEVEL_LOW:    return 15;
+            case LEVEL_LOW:    return 8;
             case LEVEL_MEDIUM: return 50;
             case LEVEL_HIGH:   return 100;
             default:           return 0;
