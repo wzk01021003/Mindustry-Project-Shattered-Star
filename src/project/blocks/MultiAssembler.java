@@ -5,6 +5,7 @@ import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
+import arc.math.Angles;
 import arc.math.Mathf;
 import arc.math.geom.Point2;
 import arc.math.geom.Vec2;
@@ -227,6 +228,9 @@ public class MultiAssembler extends GenericCrafter {
 
         public Seq<UnitJob> jobs = new Seq<>();
         public ObjectMap<UnlockableContent, Integer> payloadCounts = new ObjectMap<>();
+
+        /** 完成闪光记录 {x, y, 起始时间}，纯客户端视觉，不存档 */
+        public transient Seq<float[]> finishFlashes = new Seq<>();
 
         public boolean loopMode = false;
         public Vec2 commandPos;
@@ -542,6 +546,12 @@ public class MultiAssembler extends GenericCrafter {
             float cx = tile.worldx() + (job.offsetX + (tiles - 1) / 2f) * Vars.tilesize;
             float cy = tile.worldy() + (job.offsetY + (tiles - 1) / 2f) * Vars.tilesize;
 
+            // 完成闪光：仅客户端记录，上限 16 个防止堆积
+            if (!Vars.headless) {
+                finishFlashes.add(new float[]{cx, cy, Time.time});
+                if (finishFlashes.size > 16) finishFlashes.remove(0);
+            }
+
             Unit u = r.unit.create(team);
             u.set(cx, cy);
             u.rotation = rotation * 90f;
@@ -579,6 +589,28 @@ public class MultiAssembler extends GenericCrafter {
             for (UnitJob job : jobs) {
                 if (job.hasSlot()) drawCraftingVisual(job);
             }
+            drawFinishFlashes();
+            Draw.z(Layer.block);
+        }
+
+        /** 完成闪光：扩散光环 + 中心白闪，0.55s 衰减 */
+        private void drawFinishFlashes() {
+            for (int i = finishFlashes.size - 1; i >= 0; i--) {
+                float[] f = finishFlashes.get(i);
+                float t = (Time.time - f[2]) / 0.55f;
+                if (t >= 1f) {
+                    finishFlashes.remove(i);
+                    continue;
+                }
+                float a = 1f - t;
+                Draw.z(Layer.blockOver + 10f);
+                Lines.stroke(2.6f * a);
+                Draw.color(Pal.accent, a);
+                Lines.circle(f[0], f[1], 8f + t * 20f);
+                Draw.color(Color.white, a * 0.85f);
+                Fill.circle(f[0], f[1], Math.max(0f, (1f - t) * 9f));
+                Draw.color();
+            }
         }
 
         private void drawCraftingVisual(UnitJob job) {
@@ -589,59 +621,79 @@ public class MultiAssembler extends GenericCrafter {
             float progress = Mathf.clamp(job.progress);
             boolean hasMats = hasMaterials(job.recipe);
 
-            float ghostScale = Math.max(0f, 1f - progress);
-            float ghostAlpha = Math.max(0f, 0.75f * (1f - progress));
-            if (ghostScale > 0.01f) {
-                float oldScl = Draw.scl;
-                Draw.scl *= ghostScale;
-                Draw.z(Layer.blockOver + 1f);
-                Draw.color(Pal.accent, ghostAlpha);
-                Draw.rect(unit.fullIcon, cx, cy, Time.time * 2f);
-                Draw.scl = oldScl;
-                Draw.color();
-            }
+            float iconSize = tiles * Vars.tilesize;
+            float ringR = iconSize * 0.5f + 5f;
+            float dir = rotation * 90f - 90f;
 
+            // ============ 幽灵单位：静止朝向 + 呼吸缩放 ============
+            float breathe = 1f + Mathf.sin(Time.time * 5f) * 0.05f;
+            float ghostAlpha = 0.4f + 0.15f * Mathf.sin(Time.time * 5f + 1.5f);
+            float oldScl = Draw.scl;
+            Draw.z(Layer.blockOver + 1f);
+            Draw.color(Pal.accent, ghostAlpha);
+            Draw.scl *= breathe;
+            Draw.rect(unit.fullIcon, cx, cy, dir);
+            Draw.scl = oldScl;
+            Draw.color();
+
+            // ============ 实体化：随进度渐显 ============
             if (progress > 0.01f) {
                 Draw.z(Layer.blockOver + 2f);
-                Draw.color(Color.white, progress);
-                Draw.rect(unit.fullIcon, cx, cy, rotation * 90f - 90f);
+                Draw.color(Color.white, progress * 0.85f);
+                Draw.rect(unit.fullIcon, cx, cy, dir);
                 Draw.color();
             }
 
-            float topY = cy + tiles * Vars.tilesize / 2f + 10f;
+            // ============ 圆形进度环（原版重建厂语言） ============
+            Draw.z(Layer.blockOver + 3f);
+            Lines.stroke(3f);
+            Draw.color(Color.darkGray, 0.65f);
+            Lines.circle(cx, cy, ringR);
+            if (progress > 0.01f) {
+                Draw.color(hasMats ? Pal.accent : Pal.remove);
+                Lines.arc(cx, cy, ringR, 360f * progress, 90f);
+                // 进度弧前端脉冲点
+                float lead = 90f + 360f * progress;
+                Draw.color(hasMats ? Pal.accent : Pal.remove);
+                Fill.circle(cx + Angles.trnsx(lead, ringR), cy + Angles.trnsy(lead, ringR), 2.2f);
+            }
+            Lines.stroke(1f);
+            Draw.color();
 
-            Seq<Object> mats = new Seq<>();
+            // ============ 底部能量脉冲条 ============
+            float barW = iconSize * 0.85f;
+            float barH = 2.5f;
+            float barY = cy - ringR - 5f;
+            float pulse = 0.55f + 0.45f * Mathf.sin(Time.time * 8f);
+            Draw.z(Layer.blockOver + 3f);
+            Draw.color(Color.darkGray, 0.7f);
+            Fill.rect(cx, barY, barW, barH);
+            Draw.color(hasMats ? Pal.accent : Pal.remove, pulse);
+            Fill.rect(cx - barW / 2f + barW * progress / 2f, barY, barW * progress, barH);
+            Draw.color();
+
+            // ============ 材料指示：真实小图标 ============
+            Seq<UnlockableContent> mats = new Seq<>();
             for (ItemStack s : job.recipe.inputItems) mats.add(s.item);
             for (LiquidStack s : job.recipe.inputLiquids) mats.add(s.liquid);
             for (PayloadStack s : job.recipe.cachedInputPayloads) mats.add(s.item);
 
             if (mats.size > 0) {
-                float iconSize = 5f;
+                float iconSz = 7f;
                 float gap = 2f;
-                float totalW = mats.size * iconSize + (mats.size - 1) * gap;
-                float startX = cx - totalW / 2f + iconSize / 2f;
-                Draw.z(Layer.overlayUI);
+                float totalW = mats.size * iconSz + (mats.size - 1) * gap;
+                float startX = cx - totalW / 2f + iconSz / 2f;
+                float matY = cy + ringR + 6f;
+                Draw.z(Layer.blockOver + 3f);
                 for (int i = 0; i < mats.size; i++) {
-                    Object o = mats.get(i);
-                    Color c = Color.white;
-                    if (o instanceof Item) c = ((Item) o).color;
-                    else if (o instanceof Liquid) c = ((Liquid) o).color;
-                    Draw.color(c);
-                    Fill.square(startX + i * (iconSize + gap), topY, iconSize / 2f, 45f);
+                    UnlockableContent c = mats.get(i);
+                    if (c instanceof Item) Draw.color(((Item) c).color);
+                    else if (c instanceof Liquid) Draw.color(((Liquid) c).color);
+                    else Draw.color(Color.white);
+                    Draw.rect(c.uiIcon, startX + i * (iconSz + gap), matY, iconSz, iconSz);
                 }
                 Draw.color();
             }
-
-            float barW = Math.max(tiles * Vars.tilesize, 12f);
-            float barH = 3f;
-            float barY = topY + 6f;
-
-            Draw.z(Layer.overlayUI);
-            Draw.color(Color.darkGray);
-            Fill.rect(cx, barY, barW, barH);
-            Draw.color(hasMats ? Pal.accent : Pal.remove);
-            Fill.rect(cx - barW / 2f + barW * progress / 2f, barY, barW * progress, barH);
-            Draw.color();
 
             Draw.z(Layer.block);
         }
