@@ -335,7 +335,9 @@ public class SSUnitType {
 
                             bullet = new ArtilleryBulletType(4f, 20f, "shell") {
                                 {
-                                    hitEffect = Fx.blastExplosion;
+                                    hitEffect = new MultiEffect(Fx.blastExplosion, DistortionFx.fortressArtilleryImpact);
+                                    // 炮弹飞抵最大射程未命中时同样播放扭曲，保持观感一致
+                                    despawnEffect = DistortionFx.fortressArtilleryImpact;
                                     knockback = 0.8f;
                                     lifetime = 53.25f;
                                     maxRange = 240f;

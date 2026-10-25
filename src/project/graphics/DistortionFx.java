@@ -145,6 +145,15 @@ public class DistortionFx extends Effect {
     public static final DistortionFx reignImpact =
     new DistortionFx(280f, 2.0f, 55f, TYPE_OUTWARD, 0f, 1f, 0.15f, Interp.pow2Out);
 
+    // ---- 堡垒专属 ----
+    /**
+     * 堡垒火炮炮弹命中：中量级外扩冲击环 + 轻涡旋，短促收束。
+     * 半径取炮弹 splash 半径（35）的约 3 倍，环宽 0.18 保证边缘柔和不抢戏；
+     * 涡旋 0.8 提供轻微空间折叠感，配合色散呈现等离子炸开效果。
+     */
+    public static final DistortionFx fortressArtilleryImpact =
+    new DistortionFx(110f, 1.1f, 28f, TYPE_OUTWARD, 0f, 1f, 0.18f, Interp.pow3Out, 0.8f);
+
     // ============================================================
     //  铁锈战争 1.15 shader 效果风格预设
     //  （teleport / water ripples / nuke shockwaves + 未来科技等离子审美）

@@ -30,6 +30,9 @@ import project.SSSettings;
  *    上采样时 bilinear 自动平滑，肉眼几乎无损而填充率降 75%+
  *  - Data 对象池化，运行期零分配
  *  - uniform 只上传实际生效的 slot 数（旧版恒定上传 32 个 vec4）
+ *  - 视口全离屏时整条管线跳过：FBO 捕获 + 全屏 blit 都不执行
+ *  - shader 快路径：offset ≈ 0 的像素（无扭曲区）即使开启色散
+ *    也只取 1 次纹理采样，与旧代码输出完全一致
  *  - 调试日志 30 帧节流
  */
 public class DistortionRenderer {
@@ -105,8 +108,42 @@ public class DistortionRenderer {
     private static void onDrawEvent() {
         if (unsupported || !SSSettings.enabled() || active.size == 0) return;
 
+        // 全部扭曲都在视口外时，整条离屏管线（FBO 捕获 + 全屏 blit）
+        // 都不必执行——玩家看不见扭曲时，这两步是纯浪费。
+        if (!anyVisible()) return;
+
         Draw.draw(Layer.background - 1f, DistortionRenderer::beginCapture);
         Draw.draw(Layer.overlayUI - 1f, DistortionRenderer::endCaptureAndRender);
+    }
+
+    /**
+     * 是否存在与视口相交的扭曲源。
+     * 换算方式与 endCaptureAndRender 的 uniform 上传保持一致；
+     * 半径额外加上最大位移（strength * 10）与 64px 余量，
+     * 确保扭曲边缘的采样偏移区域也被视为可见。
+     */
+    private static boolean anyVisible() {
+        if (Core.camera == null) return true;
+        float w = Core.graphics.getWidth();
+        float h = Core.graphics.getHeight();
+        if (w <= 0 || h <= 0) return true;
+
+        float camX = Core.camera.position.x;
+        float camY = Core.camera.position.y;
+        float camW = Core.camera.width;
+        float camH = Core.camera.height;
+
+        for (int i = 0; i < active.size; i++) {
+            Data d = active.get(i);
+            float sx = (d.position.x - camX) / camW * w + w / 2f;
+            float sy = (d.position.y - camY) / camH * h + h / 2f;
+            float r = Math.abs(d.radius) / camW * w
+                    + Math.abs(d.currentStrength) * 10f + 64f;
+            if (sx + r >= 0f && sx - r <= w && sy + r >= 0f && sy - r <= h) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void beginCapture() {
@@ -252,8 +289,12 @@ public class DistortionRenderer {
         mainBody.append("    vec2 duv = offset / u_resolution;\n");
         // 色散：沿位移方向做 RGB 分离，位移越大分离越明显。
         // 三次采样同时起到强位移下的抗锯齿作用。
-        mainBody.append("    if(u_chroma > 0.001){\n");
-        mainBody.append("        vec2 nd = length(offset) > 0.0001 ? normalize(offset) : vec2(0.0);\n");
+        // 快路径：offset ≈ 0（画面中无扭曲的绝大多数像素）时即使开启
+        // 色散也只取 1 次采样——此时旧代码中 normalize(offset) 本就
+        // 被 0.0001 阈值兜底为 vec2(0.0)，三次采样结果完全相同，
+        // 属于零视觉差异的纯填充率优化。
+        mainBody.append("    if(u_chroma > 0.001 && length(offset) > 0.0001){\n");
+        mainBody.append("        vec2 nd = normalize(offset);\n");
         mainBody.append("        float spread = u_chroma * 0.012 * (1.0 + length(offset) * 0.08);\n");
         mainBody.append("        float rC = texture2D(u_texture, uv + duv + nd * spread).r;\n");
         mainBody.append("        float gC = texture2D(u_texture, uv + duv).g;\n");
