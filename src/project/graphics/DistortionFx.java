@@ -147,12 +147,33 @@ public class DistortionFx extends Effect {
 
     // ---- 堡垒专属 ----
     /**
-     * 堡垒火炮炮弹命中：中量级外扩冲击环 + 轻涡旋，短促收束。
-     * 半径取炮弹 splash 半径（35）的约 3 倍，环宽 0.18 保证边缘柔和不抢戏；
-     * 涡旋 0.8 提供轻微空间折叠感，配合色散呈现等离子炸开效果。
+     * 堡垒火炮炮弹命中·内层：等离子「拧紧」阶段。
+     *
+     * 寿命刻意只有外层的一半不到（13 帧 vs 32 帧），与外层同时触发时
+     * 形成「先向内收一口、再向外炸开」的时序层次——单一预设无法表达
+     * 这种双段节奏，因为一个 Data 只有一条生命周期曲线。
+     *
+     * 实心（环宽 0）让它作用于整个圆面而非细环，配合 pow3In 的
+     * 前段缓慢、末段加速，收束感集中在爆炸瞬间；涡旋 2.0 与外层
+     * 的 1.2 同向叠加，两层切向分量累加后形成螺旋状的扭转纹路。
+     */
+    public static final DistortionFx fortressArtilleryImplosion =
+    new DistortionFx(72f, 1.5f, 13f, TYPE_INWARD, 0f, 1f, 0f, Interp.pow3In, 2.0f);
+
+    /**
+     * 堡垒火炮炮弹命中·外层：高强度锐环外扩。
+     *
+     * 参数对齐 {@link #rwPlasmaImpact}（半径 170 / 强度 1.5 / 环宽 0.10 /
+     * 涡旋 1.2）并整体上调一档——铁锈未来科技等离子的冲击感来自
+     * 「环足够锐、扩散足够快、强度到达即巅峰」：环宽 0.10 而非 0.18
+     * 让冲击面收窄成一个清晰的能量壳，pow3Out 使半径在前 1/3 就冲到
+     * 近似满值，之后靠 1-p² 的强度衰减自然散去。
+     *
+     * 半径 185 约为炮弹 splash 半径（35）的 5 倍，使扭曲范围明显溢出
+     * 伤害圈，视觉权重高于单纯的爆炸粒子。
      */
     public static final DistortionFx fortressArtilleryImpact =
-    new DistortionFx(110f, 1.1f, 28f, TYPE_OUTWARD, 0f, 1f, 0.18f, Interp.pow3Out, 0.8f);
+    new DistortionFx(185f, 1.7f, 32f, TYPE_OUTWARD, 0f, 1f, 0.10f, Interp.pow3Out, 1.2f);
 
     // ============================================================
     //  铁锈战争 1.15 shader 效果风格预设

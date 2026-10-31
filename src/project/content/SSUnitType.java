@@ -335,9 +335,20 @@ public class SSUnitType {
 
                             bullet = new ArtilleryBulletType(4f, 20f, "shell") {
                                 {
-                                    hitEffect = new MultiEffect(Fx.blastExplosion, DistortionFx.fortressArtilleryImpact);
+                                    // 双层扭曲：内层 13 帧内爆「拧紧」，外层 32 帧锐环外扩。
+                                    // 两者同时触发，靠寿命差自然形成先收后散的双段节奏，
+                                    // 比单一预设更接近铁锈未来科技等离子炮的冲击感。
+                                    // 顺序上外层优先：maxPerFrame 在低画质档仅 2 个槽位，
+                                    // 双层占满时若被限流应保留主视觉（锐环外扩），
+                                    // 丢掉内层只损失层次感，不会退化成「只有内吸」。
+                                    hitEffect = new MultiEffect(
+                                        Fx.blastExplosion,
+                                        DistortionFx.fortressArtilleryImpact,
+                                        DistortionFx.fortressArtilleryImplosion);
                                     // 炮弹飞抵最大射程未命中时同样播放扭曲，保持观感一致
-                                    despawnEffect = DistortionFx.fortressArtilleryImpact;
+                                    despawnEffect = new MultiEffect(
+                                        DistortionFx.fortressArtilleryImpact,
+                                        DistortionFx.fortressArtilleryImplosion);
                                     knockback = 0.8f;
                                     lifetime = 53.25f;
                                     maxRange = 240f;
