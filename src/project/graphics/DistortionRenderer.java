@@ -56,12 +56,25 @@ public class DistortionRenderer {
     }
 
     private static final Seq<Data> active = new Seq<>();
+    /** 本帧参与渲染的源索引（按强度降序），复用避免每帧分配 */
+    private static final int[] slotOrder = new int[MAX_GPU_SLOTS];
     /** Data 对象池，避免每次触发都 new；池有上限，防止无限增长 */
     private static final Seq<Data> pool = new Seq<>();
     private static final int POOL_LIMIT = 64;
 
     private static FrameBuffer buffer;
-    private static Shader shader;
+    /**
+     * 按槽位数缓存的 shader 变体（量化到 1/2/4/8/16 五档）。
+     *
+     * 旧实现只有一个 shader，主循环固定编译 16 次迭代：
+     * {@code for(int i = 0; i < 16; i++) if(u_count > i) offset += applyDistort(...)}
+     * u_count 是 uniform，GLSL ES 2.0 无法在编译期裁剪这个分支，于是哪怕
+     * 画面上只有 1 个扭曲源，每个像素也要跑满 16 次循环 + 16 次判断——
+     * 这是「几十个一起上就卡」的主因。按实际槽位数编译变体后，循环次数
+     * 成为编译期常量，2 个源时 ALU 开销直接降到 1/8。
+     * 只量化五档而非每档都编译，避免 shader program 数量失控。
+     */
+    private static final Shader[] shaderVariants = new Shader[MAX_GPU_SLOTS + 1];
     private static boolean unsupported = false;
     private static boolean capturing = false;
     private static boolean eventsRegistered = false;
@@ -171,8 +184,6 @@ public class DistortionRenderer {
         try {
             buffer.end();
 
-            int slots = effectiveSlots();
-
             float w = Core.graphics.getWidth();
             float h = Core.graphics.getHeight();
             float camX = Core.camera.position.x;
@@ -180,39 +191,59 @@ public class DistortionRenderer {
             float camW = Core.camera.width;
             float camH = Core.camera.height;
 
-            for (int i = 0; i < slots; i++) {
-                Data data = active.get(i);
-                // 屏幕像素坐标（uv * u_resolution 同坐标系）
-                dBuf[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
-                dBuf[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
-                dBuf[i * 4 + 2] = data.radius / camW * w;
-                dBuf[i * 4 + 3] = data.currentStrength;
-                // ← 用 fade 后的强度
+            // 只收集视口内、强度未衰减完的源，并按强度降序取前 N 个。
+            // 旧实现直接取 active 的前 N 个（数组顺序 = 创建顺序），
+            // 齐射时刚爆炸的强源可能被一批较弱的旧扭曲挤掉，
+            // 白白占掉槽位却几乎看不见。
+            int found = collectSlots(w, h, camX, camY, camW, camH);
+            // 注意：这里不能提前 return。离屏内容还没画回屏幕，
+            // 直接返回会让 Layer.background ~ overlayUI 之间的画面整段丢失（黑屏）。
+            // 没有可用源时用 1 槽空变体跑一遍，等价于原样输出。
+            // 用 found 而非 slots 作为有效数量，避免读到 slotOrder 里的陈旧索引。
+            int slots = found > 0 ? found : 1;
 
-                float progress = data.lifetime > 0f
-                ? Math.min(1f, data.elapsed / data.lifetime)
-                : 1f;
+            // 变体声明的 uniform 数可能多于实际源数（量化到 1/2/4/8/16）。
+            // 同一 program 复用时会残留上一帧的值，必须把多余槽位显式清零，
+            // 否则会多渲染一个早已消失的扭曲。
+            int q = quantizeSlots(slots);
 
-                eBuf[i * 4]     = data.type;
-                eBuf[i * 4 + 1] = progress;
-                // 环宽按「半径比例」传入（0 = 实心），shader 内统一处理
-                eBuf[i * 4 + 2] = data.ringWidth;
-                // 切向涡旋系数
-                eBuf[i * 4 + 3] = data.swirl;
+            for (int i = 0; i < q; i++) {
+                if (i < found) {
+                    Data data = active.get(slotOrder[i]);
+                    // 屏幕像素坐标（uv * u_resolution 同坐标系）
+                    dBuf[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
+                    dBuf[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
+                    dBuf[i * 4 + 2] = data.radius / camW * w;
+                    dBuf[i * 4 + 3] = data.currentStrength;
+                    // ← 用 fade 后的强度
+
+                    float progress = data.lifetime > 0f
+                    ? Math.min(1f, data.elapsed / data.lifetime)
+                    : 1f;
+
+                    eBuf[i * 4]     = data.type;
+                    eBuf[i * 4 + 1] = progress;
+                    // 环宽按「半径比例」传入（0 = 实心），shader 内统一处理
+                    eBuf[i * 4 + 2] = data.ringWidth;
+                    // 切向涡旋系数
+                    eBuf[i * 4 + 3] = data.swirl;
+                } else {
+                    // d.z = 0 → applyDistort 内部立即早退，代价可忽略
+                    dBuf[i * 4] = 0f; dBuf[i * 4 + 1] = 0f; dBuf[i * 4 + 2] = 0f; dBuf[i * 4 + 3] = 0f;
+                    eBuf[i * 4] = 0f; eBuf[i * 4 + 1] = 0f; eBuf[i * 4 + 2] = 0f; eBuf[i * 4 + 3] = 0f;
+                }
             }
 
-            shader.bind();
-            shader.setUniformi("u_count", slots);
-            shader.setUniformf("u_resolution", w, h);
-            shader.setUniformf("u_chroma", SSSettings.chromatic() ? 1f : 0f);
-            // 只上传实际生效的 slot；未使用的 slot 的 d.z 为 0，
-            // shader 内有 d.z <= 0.001 的早退，双保险
-            for (int i = 0; i < slots; i++) {
-                shader.setUniformf(D_NAMES[i], dBuf[i * 4], dBuf[i * 4 + 1], dBuf[i * 4 + 2], dBuf[i * 4 + 3]);
-                shader.setUniformf(E_NAMES[i], eBuf[i * 4], eBuf[i * 4 + 1], eBuf[i * 4 + 2], eBuf[i * 4 + 3]);
+            Shader sh = shaderFor(slots);
+            sh.bind();
+            sh.setUniformf("u_resolution", w, h);
+            sh.setUniformf("u_chroma", SSSettings.chromatic() ? 1f : 0f);
+            for (int i = 0; i < q; i++) {
+                sh.setUniformf(D_NAMES[i], dBuf[i * 4], dBuf[i * 4 + 1], dBuf[i * 4 + 2], dBuf[i * 4 + 3]);
+                sh.setUniformf(E_NAMES[i], eBuf[i * 4], eBuf[i * 4 + 1], eBuf[i * 4 + 2], eBuf[i * 4 + 3]);
             }
 
-            buffer.blit(shader);
+            buffer.blit(sh);
 
             // 调试日志 30 帧节流，避免每帧字符串拼接 + IO
             if (SSSettings.showDebug() && Core.graphics.getFrameId() % 30 == 0) {
@@ -243,16 +274,40 @@ public class DistortionRenderer {
                 texH = bh;
                 texScale = scale;
             }
-            if (shader == null) {
-                shader = createShader();
-            }
+            // shader 变体改为按需编译：首次用到某个槽位数时才创建，
+            // 避免启动时一次性编译多个 program 造成卡顿
         } catch (Throwable t) {
             Log.err("[ss-distort] 初始化失败", t);
             unsupported = true;
         }
     }
 
-    private static Shader createShader() {
+    /** 把实际槽位数向上量化到 1/2/4/8/16，限制 shader 变体数量 */
+    private static int quantizeSlots(int slots) {
+        if (slots <= 1) return 1;
+        if (slots <= 2) return 2;
+        if (slots <= 4) return 4;
+        if (slots <= 8) return 8;
+        return MAX_GPU_SLOTS;
+    }
+
+    /** 取得（必要时懒编译）对应槽位数的 shader 变体 */
+    private static Shader shaderFor(int slots) {
+        int q = quantizeSlots(slots);
+        Shader s = shaderVariants[q];
+        if (s == null) {
+            s = createShader(q);
+            shaderVariants[q] = s;
+        }
+        return s;
+    }
+
+    /**
+     * 为指定槽位数编译 shader。
+     * slots 是编译期常量，因此主循环可以被编译器完全展开/裁剪，
+     * 不再有「固定 16 次迭代 + uniform 分支」的浪费。
+     */
+    private static Shader createShader(int slots) {
         String vertex =
         "attribute vec4 a_position;\n" +
         "attribute vec2 a_texCoord0;\n" +
@@ -266,13 +321,12 @@ public class DistortionRenderer {
         uniformDecl.append("varying vec2 v_texCoords;\n");
         uniformDecl.append("uniform sampler2D u_texture;\n");
         uniformDecl.append("uniform vec2 u_resolution;\n");
-        uniformDecl.append("uniform int u_count;\n");
         // 色散总开关（0 = 关闭，走单次采样快路径）
         uniformDecl.append("uniform float u_chroma;\n");
-        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+        for (int i = 0; i < slots; i++) {
             uniformDecl.append("uniform vec4 u_d").append(i).append(";\n");
         }
-        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
+        for (int i = 0; i < slots; i++) {
             uniformDecl.append("uniform vec4 u_e").append(i).append(";\n");
         }
 
@@ -281,9 +335,9 @@ public class DistortionRenderer {
         mainBody.append("    vec2 uv = v_texCoords;\n");
         mainBody.append("    vec2 screenPos = uv * u_resolution;\n");
         mainBody.append("    vec2 offset = vec2(0.0);\n");
-        for (int i = 0; i < MAX_GPU_SLOTS; i++) {
-            mainBody.append("    if(u_count > ").append(i)
-            .append(") offset += applyDistort(screenPos, u_d").append(i)
+        // 循环次数由变体固定：slots = 1/2/4/8/16
+        for (int i = 0; i < slots; i++) {
+            mainBody.append("    offset += applyDistort(screenPos, u_d").append(i)
             .append(", u_e").append(i).append(");\n");
         }
         mainBody.append("    vec2 duv = offset / u_resolution;\n");
@@ -422,6 +476,40 @@ public class DistortionRenderer {
 
         if (SSSettings.cullOffscreen() && isOffscreen(x, y, radius)) return;
 
+        // ============================================================
+        //  同帧合并
+        //  齐射时同一片区域会在几帧内产生大量几乎完全重叠的扭曲，
+        //  它们各占一个槽位，但在屏幕上根本分辨不出来——纯属浪费。
+        //  合并成一个（半径取大、强度叠加、按当前进度重算）能让
+        //  「几十发一起」只吃 1~2 个槽位，是降低齐射开销最关键的一步。
+        //  只合并同帧/上一帧的源，避免把已经扩散开的老环拽回起点。
+        // ============================================================
+        float mergeR = radius * 0.35f;
+        float mergeR2 = mergeR * mergeR;
+        for (int i = 0; i < active.size; i++) {
+            Data d = active.get(i);
+            if (d.type != type) continue;
+            if (d.elapsed > Time.delta * 2f) continue;
+            float dx = d.position.x - x;
+            float dy = d.position.y - y;
+            if (dx * dx + dy * dy > mergeR2) continue;
+
+            float p = d.lifetime > 0f ? Math.min(1f, d.elapsed / d.lifetime) : 1f;
+            if (radius > d.maxRadius) {
+                d.maxRadius = radius;
+                d.radiusFrom = radiusFrom;
+                d.radiusTo = radiusTo;
+                d.interp = interp;
+                // 按当前进度重算半径，避免合并瞬间半径突跳
+                d.radius = radius * Mathf.lerp(radiusFrom, radiusTo, interp.apply(p));
+            }
+            // 强度叠加但有上限，避免多枚叠加后把画面撕烂
+            d.strength = Math.min(SSSettings.maxStrength(), d.strength + strength * 0.5f);
+            d.currentStrength = d.strength * (1f - p * p);
+            d.lifetime = Math.max(d.lifetime, lifetime);
+            return;
+        }
+
         int max = SSSettings.maxConcurrent();
         while (active.size >= max) {
             active.remove(0);
@@ -495,6 +583,49 @@ public class DistortionRenderer {
         }
     }
 
+    /** 本帧允许使用的槽位上限（自动降级会收紧） */
+    private static int slotBudget() {
+        if (downgrade >= 3) return 2;
+        if (downgrade >= 2) return 4;
+        if (downgrade >= 1) return 8;
+        return MAX_GPU_SLOTS;
+    }
+
+    /**
+     * 按「视口内 + 强度降序」挑选参与本帧渲染的源，返回实际数量。
+     *
+     * 旧实现直接取 active 的前 N 个（数组顺序即创建顺序），
+     * 齐射时刚爆炸的强源可能被一批已快衰减完的旧扭曲挤掉。
+     * 这里用一个 16 元插入排序（active 通常几十个，O(n·16) 可忽略），
+     * 顺带丢掉衰减到肉眼不可见的源，进一步压低 shader 循环次数。
+     */
+    private static int collectSlots(float w, float h, float camX, float camY, float camW, float camH) {
+        int cap = slotBudget();
+        int n = 0;
+        for (int i = 0; i < active.size; i++) {
+            Data d = active.get(i);
+            // 强度已衰减到不可见，或半径塌缩，直接不占槽位
+            if (d.currentStrength <= 0.015f || d.radius <= 0.5f) continue;
+
+            float sx = (d.position.x - camX) / camW * w + w / 2f;
+            float sy = (d.position.y - camY) / camH * h + h / 2f;
+            float r = d.radius / camW * w + Math.abs(d.currentStrength) * 10f + 64f;
+            if (sx + r < 0f || sx - r > w || sy + r < 0f || sy - r > h) continue;
+
+            float s = d.currentStrength;
+            int pos = n;
+            while (pos > 0 && active.get(slotOrder[pos - 1]).currentStrength < s) {
+                if (pos < cap) slotOrder[pos] = slotOrder[pos - 1];
+                pos--;
+            }
+            if (pos < cap) {
+                slotOrder[pos] = i;
+                if (n < cap) n++;
+            }
+        }
+        return n;
+    }
+
     private static int effectiveSlots() {
         int n = active.size;
         if (downgrade >= 1) n = Math.min(n, 8);
@@ -503,13 +634,24 @@ public class DistortionRenderer {
         return Math.min(n, MAX_GPU_SLOTS);
     }
 
-    /** 离屏渲染缩放：扭曲是低频信号，半分辨率 + bilinear 上采样肉眼无损 */
+    /**
+     * 离屏渲染缩放：扭曲是低频信号，半分辨率 + bilinear 上采样肉眼无损。
+     *
+     * 自动降级到第 3 档时，除槽位收到 2 个之外，分辨率也强制降到 1/4——
+     * 填充率是 4 倍差距，比减少槽位更直接。宁可扭曲糊一点，也不能掉帧。
+     */
     public static float renderScale() {
+        float base;
         switch (SSSettings.getLevel()) {
-            case SSSettings.LEVEL_LOW:    return 0.25f;
-            case SSSettings.LEVEL_MEDIUM: return 0.5f;
-            default:                      return 1f;
+            case SSSettings.LEVEL_LOW:    base = 0.25f; break;
+            case SSSettings.LEVEL_MEDIUM: base = 0.5f;  break;
+            default:                      base = 1f;    break;
         }
+        if (downgrade >= 3 && base > 0.25f) return 0.25f;
+        // 高画质（全分辨率）一旦开始掉帧就先砍到半分辨率：
+        // 填充率直接腰斩，且半分辨率对扭曲这种低频信号几乎看不出差别
+        if (downgrade >= 1 && base > 0.5f) return 0.5f;
+        return base;
     }
 
     public static void dispose() {
@@ -517,9 +659,11 @@ public class DistortionRenderer {
             buffer.dispose();
             buffer = null;
         }
-        if (shader != null) {
-            shader.dispose();
-            shader = null;
+        for (int i = 0; i < shaderVariants.length; i++) {
+            if (shaderVariants[i] != null) {
+                shaderVariants[i].dispose();
+                shaderVariants[i] = null;
+            }
         }
         texW = texH = -1;
         texScale = -1f;

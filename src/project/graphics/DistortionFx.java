@@ -158,7 +158,7 @@ public class DistortionFx extends Effect {
      * 的 1.2 同向叠加，两层切向分量累加后形成螺旋状的扭转纹路。
      */
     public static final DistortionFx fortressArtilleryImplosion =
-    new DistortionFx(72f, 1.5f, 13f, TYPE_INWARD, 0f, 1f, 0f, Interp.pow3In, 2.0f);
+    new DistortionFx(58f, 1.5f, 13f, TYPE_INWARD, 0f, 1f, 0f, Interp.pow3In, 2.0f);
 
     /**
      * 堡垒火炮炮弹命中·外层：高强度锐环外扩。
@@ -169,11 +169,12 @@ public class DistortionFx extends Effect {
      * 让冲击面收窄成一个清晰的能量壳，pow3Out 使半径在前 1/3 就冲到
      * 近似满值，之后靠 1-p² 的强度衰减自然散去。
      *
-     * 半径 185 约为炮弹 splash 半径（35）的 5 倍，使扭曲范围明显溢出
-     * 伤害圈，视觉权重高于单纯的爆炸粒子。
+     * 半径 145 约为炮弹 splash 半径（35）的 4 倍：既明显溢出伤害圈，
+     * 又不会在单发时铺满半个屏幕——原 185 在 1080p 下约占 1/3 屏宽，
+     * 多门齐射时会糊成一片，收敛到 145 后单发清晰、齐射可控。
      */
     public static final DistortionFx fortressArtilleryImpact =
-    new DistortionFx(185f, 1.7f, 32f, TYPE_OUTWARD, 0f, 1f, 0.10f, Interp.pow3Out, 1.2f);
+    new DistortionFx(145f, 1.7f, 32f, TYPE_OUTWARD, 0f, 1f, 0.10f, Interp.pow3Out, 1.2f);
 
     // ============================================================
     //  铁锈战争 1.15 shader 效果风格预设
