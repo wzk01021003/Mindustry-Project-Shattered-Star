@@ -30,11 +30,9 @@ import mindustry.graphics.Layer;
 import mindustry.type.StatusEffect;
 import project.SSWarpSettings;
 import project.graphics.DistortionFx;
-import project.graphics.WarpEffects.WarpArriveEffect;
-import project.graphics.WarpEffects.WarpBurstEffect;
-import project.graphics.WarpEffects.WarpChargeEffect;
 import project.graphics.WarpEffects.WarpTrailEffect;
 import project.graphics.WarpParticleEffect;
+import project.graphics.WarpShapes;
 
 import static mindustry.Vars.tilesize;
 
@@ -71,11 +69,17 @@ public class WarpAbility extends Ability{
     public float warpMaxDistance = 0f;
 
     public Seq<DrawPart> warpEndParts = new Seq<>();
-    // 三段专用特效（见 WarpEffects），不再借用炮口火花和大炮爆炸
-    public Effect warpEndEffect = new WarpArriveEffect();
-    public Effect warpBeginEffect = new WarpBurstEffect();
-    public Effect warpPrepareEffect = new WarpChargeEffect();
-    public float warpPrepareEffectChance = 0.22f;
+    /*
+     * 三段特效 = 手写层（WarpEffects）+ 几何层（WarpShapes），由 MultiEffect 合成：
+     * 手写层负责光柱、白闪、尖刺这些不好用参数描述的部分，
+     * 几何层用官方的 WaveEffect 画出会呼吸的六边形 / 二十四边形能量环。
+     * 三层环各自带 startDelay，错峰炸开，比原来单个圆环有层次。
+     */
+    public Effect warpEndEffect = WarpShapes.ARRIVE;
+    public Effect warpBeginEffect = WarpShapes.BURST;
+    public Effect warpPrepareEffect = WarpShapes.CHARGE;
+    /** 蓄力特效每帧生成概率。0.12 在 60fps 下约每 8 帧一发，同屏叠 2~3 个，不会糊成一团 */
+    public float warpPrepareEffectChance = 0.12f;
     public float warpPrepareEffectSpread = 4f;
     public Sound warpSound = Sounds.massdriver;
     /** 起跳 / 落地音效：mod 自带的 stAstroWarp1、stAstroWarp2，加载失败时退回 massdriver */
