@@ -199,7 +199,7 @@ public class SSUnitType {
                 stepSoundPitch = 0.8f;
                 stepSoundVolume = 0.65f;
 
-                weapons.add(new Weapon("artillery") {
+                weapons.add(new SSWeapon("artillery") {
                         {
                             top = false;
                             y = 1f;
@@ -271,7 +271,7 @@ public class SSUnitType {
                 tankMoveVolume = 0.32f;
                 tankMoveSound = Sounds.tankMoveSmall;
 
-                weapons.add(new Weapon("stell-serpulo-weapon") {
+                weapons.add(new SSWeapon("stell-serpulo-weapon") {
                         {
                             shootSound = Sounds.shootStell;
                             layerOffset = 0.0001f;
@@ -364,7 +364,7 @@ public class SSUnitType {
                         });
                 }
 
-                weapons.add(new Weapon("elude-serpulo-weapon") {
+                weapons.add(new SSWeapon("elude-serpulo-weapon") {
                         {
                             shootSound = Sounds.shootElude;
                             y = -2f;
@@ -447,7 +447,7 @@ public class SSUnitType {
                 groundLayer = Layer.legUnit - 1f;
                 targetAir = false;
 
-                weapons.add(new Weapon("merui-serpulo-weapon") {
+                weapons.add(new SSWeapon("merui-serpulo-weapon") {
                         {
                             shootSound = Sounds.shootMerui;
                             mirror = false;
@@ -527,7 +527,7 @@ public class SSUnitType {
                         }
                     });
 
-                weapons.add(new Weapon("large-weapon-allotropes") {
+                weapons.add(new SSWeapon("large-weapon-allotropes") {
                         {
                             reload = 10f;
                             x = 4f;
@@ -602,7 +602,7 @@ public class SSUnitType {
                         }
                     });
 
-                weapons.add(new Weapon("heal-weapon-allotropes") {
+                weapons.add(new SSWeapon("heal-weapon-allotropes") {
                         {
                             reload = 7f;
                             x = 4.5f;
@@ -757,7 +757,7 @@ public class SSUnitType {
                 envDisabled = 0;
                 deathSound = Sounds.explosionAfflict;
 
-                weapons.add(new Weapon("zenith-missiles") {
+                weapons.add(new SSWeapon("zenith-missiles") {
                         {
                             reload = 50f;
                             x = 7f;
