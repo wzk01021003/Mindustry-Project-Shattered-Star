@@ -534,7 +534,11 @@ public class SSUnitType {
                             y = 2f;
                             rotate = false;
                             shootY = 4.5f;
-                            top = false;
+                            // 炮塔必须画在机体之上。
+                            // dagger-at 的机体贴图中央是实心的亮色核心，
+                            // top=false 会把整根炮管压在机身下面，
+                            // 只从顶部露出 1~2 像素，看上去就像"没有武器"。
+                            top = true;
                             ejectEffect = Fx.casing1;
                             cooldownTime = 20f;
                             heatColor = Color.valueOf("FFA665");
@@ -599,7 +603,8 @@ public class SSUnitType {
                             reload = 7f;
                             x = 4.5f;
                             shootY = 2f;
-                            top = false;
+                            // 同上：nova-at 机体中央是实心修复核心，炮管会被完全遮住
+                            top = true;
                             inaccuracy = 0f;
                             alternate = true;
                             ejectEffect = Fx.none;
