@@ -93,6 +93,7 @@ import mindustry.world.meta.Env;
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
+import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
 import project.content.units.CarrierUnitType;
 
@@ -712,6 +713,11 @@ public class SSUnitType {
                             };
                         }
                     });
+
+                // 主动跃迁：按住 Alt 蓄力，把星辉送到鼠标位置。
+                // 蓄力时间随距离增长、要求先转到目标方向、结束后进入冷却，
+                // 三点共同防止它变成无脑贴脸闪避。数值在 WarpAbility 里改。
+                abilities.add(new WarpAbility());
             }
         };
     }
