@@ -534,15 +534,7 @@ public class SSUnitType {
                             y = 2f;
                             rotate = false;
                             shootY = 4.5f;
-                            // top 管的是「炮塔描边画在哪一层」，不是武器本体的层级：
-                            // 武器本体永远在 drawBody 之后绘制（UnitType.draw → drawWeapons），
-                            // 也就是一直在机体上面。
-                            // top=false 时描边走 drawWeaponOutlines，那一趟在 drawBody 之前，
-                            // 描边会被机体整个盖掉，炮塔只剩一块没有轮廓的深灰。
-                            // 原版 dagger 机体是浅灰(亮度158)、炮塔也浅灰(156)，
-                            // 靠明暗层次就能分辨；异构版整机压暗到 91/81 后层次没了，
-                            // 必须靠描边分形，所以这里取 true。
-                            top = true;
+                            top = false;
                             ejectEffect = Fx.casing1;
                             cooldownTime = 20f;
                             heatColor = Color.valueOf("FFA665");
@@ -607,10 +599,7 @@ public class SSUnitType {
                             reload = 7f;
                             x = 4.5f;
                             shootY = 2f;
-                            // 同 dagger-at：原版 nova 的武器也是 top=false，
-                            // 但原版整机是浅灰，异构版压暗后炮塔与机身分不开，
-                            // 这里让炮塔带描边以恢复轮廓。
-                            top = true;
+                            top = false;
                             inaccuracy = 0f;
                             alternate = true;
                             ejectEffect = Fx.none;
