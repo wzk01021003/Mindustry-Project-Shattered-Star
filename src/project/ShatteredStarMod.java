@@ -19,6 +19,28 @@ import static mindustry.Vars.content;
 
 public class ShatteredStarMod extends Mod {
 
+    /** 必须与 mod.hjson 里的 name 保持一致。 */
+    public static final String MOD_NAME = "ss";
+
+    /**
+     * 返回 mod 贴图在 atlas 里的真实名字，即 {@code "ss-" + name}。
+     *
+     * <p>mod 的 sprites/ 打包时，Mindustry 会给每个 region 名拼上 mod 名做前缀
+     * （{@code Mods.packSprites} 里 {@code prefix = mod.name + "-"}），
+     * 因为所有 mod 的图最终进同一张全局 atlas，不加前缀必然重名。
+     *
+     * <p>单位、方块这类 {@code Content} 不用管：{@code ContentLoader.transformName()}
+     * 会把内容名一起改写成 {@code ss-dagger-at}，查找时正好对上——语言包键写成
+     * {@code unit.ss-dagger-at.name} 能生效也是这个原因。
+     *
+     * <p>但 {@code Weapon} / {@code RegionPart} 不是 Content，名字保持原样，
+     * {@code Weapon.load()} 里又是 {@code Core.atlas.find(name)} 直查，
+     * 所以这类引用必须手动拼前缀，否则拿到的是 error region。
+     */
+    public static String name(String name) {
+        return MOD_NAME + "-" + name;
+    }
+
     public static UnitCommand huntCommand;
     public static UnitCommand protectCommand;
     public static UnitCommand guardCommand;

@@ -93,6 +93,7 @@ import mindustry.world.meta.Env;
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
+import project.ShatteredStarMod;
 import project.content.units.CarrierUnitType;
 
 import static arc.graphics.g2d.Draw.color;
@@ -199,7 +200,7 @@ public class SSUnitType {
                 stepSoundPitch = 0.8f;
                 stepSoundVolume = 0.65f;
 
-                weapons.add(new SSWeapon("artillery") {
+                weapons.add(new Weapon(ShatteredStarMod.name("artillery")) {
                         {
                             top = false;
                             y = 1f;
@@ -271,7 +272,7 @@ public class SSUnitType {
                 tankMoveVolume = 0.32f;
                 tankMoveSound = Sounds.tankMoveSmall;
 
-                weapons.add(new SSWeapon("stell-serpulo-weapon") {
+                weapons.add(new Weapon(ShatteredStarMod.name("stell-serpulo-weapon")) {
                         {
                             shootSound = Sounds.shootStell;
                             layerOffset = 0.0001f;
@@ -364,7 +365,7 @@ public class SSUnitType {
                         });
                 }
 
-                weapons.add(new SSWeapon("elude-serpulo-weapon") {
+                weapons.add(new Weapon(ShatteredStarMod.name("elude-serpulo-weapon")) {
                         {
                             shootSound = Sounds.shootElude;
                             y = -2f;
@@ -447,7 +448,7 @@ public class SSUnitType {
                 groundLayer = Layer.legUnit - 1f;
                 targetAir = false;
 
-                weapons.add(new SSWeapon("merui-serpulo-weapon") {
+                weapons.add(new Weapon(ShatteredStarMod.name("merui-serpulo-weapon")) {
                         {
                             shootSound = Sounds.shootMerui;
                             mirror = false;
@@ -527,7 +528,7 @@ public class SSUnitType {
                         }
                     });
 
-                weapons.add(new SSWeapon("large-weapon-allotropes") {
+                weapons.add(new Weapon(ShatteredStarMod.name("large-weapon-allotropes")) {
                         {
                             reload = 10f;
                             x = 4f;
@@ -594,7 +595,7 @@ public class SSUnitType {
                         }
                     });
 
-                weapons.add(new SSWeapon("heal-weapon-allotropes") {
+                weapons.add(new Weapon(ShatteredStarMod.name("heal-weapon-allotropes")) {
                         {
                             reload = 7f;
                             x = 4.5f;
@@ -746,7 +747,7 @@ public class SSUnitType {
                 envDisabled = 0;
                 deathSound = Sounds.explosionAfflict;
 
-                weapons.add(new SSWeapon("zenith-missiles") {
+                weapons.add(new Weapon(ShatteredStarMod.name("zenith-missiles")) {
                         {
                             reload = 50f;
                             x = 7f;
