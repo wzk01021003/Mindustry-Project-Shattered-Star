@@ -207,15 +207,31 @@ public class DistortionRenderer {
             // 否则会多渲染一个早已消失的扭曲。
             int q = quantizeSlots(slots);
 
+            // 所有有效源的屏幕并集包围盒，供 shader 做整块早退。
+            // 初值取反向极值，循环结束后若仍是反向值说明没有源。
+            float bMinX = Float.MAX_VALUE, bMinY = Float.MAX_VALUE;
+            float bMaxX = -Float.MAX_VALUE, bMaxY = -Float.MAX_VALUE;
+
             for (int i = 0; i < q; i++) {
                 if (i < found) {
                     Data data = active.get(slotOrder[i]);
                     // 屏幕像素坐标（uv * u_resolution 同坐标系）
-                    dBuf[i * 4]     = (data.position.x - camX) / camW * w + w / 2f;
-                    dBuf[i * 4 + 1] = (data.position.y - camY) / camH * h + h / 2f;
+                    float sx = (data.position.x - camX) / camW * w + w / 2f;
+                    float sy = (data.position.y - camY) / camH * h + h / 2f;
+                    dBuf[i * 4]     = sx;
+                    dBuf[i * 4 + 1] = sy;
                     dBuf[i * 4 + 2] = data.radius / camW * w;
                     dBuf[i * 4 + 3] = data.currentStrength;
                     // ← 用 fade 后的强度
+
+                    // 包围盒 = 半径 + 最大位移（amp 系数 10）+ 色散采样余量。
+                    // 少算任何一项都会让边缘像素走早退路径，丢掉色散或位移。
+                    float br = Math.abs(data.radius) / camW * w
+                             + Math.abs(data.currentStrength) * 10f + 48f;
+                    if (sx - br < bMinX) bMinX = sx - br;
+                    if (sy - br < bMinY) bMinY = sy - br;
+                    if (sx + br > bMaxX) bMaxX = sx + br;
+                    if (sy + br > bMaxY) bMaxY = sy + br;
 
                     float progress = data.lifetime > 0f
                     ? Math.min(1f, data.elapsed / data.lifetime)
@@ -238,6 +254,12 @@ public class DistortionRenderer {
             sh.bind();
             sh.setUniformf("u_resolution", w, h);
             sh.setUniformf("u_chroma", SSSettings.chromatic() ? 1f : 0f);
+            // 没有有效源时置成空盒（min > max），shader 的早退条件恒成立，
+            // 全屏退化为原样输出——这正是 slots=1 空变体需要的语义。
+            if (found <= 0) {
+                bMinX = 0f; bMinY = 0f; bMaxX = -1f; bMaxY = -1f;
+            }
+            sh.setUniformf("u_bounds", bMinX, bMinY, bMaxX, bMaxY);
             for (int i = 0; i < q; i++) {
                 sh.setUniformf(D_NAMES[i], dBuf[i * 4], dBuf[i * 4 + 1], dBuf[i * 4 + 2], dBuf[i * 4 + 3]);
                 sh.setUniformf(E_NAMES[i], eBuf[i * 4], eBuf[i * 4 + 1], eBuf[i * 4 + 2], eBuf[i * 4 + 3]);
@@ -323,6 +345,9 @@ public class DistortionRenderer {
         uniformDecl.append("uniform vec2 u_resolution;\n");
         // 色散总开关（0 = 关闭，走单次采样快路径）
         uniformDecl.append("uniform float u_chroma;\n");
+        // 所有扭曲源在屏幕上的并集包围盒 (minX, minY, maxX, maxY)。
+        // 包围盒外的像素不可能被任何源影响，直接原样输出。
+        uniformDecl.append("uniform vec4 u_bounds;\n");
         for (int i = 0; i < slots; i++) {
             uniformDecl.append("uniform vec4 u_d").append(i).append(";\n");
         }
@@ -334,6 +359,17 @@ public class DistortionRenderer {
         mainBody.append("void main(){\n");
         mainBody.append("    vec2 uv = v_texCoords;\n");
         mainBody.append("    vec2 screenPos = uv * u_resolution;\n");
+        // 包围盒早退：屏幕上绝大多数的像素离所有扭曲源都很远。
+        // 这里是整条 shader 里唯一一次「一次性跳过全部槽位」的机会——
+        // 少了它，每个像素都要先把每个槽的 diff/length/除法算完才轮到
+        // applyDistort 内部那个早退，几十发齐射时这部分就是纯浪费。
+        // 包围盒已含半径、最大位移与色散采样余量，框外 offset 必为 0，
+        // 直接单次采样与旧输出完全一致。
+        mainBody.append("    if(screenPos.x < u_bounds.x || screenPos.x > u_bounds.z ||\n");
+        mainBody.append("       screenPos.y < u_bounds.y || screenPos.y > u_bounds.w){\n");
+        mainBody.append("        gl_FragColor = vec4(texture2D(u_texture, uv).rgb, 1.0);\n");
+        mainBody.append("        return;\n");
+        mainBody.append("    }\n");
         mainBody.append("    vec2 offset = vec2(0.0);\n");
         // 循环次数由变体固定：slots = 1/2/4/8/16
         for (int i = 0; i < slots; i++) {
