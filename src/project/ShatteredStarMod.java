@@ -12,7 +12,6 @@ import project.ai.ProtectAI;
 import project.ai.UnloadAI;
 import project.blocks.MultiAssembler;
 import project.content.ProtectModeRegistry;
-import project.content.SSPlanets;
 import project.content.SSUnitType;
 import project.graphics.DistortionRenderer;
 
@@ -37,7 +36,6 @@ public class ShatteredStarMod extends Mod {
     public void loadContent() {
         Log.info("Loading content.");
 
-        SSPlanets.load();
         ProtectModeRegistry.load();
         new MultiAssembler("multi-assembler");
         SSUnitType.load();
