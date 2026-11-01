@@ -65,8 +65,16 @@ public class WarpAbility extends Ability{
     public float warpMinWarmup = 15f;
     /** 与距离无关的固定蓄力帧数 */
     public float warpBaseWarmup = 15f;
-    /** 跃迁结束后的冷却帧数 */
+    /** 手动跃迁（按住 Alt）结束后的冷却帧数 */
     public float warpCooldown = 150f;
+    /**
+     * 自动跃迁（指挥 / 移动端）的冷却帧数。
+     *
+     * <p>不能跟手动共用 150 帧：星辉巡航速度 300 px/s，等满 2.5 秒已经飞出 750 像素，
+     * 早就掉到指令自动跃迁的距离阈值以内了，等于把自动跃迁彻底废掉。
+     * 40 帧足够挡住同一帧内的重复触发，又不会让 AI 白等。
+     */
+    public float autoWarpCooldown = 40f;
     /** 单次跃迁的最大距离（像素）。0 = 不限，VE 原版就是不限的 */
     public float warpMaxDistance = 0f;
 
@@ -190,6 +198,12 @@ public class WarpAbility extends Ability{
         autoWarping = false;
         if(!SSWarpSettings.enabled) return false;
 
+        // 冷却统一在这里判，三条路径都要受它限制。
+        // VE 原版只在「玩家按 Alt」那句 return 里写了 warpCooldownTimer <= 0，
+        // 指挥自动跃迁和移动端自动跃迁都直接 return true，等于 AI 可以无限连闪，
+        // 而玩家自己按 Alt 反而要等满 150 帧 —— 这个不对称就是「指挥没间隔」的来源。
+        if(warpCooldownTimer > 0f) return false;
+
         if(Vars.mobile && SSWarpSettings.mobileAutoWarp && unit.isPlayer() && mobileAutoWarpTimer >= mobileAutoWarpTime){
             float md = SSWarpSettings.mobileAutoWarpDistance;
             if(Mathf.dst2(unit.x, unit.y, Core.camera.position.x, Core.camera.position.y) >= md * md){
@@ -233,7 +247,7 @@ public class WarpAbility extends Ability{
         }
 
         return unit.isPlayer() && Core.input.keyDown(warpKey) && !Core.input.keyDown(warpBanKey)
-            && !unit.isShooting() && warpCooldownTimer <= 0;
+            && !unit.isShooting();
     }
 
     @Override
@@ -305,7 +319,7 @@ public class WarpAbility extends Ability{
     }
 
     public void warp(Unit unit){
-        warpCooldownTimer = warpCooldown;
+        warpCooldownTimer = autoWarping ? autoWarpCooldown : warpCooldown;
         float x1 = unit.x, y1 = unit.y;
         float x2 = wx, y2 = wy;
         float r = wRot;
@@ -374,6 +388,11 @@ public class WarpAbility extends Ability{
         }
 
         if(!warpCharging || !SSWarpSettings.effects) return;
+
+        // 准星单独给了开关：指挥一整队同时自动跃迁时，屏幕上会同时出现十几个落点提示，
+        // 除了挡住战场没有任何帮助。可以全关，也可以只留玩家自己操控的那台。
+        if(!SSWarpSettings.reticle) return;
+        if(SSWarpSettings.reticlePlayerOnly && !unit.isPlayer()) return;
 
         // 蓄力期间在落点上画准星：光靠机体冒粒子，玩家判断不出会跳到哪
         float dist = Mathf.dst(unit.x, unit.y, wx, wy);

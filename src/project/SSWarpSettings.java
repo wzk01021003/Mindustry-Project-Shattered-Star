@@ -29,6 +29,8 @@ public class SSWarpSettings{
     public static final String KEY_MOBILE_DIST = "ss-warp-mobile-dist";
     public static final String KEY_VOLUME      = "ss-warp-volume";
     public static final String KEY_EFFECT      = "ss-warp-effect";
+    public static final String KEY_RETICLE     = "ss-warp-reticle";
+    public static final String KEY_RETICLE_OWN = "ss-warp-reticle-own";
 
     /** 自动跃迁距离的滑条范围（单位：格） */
     private static final int AUTO_DIST_MIN = 10, AUTO_DIST_MAX = 120, AUTO_DIST_DEF = 60;
@@ -50,6 +52,10 @@ public class SSWarpSettings{
     public static float volume = 0.55f;
     /** 起终点特效、能量轨迹、粒子与震屏的开关；关掉只留音效 */
     public static boolean effects = true;
+    /** 蓄力时在落点画准星（虚线 + 双环 + 十字）；关掉后依然能跃迁，只是没有落点提示 */
+    public static boolean reticle = true;
+    /** 准星只在玩家直接操控的单位上画，指挥 / AI 单位不画 */
+    public static boolean reticlePlayerOnly = false;
 
     public static void load(){
         try{
@@ -69,6 +75,8 @@ public class SSWarpSettings{
         mobileAutoWarpDistance = Math.max(1, Core.settings.getInt(KEY_MOBILE_DIST, MOBILE_DIST_DEF)) * Vars.tilesize;
         volume = Mathf.clamp(Core.settings.getInt(KEY_VOLUME, 55) / 100f, 0f, 1f);
         effects = Core.settings.getBool(KEY_EFFECT, true);
+        reticle = Core.settings.getBool(KEY_RETICLE, true);
+        reticlePlayerOnly = Core.settings.getBool(KEY_RETICLE_OWN, false);
     }
 
     private static void buildUI(SettingsTable table){
@@ -81,5 +89,7 @@ public class SSWarpSettings{
             i -> Core.bundle.format("ss-warp.dist", i), i -> refresh());
         table.sliderPref(KEY_VOLUME, 55, 0, 100, 5, i -> i + "%", i -> refresh());
         table.checkPref(KEY_EFFECT, true, b -> refresh());
+        table.checkPref(KEY_RETICLE, true, b -> refresh());
+        table.checkPref(KEY_RETICLE_OWN, false, b -> refresh());
     }
 }
