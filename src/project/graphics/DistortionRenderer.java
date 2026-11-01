@@ -11,8 +11,6 @@ import arc.math.Mathf;
 import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
-import arc.util.Time;
-import mindustry.Vars;
 import mindustry.game.EventType.Trigger;
 import mindustry.graphics.Layer;
 import project.SSSettings;
@@ -45,7 +43,14 @@ public class DistortionRenderer {
         public float radius, maxRadius;
         public float strength;
         public float lifetime;
-        public float elapsed;
+        /**
+         * 出生时刻的墙钟时间（{@link System#nanoTime()}）。
+         *
+         * 生命周期一律由墙钟推导，不再累加 Time.delta：暂停时逻辑时间被
+         * 冻结，累加式推进会让这些源永远停在原地；而按墙钟算年龄是
+         * 幂等的——update 和 draw 谁调、调几次、调不调，结果都一样。
+         */
+        public long bornNanos;
         public int type;
         public float radiusFrom, radiusTo;
         public float ringWidth;
@@ -62,6 +67,13 @@ public class DistortionRenderer {
     /** Data 对象池，避免每次触发都 new；池有上限，防止无限增长 */
     private static final Seq<Data> pool = new Seq<>();
     private static final int POOL_LIMIT = 64;
+    /**
+     * 同帧合并的时间窗口（纳秒，约 3 帧）。
+     *
+     * 用墙钟而不是 Time.delta：暂停时 Time.delta 可能被冻结，判断会失效。
+     * 3 帧足够覆盖一次齐射的炮弹落地抖动，又不会把已经扩散开的老环并进来。
+     */
+    private static final long MERGE_WINDOW_NANOS = 50_000_000L;
 
     private static FrameBuffer buffer;
     /**
@@ -112,27 +124,28 @@ public class DistortionRenderer {
 
     private static void onUpdate() {
         if (unsupported || !SSSettings.enabled()) {
-            active.clear();
+            clearAll();
             return;
         }
         tickFps();
-        updateActive();
+        sync();
     }
 
     private static void onDrawEvent() {
+        // 上一帧若 begin 了却没有 end（Draw 队列被中途打断、或某帧抛了
+        // 未预料的异常），FBO 会一直处于 bound 状态：之后所有绘制都写进
+        // 离屏纹理，屏幕上只剩一帧旧内容——表现为画面「冻结」或一直糊着
+        // 扭曲。这里先兜底收尾，绝不让一帧异常演变成永久花屏。
+        if (capturing) releaseLeak();
+
         if (unsupported || !SSSettings.enabled() || active.size == 0) return;
 
-        // 暂停（或逻辑时间被冻结）时，updateActive 里的 elapsed 不会前进：
-        // 这些扭曲既不会结束也不会消失，而 Trigger.draw 照常每帧触发，
-        // 于是一直白跑整条 FBO 捕获 + blit —— 暂停多久就浪费多久。
-        // 这里改用渲染帧的真实间隔把它们推进到结束。暂停画面本就静止，
-        // 看不出差别，但开销会在半秒内归零。
-        // 单帧步长封顶：断点或长时间卡顿后 getDeltaTime 会暴涨，
-        // 不封顶的话一次就跳完整段动画。
-        if (logicFrozen()) {
-            advance(Math.min(Core.graphics.getDeltaTime() * 60f, 5f));
-            if (active.size == 0) return;
-        }
+        // 生命周期一律按墙钟同步，与逻辑时间是否推进无关。
+        // 暂停时 Logic.update() 会跳过 updateEntities()，Time.delta 随之冻结，
+        // 靠它推进的话这些源既不会结束也不会消失；墙钟则照常流逝，
+        // 暂停画面本就静止，看不出差别，但开销会在半秒内归零。
+        sync();
+        if (active.size == 0) return;
 
         // 全部扭曲都在视口外时，整条离屏管线（FBO 捕获 + 全屏 blit）
         // 都不必执行——玩家看不见扭曲时，这两步是纯浪费。
@@ -142,24 +155,28 @@ public class DistortionRenderer {
         Draw.draw(Layer.overlayUI - 1f, DistortionRenderer::endCaptureAndRender);
     }
 
-    /**
-     * 逻辑时间是否已经停止推进。
-     *
-     * 三个条件取并集，因为单看任何一个都会漏：
-     *  - 菜单：没有任何对局逻辑在跑
-     *  - 暂停：世界整体冻结
-     *  - Time.delta 为 0：极端卡顿或某些界面下逻辑步进为 0
-     * 不能靠「Trigger.update 有没有跑」来判断：它在 Logic.update 里排在
-     * isPaused 判断之前，暂停时究竟还触不触发取决于上层 update 链路，
-     * 不同版本表现不一致，直接查状态最稳。
-     */
-    private static boolean logicFrozen() {
-        if (Vars.state == null) return true;
-        // 菜单界面没有任何游戏逻辑在跑，从对局退回主菜单时 active 里
-        // 可能还留着没播完的源，靠这一条把它们清干净。
-        if (Vars.state.isMenu()) return true;
-        if (Vars.state.isPaused()) return true;
-        return Time.delta < 0.01f;
+    /** 丢弃所有活跃源并归还对象池（关闭开关、卸载时用） */
+    private static void clearAll() {
+        for (int i = 0; i < active.size; i++) {
+            recycle(active.get(i));
+        }
+        active.clear();
+    }
+
+    /** 收尾一个没有正常 end 的帧，把 FBO 解绑 */
+    private static void releaseLeak() {
+        capturing = false;
+        try {
+            if (buffer != null) buffer.end();
+        } catch (Throwable t) {
+            Log.err("[ss-distort] 释放遗留 FBO 失败", t);
+            unsupported = true;
+        }
+    }
+
+    /** 某个源从出生到现在经过了多少帧（1.0 = 60fps 下的一帧，与旧 Time.delta 同单位） */
+    private static float ageFrames(Data data, long nowNanos) {
+        return (nowNanos - data.bornNanos) / 1_000_000_000f * 60f;
     }
 
     /**
@@ -244,6 +261,7 @@ public class DistortionRenderer {
             // 初值取反向极值，循环结束后若仍是反向值说明没有源。
             float bMinX = Float.MAX_VALUE, bMinY = Float.MAX_VALUE;
             float bMaxX = -Float.MAX_VALUE, bMaxY = -Float.MAX_VALUE;
+            long now = System.nanoTime();
 
             for (int i = 0; i < q; i++) {
                 if (i < found) {
@@ -267,7 +285,7 @@ public class DistortionRenderer {
                     if (sy + br > bMaxY) bMaxY = sy + br;
 
                     float progress = data.lifetime > 0f
-                    ? Math.min(1f, data.elapsed / data.lifetime)
+                    ? Math.min(1f, ageFrames(data, now) / data.lifetime)
                     : 1f;
 
                     eBuf[i * 4]     = data.type;
@@ -309,6 +327,12 @@ public class DistortionRenderer {
         } catch (Throwable t) {
             Log.err("[ss-distort] endCaptureAndRender 异常", t);
             unsupported = true;
+            // FBO 可能停在 bound 状态：不主动解绑的话，之后所有绘制都会
+            // 落进离屏纹理，屏幕上只剩一帧旧画面——比"特效失效"严重得多。
+            try {
+                if (buffer != null) buffer.end();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -492,37 +516,35 @@ public class DistortionRenderer {
         return new Shader(vertex, fragment);
     }
 
-    private static void updateActive() {
-        advance(Time.delta);
-    }
-
     /**
-     * 按给定帧时长推进所有扭曲的生命周期并回收已结束的。
+     * 按墙钟把所有源同步到「当前年龄」，并回收已过期的。
      *
-     * 时长做成参数而不是固定读 Time.delta：逻辑时间冻结时（暂停等）
-     * Time.delta 不再前进，扭曲会永远停在原地，onDrawEvent 需要能拿
-     * 渲染帧的真实间隔另行推进。
+     * 关键性质是**幂等**：半径和强度全部由「出生时刻 → 现在」推导，
+     * 不是逐帧累加。因此 update 和 draw 都调、一帧调两次、或者长时间
+     * 一帧都没调，结果都完全一致，不存在「推进过头」或「推不动」。
      *
-     * @param delta 帧数，1.0 = 60fps 下的一帧（与 Time.delta 同单位）
+     * 旧实现按 Time.delta 累加 elapsed，暂停时 Logic.update() 会跳过
+     * updateEntities()，Time.delta 冻结 → elapsed 不再增长 → 扭曲停在
+     * 原地永不结束。这就是「暂停时扭曲一直在跑」的第二层原因：
+     * 光靠 draw 里补一次推进，只能缓解，一遇到 draw 也不跑的情形就漏。
      */
-    private static void advance(float delta) {
+    private static void sync() {
+        long now = System.nanoTime();
         for (int i = active.size - 1; i >= 0; i--) {
             Data data = active.get(i);
-            data.elapsed += delta;
-            if (data.elapsed >= data.lifetime) {
+            float age = ageFrames(data, now);
+            if (age >= data.lifetime) {
                 active.remove(i);
                 recycle(data);
                 continue;
             }
-            float progress = data.elapsed / data.lifetime;
+            float progress = age / data.lifetime;
             float curve = data.interp.apply(progress);
             data.radius = data.maxRadius * Mathf.lerp(data.radiusFrom, data.radiusTo, curve);
 
             // ============================================================
-            //  ★ 淡出曲线改为 1 - p²：
-            //  旧曲线在前 50% 保持满强度、之后 1-t²，在 p=0.5 处导数
-            //  不连续，视觉上能看出「突然开始衰减」。
-            //  新曲线全程平滑、前段维持强度、尾段快速收敛，
+            //  ★ 淡出曲线为 1 - p²：
+            //  全程平滑、前段维持强度、尾段快速收敛，
             //  接近铁锈核弹冲击波「到达即巅峰、迅速散去」的手感。
             //  环宽不参与 fade——避免环淡到阈值以下时
             //  从环状突然跳成实心圆。
@@ -564,19 +586,24 @@ public class DistortionRenderer {
         //  它们各占一个槽位，但在屏幕上根本分辨不出来——纯属浪费。
         //  合并成一个（半径取大、强度叠加、按当前进度重算）能让
         //  「几十发一起」只吃 1~2 个槽位，是降低齐射开销最关键的一步。
-        //  只合并同帧/上一帧的源，避免把已经扩散开的老环拽回起点。
+        //  只合并刚生成的源，避免把已经扩散开的老环拽回起点。
+        //
+        //  「刚生成」用墙钟判断而不是 Time.delta：暂停时 delta 可能被
+        //  冻结成 0 或极小值，`elapsed > delta * 2` 会把任何一个老环都
+        //  判成刚生成，于是新爆炸被并进几十秒前的旧扭曲里。
         // ============================================================
+        long now = System.nanoTime();
         float mergeR = radius * 0.35f;
         float mergeR2 = mergeR * mergeR;
         for (int i = 0; i < active.size; i++) {
             Data d = active.get(i);
             if (d.type != type) continue;
-            if (d.elapsed > Time.delta * 2f) continue;
+            if (now - d.bornNanos > MERGE_WINDOW_NANOS) continue;
             float dx = d.position.x - x;
             float dy = d.position.y - y;
             if (dx * dx + dy * dy > mergeR2) continue;
 
-            float p = d.lifetime > 0f ? Math.min(1f, d.elapsed / d.lifetime) : 1f;
+            float p = d.lifetime > 0f ? Math.min(1f, ageFrames(d, now) / d.lifetime) : 1f;
             if (radius > d.maxRadius) {
                 d.maxRadius = radius;
                 d.radiusFrom = radiusFrom;
@@ -594,18 +621,18 @@ public class DistortionRenderer {
 
         int max = SSSettings.maxConcurrent();
         while (active.size >= max) {
-            active.remove(0);
+            recycle(active.remove(0));
         }
 
         Data data = obtain();
         data.position.set(x, y);
         data.maxRadius = radius;
-        // 初始半径 = 按 interp(0) 算出的起始值，跟后续 updateActive 公式一致
+        // 初始半径 = 按 interp(0) 算出的起始值，跟后续 sync 公式一致
         float initialCurve = interp.apply(0f);
         data.radius = radius * Mathf.lerp(radiusFrom, radiusTo, initialCurve);
         data.strength = strength;
         data.lifetime = lifetime;
-        data.elapsed = 0f;
+        data.bornNanos = now;
         data.type = type;
         data.radiusFrom = radiusFrom;
         data.radiusTo = radiusTo;
@@ -654,7 +681,10 @@ public class DistortionRenderer {
             downgrade = 0;
             return;
         }
-        fpsAccum += Time.delta;
+        // 用渲染帧间隔而不是 Time.delta：暂停时后者被冻结，
+        // 会让 30 个样本的累计耗时趋近 0，fps 虚高到离谱，自动降级
+        // 于是越暂停越"觉得流畅"，一恢复又立刻掉档。
+        fpsAccum += Core.graphics.getDeltaTime();
         fpsSamples++;
         if (fpsSamples >= 30) {
             lastFps = (int) (30f / Math.max(fpsAccum, 0.0001f));
@@ -708,14 +738,6 @@ public class DistortionRenderer {
         return n;
     }
 
-    private static int effectiveSlots() {
-        int n = active.size;
-        if (downgrade >= 1) n = Math.min(n, 8);
-        if (downgrade >= 2) n = Math.min(n, 4);
-        if (downgrade >= 3) n = Math.min(n, 2);
-        return Math.min(n, MAX_GPU_SLOTS);
-    }
-
     /**
      * 离屏渲染缩放：扭曲是低频信号，半分辨率 + bilinear 上采样肉眼无损。
      *
@@ -749,7 +771,7 @@ public class DistortionRenderer {
         }
         texW = texH = -1;
         texScale = -1f;
-        active.clear();
+        clearAll();
         pool.clear();
     }
 

@@ -3,7 +3,6 @@ package project.graphics;
 import arc.Core;
 import arc.func.Cons;
 import arc.math.Interp;
-import arc.util.Time;
 import mindustry.entities.Effect;
 
 public class DistortionFx extends Effect {
@@ -89,8 +88,29 @@ public class DistortionFx extends Effect {
 
         @Override
         public void get(EffectContainer e) {
-            // 只在 Effect 的第一帧触发（e.time 从 0 开始，每帧 += Time.delta）
-            if (e.time > Time.delta * 1.5f) return;
+            // ============================================================
+            //  ★ 用「lifetime 负值」当已触发标记，不再依赖时间
+            //
+            //  血的教训：EffectState.draw() 每帧都会无条件调用 renderer，
+            //  而 EffectState.time 只在 update() 里推进——偏偏
+            //  Logic.update() 在 state.isPaused() 时直接跳过 updateEntities()，
+            //  暂停期间 time 被冻结在 0。
+            //
+            //  原来用 `e.time > Time.delta * 1.5f` 判断首帧，暂停时这个条件
+            //  永远不成立，于是每帧都新建一个扭曲——「暂停后扭曲一直在跑」
+            //  的真正来源在这里，跟 DistortionRenderer 的生命周期推进无关。
+            //  只修推进那边是治不好的，这就是「还是有可能出现」的原因。
+            //
+            //  EffectState.draw() 会把 render() 的返回值写回自己的 lifetime，
+            //  而 render() 返回的正是这个 container 的 lifetime，所以在这里
+            //  写负数，标记会持久化到该 EffectState 上：
+            //    · 下一帧 draw 时 set() 把 -1 同步回来 → 直接 return；
+            //    · 下一帧 update 时 time >= lifetime 立即成立 → 该
+            //      EffectState 被移除，连原本 32 帧的存活开销都省了。
+            //  整套判断不依赖任何时间源，暂停、掉帧、变速都不会漏。
+            // ============================================================
+            if (e.lifetime < 0f) return;
+            e.lifetime = -1f;
 
             // 注：旧版这里还有一层「同一帧多实例只触发一次」的帧级去重，
             // 但 lastFrame 存在共享的 renderer 实例上，导致同帧两个单位
