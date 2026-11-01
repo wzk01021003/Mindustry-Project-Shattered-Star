@@ -25,6 +25,7 @@ import mindustry.gen.Sounds;
 import mindustry.gen.Unit;
 import mindustry.graphics.Drawf;
 import mindustry.type.StatusEffect;
+import project.SSWarpSettings;
 import project.graphics.WarpParticleEffect;
 
 import static mindustry.Vars.tilesize;
@@ -34,7 +35,8 @@ import static mindustry.Vars.tilesize;
  *
  * 移植自 Vanilla Expansion 的 WarpAbility（作者 火星人076 & 128_OTEML，
  * 该项目公开源码供学习）。逻辑与手感保持原样，改动只有三处：
- *  - 去掉对 VE 自有设置系统（VESettings）的依赖，移动端自动跃迁改为常开
+ *  - 设置项改由 {@link project.SSWarpSettings} 接管（VE 用的是它自己的 VESettings），
+ *    总开关、指挥自动跃迁、移动端自动跃迁、阈值、音量、特效都能在游戏里调
  *  - 配色从青绿 00ffce 换成星辉的橙金 ffa665，与本 mod 机体辉光同色系
  *  - 新增 warpMaxDistance，默认 0（不限），需要时可用来封顶跃迁距离
  *
@@ -67,7 +69,6 @@ public class WarpAbility extends Ability{
     public float warpPrepareEffectChance = 0.25f;
     public float warpPrepareEffectSpread = 6f;
     public Sound warpSound = Sounds.massdriver;
-    public float warpSoundVolume = 0.55f;
     public float warpShake = 10f;
     public StatusEffect warpStatus = StatusEffects.none;
 
@@ -92,11 +93,10 @@ public class WarpAbility extends Ability{
     /** 采矿 / 建造 / 维修 / 协助类指令下是否允许自动跃迁 */
     public boolean commandAutoWarpSupport = true;
     public float commandAutoWarpSupportDistance = 120f;
-    /** 移动端：镜头拉远后自动跃迁到镜头位置（触屏没有 Alt 键） */
-    public boolean mobileAutoWarp = true;
-    public float mobileAutoWarpDistance = 240f;
-    /** 镜头静止多久之后才允许触发，避免拖动视角时乱闪 */
+    /** 镜头静止多久之后才允许触发移动端自动跃迁，避免拖动视角时乱闪 */
     public float mobileAutoWarpTime = 20f;
+    // 移动端自动跃迁的开关与距离在 SSWarpSettings 里（KEY_MOBILE / KEY_MOBILE_DIST），
+    // 因为那是玩家最常改的一项，放在游戏设置里比写死在单位上更合适
 
     private final KeyCode warpKey = KeyCode.altLeft;
     private final KeyCode warpBanKey = KeyCode.o;
@@ -120,9 +120,11 @@ public class WarpAbility extends Ability{
     /** 这一帧是否正在尝试跃迁（按键 / 指挥 / 移动端三条触发路径） */
     public boolean tryingWarp(Unit unit){
         autoWarping = false;
+        if(!SSWarpSettings.enabled) return false;
 
-        if(Vars.mobile && mobileAutoWarp && unit.isPlayer() && mobileAutoWarpTimer >= mobileAutoWarpTime){
-            if(Mathf.dst2(unit.x, unit.y, Core.camera.position.x, Core.camera.position.y) >= mobileAutoWarpDistance * mobileAutoWarpDistance){
+        if(Vars.mobile && SSWarpSettings.mobileAutoWarp && unit.isPlayer() && mobileAutoWarpTimer >= mobileAutoWarpTime){
+            float md = SSWarpSettings.mobileAutoWarpDistance;
+            if(Mathf.dst2(unit.x, unit.y, Core.camera.position.x, Core.camera.position.y) >= md * md){
                 wx = Core.camera.position.x;
                 wy = Core.camera.position.y;
                 autoWarping = true;
@@ -130,7 +132,7 @@ public class WarpAbility extends Ability{
             }
         }
 
-        if(!unit.isPlayer() && commandAutoWarp && unit.isCommandable() && unit.command().targetPos != null){
+        if(!unit.isPlayer() && commandAutoWarp && SSWarpSettings.autoWarp && unit.isCommandable() && unit.command().targetPos != null){
             CommandAI c = unit.command();
             boolean boosting = commandAutoWarpBoost && c.hasStance(UnitStance.boost);
             // 括号不能省：&& 优先级高于 ||，写成 flat 版本会让开关只作用于第一个条件
@@ -145,11 +147,14 @@ public class WarpAbility extends Ability{
                 c.command == UnitCommand.assistCommand ||
                 c.command == UnitCommand.repairCommand);
 
+            // 玩家调的是「普通移动」的阈值，其余几档按出厂比例同步缩放，
+            // 这样滑块一动，整套自动跃迁的距离一起变，不会出现助推比普通还远的情况
+            float scale = SSWarpSettings.autoWarpDistance / Math.max(commandAutoWarpDistance, 1f);
             float d = Mathf.dst(c.targetPos.getX(), c.targetPos.getY(), unit.x, unit.y);
-            boolean shouldWarp = (boosting && d > commandAutoWarpBoostDistance) ||
-                (payloadActing && d > commandAutoWarpPayloadDistance) ||
-                (supportActing && d > commandAutoWarpSupportDistance) ||
-                (d > commandAutoWarpDistance);
+            boolean shouldWarp = (boosting && d > commandAutoWarpBoostDistance * scale) ||
+                (payloadActing && d > commandAutoWarpPayloadDistance * scale) ||
+                (supportActing && d > commandAutoWarpSupportDistance * scale) ||
+                (d > SSWarpSettings.autoWarpDistance);
 
             if(shouldWarp){
                 wx = c.targetPos.getX();
@@ -168,7 +173,15 @@ public class WarpAbility extends Ability{
         // 助推姿态是「指挥自动跃迁」的触发条件之一，单位没有就补上
         if(commandAutoWarpBoost && !unit.type.stances.contains(UnitStance.boost)) unit.type.stances.add(UnitStance.boost);
 
-        if(Vars.mobile && mobileAutoWarp){
+        if(!SSWarpSettings.enabled){
+            // 设置里关掉跃迁：立刻收手，蓄力清零；冷却照常走完，重新开启时不会白送一次
+            warpWarmup = 0f;
+            warpCharging = false;
+            if(warpCooldownTimer > 0f) warpCooldownTimer -= Time.delta;
+            return;
+        }
+
+        if(Vars.mobile && SSWarpSettings.mobileAutoWarp){
             if(mobileCamXLast != Core.camera.position.x || mobileCamYLast != Core.camera.position.y){
                 mobileAutoWarpTimer = 0;
             }else{
@@ -196,7 +209,7 @@ public class WarpAbility extends Ability{
             }
 
             wRot = Mathf.atan2(wx - unit.x, wy - unit.y) * Mathf.radiansToDegrees;
-            if(Mathf.chanceDelta(warpPrepareEffectChance)){
+            if(SSWarpSettings.effects && Mathf.chanceDelta(warpPrepareEffectChance)){
                 warpPrepareEffect.at(unit.x + Mathf.range(warpPrepareEffectSpread), unit.y + Mathf.range(warpPrepareEffectSpread));
             }
             rotateToWarp(unit);
@@ -229,43 +242,50 @@ public class WarpAbility extends Ability{
         unit.x(x2);
         unit.y(y2);
 
-        warpBeginEffect.at(x1, y1, r, warpEffectColor);
-        warpEndEffect.at(x2, y2, r, warpEffectColor);
+        // 特效整组受设置控制：低端设备或多人卡顿时可以只留音效
+        if(SSWarpSettings.effects){
+            warpBeginEffect.at(x1, y1, r, warpEffectColor);
+            warpEndEffect.at(x2, y2, r, warpEffectColor);
 
-        // 三层同线、逐层变细变亮，叠起来就是一束带核心高光的能量轨迹
-        Effect line = new Effect(warpTrailLife, 80000f, e -> {
-            Drawf.light(x1, y1, x2, y2, warpTrailStroke * e.fout(), warpEffectColor, 1f);
-            Lines.stroke(warpTrailStroke * e.fout());
-            Draw.color(warpTrailColor1);
-            Lines.line(x1, y1, x2, y2);
-            Lines.stroke(warpTrailStroke * e.fout() * 0.6f);
-            Draw.color(warpTrailColor2);
-            Lines.line(x1, y1, x2, y2);
-            Lines.stroke(warpTrailStroke * e.fout() * 0.3f);
-            Draw.color(warpTrailColor3);
-            Lines.line(x1, y1, x2, y2);
-        });
-        line.at(x1, y1);
+            // 三层同线、逐层变细变亮，叠起来就是一束带核心高光的能量轨迹
+            Effect line = new Effect(warpTrailLife, 80000f, e -> {
+                Drawf.light(x1, y1, x2, y2, warpTrailStroke * e.fout(), warpEffectColor, 1f);
+                Lines.stroke(warpTrailStroke * e.fout());
+                Draw.color(warpTrailColor1);
+                Lines.line(x1, y1, x2, y2);
+                Lines.stroke(warpTrailStroke * e.fout() * 0.6f);
+                Draw.color(warpTrailColor2);
+                Lines.line(x1, y1, x2, y2);
+                Lines.stroke(warpTrailStroke * e.fout() * 0.3f);
+                Draw.color(warpTrailColor3);
+                Lines.line(x1, y1, x2, y2);
+            });
+            line.at(x1, y1);
 
-        if(useAutoWarpEffect){
-            WarpParticleEffect wp = new WarpParticleEffect(){{
-                generalLength = d;
-                lengthFrom = Math.min(20f, d / 36f);
-                lengthTo = Math.min(5f, d / 144f);
-                stroke = 2f;
-                colorFrom = warpEffectColor;
-                colorTo = warpEffectColor;
-                lifetime = 60f;
-                particles = Mathf.ceil(d / 14.4f);
-                width = unit.hitSize() * 0.8f;
-            }};
-            wp.at(x1, y1, r);
+            if(useAutoWarpEffect){
+                WarpParticleEffect wp = new WarpParticleEffect(){{
+                    generalLength = d;
+                    lengthFrom = Math.min(20f, d / 36f);
+                    lengthTo = Math.min(5f, d / 144f);
+                    stroke = 2f;
+                    colorFrom = warpEffectColor;
+                    colorTo = warpEffectColor;
+                    lifetime = 60f;
+                    particles = Mathf.ceil(d / 14.4f);
+                    width = unit.hitSize() * 0.8f;
+                }};
+                wp.at(x1, y1, r);
+            }
+
+            Effect.shake(warpShake, warpShake * 2f, x1, y1);
+            Effect.shake(warpShake, warpShake * 2f, x2, y2);
         }
 
-        warpSound.at(x1, y1, 1f, warpSoundVolume * Math.max(0.33f, d / warpMinWarmupDistance));
-        warpSound.at(x2, y2, 1f, warpSoundVolume * Math.max(0.33f, d / warpMinWarmupDistance));
-        Effect.shake(warpShake, warpShake * 2f, x1, y1);
-        Effect.shake(warpShake, warpShake * 2f, x2, y2);
+        if(SSWarpSettings.volume > 0.01f){
+            float vol = SSWarpSettings.volume * Math.max(0.33f, d / warpMinWarmupDistance);
+            warpSound.at(x1, y1, 1f, vol);
+            warpSound.at(x2, y2, 1f, vol);
+        }
     }
 
     /** 转向目标，转到足够接近才放开跃迁许可 */

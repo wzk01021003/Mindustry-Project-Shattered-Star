@@ -70,6 +70,8 @@ public class ShatteredStarMod extends Mod {
         // 0. 实验性渲染
         SSSettings.load();
         DistortionRenderer.init();
+        // 0.1. 星辉跃迁设置
+        SSWarpSettings.load();
         // ============ 0.9. 扭曲配置 ============
         project.content.DistortionConfig.load();
         project.content.DistortionConfig.apply();
