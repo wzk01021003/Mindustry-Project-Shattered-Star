@@ -23,7 +23,9 @@ public class SSSettings {
         detectDevice();
 
         try {
-            Vars.ui.settings.addCategory("ss-settings.category", "settings", SSSettings::buildUI);
+            // 分类名要带 "@" 前缀，Arc 的 Label 才会走 Core.bundle 查表；
+            // 不带前缀会被原样显示成键名 "ss-settings.category"。
+            Vars.ui.settings.addCategory("@ss-settings.category", "settings", SSSettings::buildUI);
         } catch (Throwable t) {
             Log.err("[ss] 无法注册设置分类，可通过控制台手动改 Core.settings", t);
         }
