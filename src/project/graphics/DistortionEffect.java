@@ -22,6 +22,14 @@ public class DistortionEffect extends Effect {
 
     @Override
     public void render(EffectContainer e) {
+        // 和 DistortionFx 同样的坑：EffectState.draw() 每帧都会调用 render，
+        // 而暂停时 EffectState.time 冻结（Logic.update 跳过 updateEntities），
+        // 不做标记的话每帧都会注入一个新扭曲。
+        // 负数 lifetime 会随 render 的返回值写回 EffectState，下一帧 update
+        // 时立即销毁该 EffectState，跨帧也不会重复触发。
+        if (e.lifetime < 0f) return;
+        e.lifetime = -1f;
+
         // 这里 this 字段已经是 JSON 填充后的值
         DistortionRenderer.addDistortion(
             e.x, e.y,
