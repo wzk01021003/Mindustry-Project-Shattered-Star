@@ -24,7 +24,8 @@ import mindustry.graphics.Drawf;
  * <ul>
  *   <li>{@link WarpChargeEffect}——蓄力，一圈向心收缩的细环加吸进来的短线</li>
  *   <li>{@link WarpBurstEffect}——起跳，放射尖刺 + 白热核心（环交给 WarpShapes）</li>
- *   <li>{@link WarpArriveEffect}——落点，自上而下的光柱 + 收束环 + 落地火花</li>
+ *   <li>{@link WarpArriveEffect}——落点，收束环 + 向心线 + 落地火花，节奏慢一点（32 帧），
+ *       强调「合拢」</li>
  * </ul>
  *
  * <p>多边形能量环、放射光刃这类「几何层」在 {@link WarpShapes} 里，
@@ -199,8 +200,6 @@ public class WarpEffects{
     public static class WarpArriveEffect extends Effect{
         public float radius = 38f;
         public float stroke = 3.4f;
-        /** 光柱高度 */
-        public float beamHeight = 76f;
 
         public WarpArriveEffect(){
             lifetime = 32f;
@@ -212,31 +211,16 @@ public class WarpEffects{
             float p = e.fin();
             Color c = main(e);
 
-            // 1. 自上而下的光柱：前 35% 落下，之后一边淡出、一边从下往上缩回去。
-            //    只淡出的话，收尾那几帧会剩一根又细又长的杆子戳在天上，很突兀。
-            float drop = Mathf.clamp(p / 0.35f);
-            float beamFade = 1f - Mathf.clamp((p - 0.35f) / 0.65f);
-            if(beamFade > 0.01f){
-                float w = stroke * 2.2f * beamFade;
-                float len = beamHeight * drop * (0.3f + 0.7f * beamFade);
-                // 外层淡光晕
-                Draw.color(c);
-                Draw.alpha(0.28f * beamFade);
-                Fill.rect(e.x - w * 1.8f, e.y, w * 3.6f, len);
-                // 内层白芯
-                Draw.color(CORE, c, 0.35f);
-                Draw.alpha(0.85f * beamFade);
-                Fill.rect(e.x - w * 0.5f, e.y, w, len);
-            }
-
-            // 2. 收束环：快速收到脚下，制造「被压缩」的错觉
+            // 1. 收束环：快速收到脚下，制造「被压缩」的错觉。
+            //    原来这里还有一根自上而下的竖直光柱，俯视视角里就是一根杆子戳在落点中间，
+            //    既不像瞬移也不像落地，已经删掉。落点的「散开再收回」交给 WarpAbility 的四份残影。
             float pin = Mathf.clamp(p / 0.4f);
             Draw.color(c);
             Draw.alpha(1f - pin);
             Lines.stroke(stroke * (1f - pin * 0.65f));
             Lines.circle(e.x, e.y, radius * (1f - Interp.pow3In.apply(pin)) + 3f);
 
-            // 3. 落地火花：一圈向外的小点，比线条更碎
+            // 2. 落地火花：一圈向外的小点，比线条更碎
             rand.setSeed(e.id);
             Draw.color(CORE);
             float spark = Mathf.clamp((p - 0.2f) / 0.5f);
@@ -249,7 +233,7 @@ public class WarpEffects{
                 }
             }
 
-            // 4. 核心白闪，压到前一半
+            // 3. 核心白闪，压到前一半
             float flash = 1f - Interp.pow2In.apply(Mathf.clamp(p / 0.45f));
             Draw.color(Color.white);
             Draw.alpha(flash);

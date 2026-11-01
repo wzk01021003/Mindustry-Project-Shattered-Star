@@ -2,9 +2,11 @@ package project.abilities;
 
 import arc.Core;
 import arc.audio.Sound;
+import arc.graphics.Blending;
 import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Lines;
+import arc.graphics.g2d.TextureRegion;
 import arc.input.KeyCode;
 import arc.math.Angles;
 import arc.math.Interp;
@@ -71,7 +73,7 @@ public class WarpAbility extends Ability{
     public Seq<DrawPart> warpEndParts = new Seq<>();
     /*
      * 三段特效 = 手写层（WarpEffects）+ 几何层（WarpShapes），由 MultiEffect 合成：
-     * 手写层负责光柱、白闪、尖刺这些不好用参数描述的部分，
+     * 手写层负责向心线、白闪、尖刺这些不好用参数描述的部分，
      * 几何层用官方的 WaveEffect 画出会呼吸的六边形 / 二十四边形能量环。
      * 三层环各自带 startDelay，错峰炸开，比原来单个圆环有层次。
      */
@@ -106,6 +108,22 @@ public class WarpAbility extends Ability{
     public static final Effect warpParticleEffect = new WarpParticleEffect();
     public boolean useAutoWarpEffect = true;
 
+    /*
+     * 落地残影：四份机体剪影，从落点向外推开再收回来。
+     * 做法抄 VE 磁暴单位（lacuna/surge）warpEndParts 里的「sin 呼吸」——
+     * 那边用 progress = sin(life * 0.5) * mag + offset 让零件半径先涨后落，
+     * 这里把零件换成机体自己的贴图，看起来像「人还留在原地慢慢散掉」。
+     */
+    /** 残影个数 */
+    public int ghostCount = 4;
+    /** 残影向外扩散的最大半径（像素） */
+    public float ghostRadius = 58f;
+    /** 残影存活帧数，从落点开始算 */
+    public float ghostLife = 34f;
+    /** 残影最亮时的不透明度 */
+    public float ghostAlpha = 0.75f;
+    public Color ghostColor = Color.valueOf("ffe2bc");
+
     /** 被指挥时是否允许自动跃迁 */
     public boolean commandAutoWarp = true;
     /** 普通移动指令下，目标超过此距离自动跃迁 */
@@ -131,6 +149,8 @@ public class WarpAbility extends Ability{
     private float wx, wy, wRot;
     private boolean rotAllowWarp, warpCharging, autoWarping;
     private float mobileAutoWarpTimer, mobileCamXLast, mobileCamYLast;
+    /** 落地残影的剩余寿命与落地朝向 */
+    private float ghostTimer, ghostRot;
 
     /**
      * 把 mod 自带的跃迁音效挂进来，由 ShatteredStarMod.init() 调用。
@@ -218,6 +238,9 @@ public class WarpAbility extends Ability{
 
     @Override
     public void update(Unit unit){
+        // 残影要先走完：下面「设置里关掉跃迁」会 early return，放后面的话残影会冻在半路
+        if(ghostTimer > 0f) ghostTimer -= Time.delta;
+
         // 助推姿态是「指挥自动跃迁」的触发条件之一，单位没有就补上
         if(commandAutoWarpBoost && !unit.type.stances.contains(UnitStance.boost)) unit.type.stances.add(UnitStance.boost);
 
@@ -291,6 +314,10 @@ public class WarpAbility extends Ability{
         unit.x(x2);
         unit.y(y2);
 
+        // 四份剪影从落点散开再收回，和下面的落点特效同时起步
+        ghostTimer = ghostLife;
+        ghostRot = r;
+
         // 特效整组受设置控制：低端设备或多人卡顿时可以只留音效
         if(SSWarpSettings.effects){
             warpBeginEffect.at(x1, y1, r, warpEffectColor);
@@ -334,6 +361,8 @@ public class WarpAbility extends Ability{
 
     @Override
     public void draw(Unit unit){
+        drawGhosts(unit);
+
         if(warpCharging && warpEndParts.size > 0){
             // 蓄力进度驱动目标端零件（如果单位配了的话）
             float prog = Mathf.clamp(warpWarmup / Math.max(warpMinWarmup, 1f));
@@ -394,5 +423,56 @@ public class WarpAbility extends Ability{
         Draw.z(oldZ);
         Draw.color();
         Draw.alpha(1f);
+    }
+
+    /**
+     * 落地残影：{@link #ghostCount} 份机体剪影，从落点向外推开再收回来。
+     *
+     * <p>抄的是 VE 磁暴单位 lacuna/surge 的 warpEndParts：那边四个零件都用
+     * {@code progress = sin(life * 0.5) * mag + offset} 让半径先涨后落，
+     * 机体周围始终有东西在收放。这里把零件换成机体自己的贴图，
+     * 比纯几何线条更像「人还留在原地、慢慢散掉」。
+     *
+     * <p>为什么不写成 Effect：Effect 是全局单例，既不能持有单位引用
+     * （单位会被回收复用），也拿不到每帧的朝向和 region。
+     *
+     * <p>{@code sin(πt)} 是这里的关键：t 从 0 走到 1 时它先增后减，
+     * 一次函数就能把「散开—缩回」讲完，两端的值为 0，天然没有突兀的起止。
+     */
+    private void drawGhosts(Unit unit){
+        if(ghostTimer <= 0f || !SSWarpSettings.effects || ghostCount <= 0) return;
+        TextureRegion reg = unit.type.region;
+        if(reg == null) return;
+
+        float t = Mathf.clamp(1f - ghostTimer / Math.max(ghostLife, 1f));
+        float wave = Mathf.sin(t * Mathf.pi);
+        // 位移开 0.6 次方：影子更快离身，否则大半段时间都挤在机体旁边，看着只是抖了一下
+        float r = ghostRadius * Mathf.pow(wave, 0.6f);
+        // 亮度单独再压一道曲线，两端收得比位移更快，起落不会突然冒出来
+        float alpha = ghostAlpha * Mathf.pow(wave, 1.15f);
+        // 越到后面越收缩一点，像影子被拉回机身
+        float scl = 1f - 0.12f * t;
+
+        // Ability.draw 被调用时 Draw.z 就是本单位所在层，往下压一点让影子排在机体后面
+        float oldZ = Draw.z();
+        Draw.z(oldZ - 0.1f);
+        Draw.blend(Blending.additive);
+        Draw.color(ghostColor);
+
+        for(int i = 0; i < ghostCount; i++){
+            // 从 45° 起均分，末尾那个 t * 26f 让四个影子整体缓慢转一点，不然像静态图标
+            float ang = 45f + 360f / ghostCount * i + t * 26f;
+            Draw.alpha(alpha);
+            Draw.rect(reg,
+                unit.x + Mathf.cosDeg(ang) * r,
+                unit.y + Mathf.sinDeg(ang) * r,
+                reg.width * scl, reg.height * scl,
+                ghostRot - 90f);
+        }
+
+        Draw.blend();
+        Draw.color();
+        Draw.alpha(1f);
+        Draw.z(oldZ);
     }
 }

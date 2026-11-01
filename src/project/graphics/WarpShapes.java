@@ -77,7 +77,9 @@ public class WarpShapes{
      *
      * <p>参数和起跳那圈相同，只是晚 4 帧才出现、颜色从核心白起算 ——
      * 机体已经落位了膜才被「踩」出来，正好对应踩地的节奏。
-     * 光柱、收束环、落地火花都在手写层里，这里不再叠第二圈环。
+     * 收束环、向心线、落地火花都在手写层里，这里不再叠第二圈环。
+     * 落地的那四个机体残影不在这里，它们是 unit 贴图的副本，得由
+     * {@code WarpAbility.draw} 画（Effect 拿不到单位引用，也没法每帧跟着机体）。
      */
     public static final Effect ARRIVE = new MultiEffect(
         new WarpEffects.WarpArriveEffect(),
