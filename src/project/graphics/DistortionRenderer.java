@@ -12,6 +12,7 @@ import arc.math.geom.Vec2;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
+import mindustry.Vars;
 import mindustry.game.EventType.Trigger;
 import mindustry.graphics.Layer;
 import project.SSSettings;
@@ -121,12 +122,44 @@ public class DistortionRenderer {
     private static void onDrawEvent() {
         if (unsupported || !SSSettings.enabled() || active.size == 0) return;
 
+        // 暂停（或逻辑时间被冻结）时，updateActive 里的 elapsed 不会前进：
+        // 这些扭曲既不会结束也不会消失，而 Trigger.draw 照常每帧触发，
+        // 于是一直白跑整条 FBO 捕获 + blit —— 暂停多久就浪费多久。
+        // 这里改用渲染帧的真实间隔把它们推进到结束。暂停画面本就静止，
+        // 看不出差别，但开销会在半秒内归零。
+        // 单帧步长封顶：断点或长时间卡顿后 getDeltaTime 会暴涨，
+        // 不封顶的话一次就跳完整段动画。
+        if (logicFrozen()) {
+            advance(Math.min(Core.graphics.getDeltaTime() * 60f, 5f));
+            if (active.size == 0) return;
+        }
+
         // 全部扭曲都在视口外时，整条离屏管线（FBO 捕获 + 全屏 blit）
         // 都不必执行——玩家看不见扭曲时，这两步是纯浪费。
         if (!anyVisible()) return;
 
         Draw.draw(Layer.background - 1f, DistortionRenderer::beginCapture);
         Draw.draw(Layer.overlayUI - 1f, DistortionRenderer::endCaptureAndRender);
+    }
+
+    /**
+     * 逻辑时间是否已经停止推进。
+     *
+     * 三个条件取并集，因为单看任何一个都会漏：
+     *  - 菜单：没有任何对局逻辑在跑
+     *  - 暂停：世界整体冻结
+     *  - Time.delta 为 0：极端卡顿或某些界面下逻辑步进为 0
+     * 不能靠「Trigger.update 有没有跑」来判断：它在 Logic.update 里排在
+     * isPaused 判断之前，暂停时究竟还触不触发取决于上层 update 链路，
+     * 不同版本表现不一致，直接查状态最稳。
+     */
+    private static boolean logicFrozen() {
+        if (Vars.state == null) return true;
+        // 菜单界面没有任何游戏逻辑在跑，从对局退回主菜单时 active 里
+        // 可能还留着没播完的源，靠这一条把它们清干净。
+        if (Vars.state.isMenu()) return true;
+        if (Vars.state.isPaused()) return true;
+        return Time.delta < 0.01f;
     }
 
     /**
@@ -460,9 +493,22 @@ public class DistortionRenderer {
     }
 
     private static void updateActive() {
+        advance(Time.delta);
+    }
+
+    /**
+     * 按给定帧时长推进所有扭曲的生命周期并回收已结束的。
+     *
+     * 时长做成参数而不是固定读 Time.delta：逻辑时间冻结时（暂停等）
+     * Time.delta 不再前进，扭曲会永远停在原地，onDrawEvent 需要能拿
+     * 渲染帧的真实间隔另行推进。
+     *
+     * @param delta 帧数，1.0 = 60fps 下的一帧（与 Time.delta 同单位）
+     */
+    private static void advance(float delta) {
         for (int i = active.size - 1; i >= 0; i--) {
             Data data = active.get(i);
-            data.elapsed += Time.delta;
+            data.elapsed += delta;
             if (data.elapsed >= data.lifetime) {
                 active.remove(i);
                 recycle(data);
