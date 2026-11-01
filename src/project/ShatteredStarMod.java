@@ -72,6 +72,8 @@ public class ShatteredStarMod extends Mod {
         DistortionRenderer.init();
         // 0.1. 星辉跃迁设置
         SSWarpSettings.load();
+        // 0.2. 跃迁音效（stAstroWarp1 / 2）
+        project.abilities.WarpAbility.loadSounds();
         // ============ 0.9. 扭曲配置 ============
         project.content.DistortionConfig.load();
         project.content.DistortionConfig.apply();

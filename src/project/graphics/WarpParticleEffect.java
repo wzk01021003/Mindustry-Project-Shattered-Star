@@ -21,47 +21,61 @@ import mindustry.graphics.Drawf;
 public class WarpParticleEffect extends Effect{
 
     public WarpParticleEffect(){
-        // 注意：这个构造器跑在字段初始化之前，读到的 generalLength 恒为下方默认值，
-        // clip 因此固定为 1440。原文如此，对 800px 以内的跃迁足够，保留不改。
-        clip = generalLength * 2f;
+        // 这个类现在做成静态单例，长度、粒子数这类每发不同的参数
+        // 由 at(x, y, rot, color, data) 的 data 传进来（见 WarpEffects.data）。
+        // 原来是把参数写进匿名子类的实例字段，代价是每次跃迁 new 一个 Effect，
+        // 而 Effect 的构造器会把自己永久塞进 Effect.all——等于每跳一次漏一个对象。
+        lifetime = 60f;
+        clip = 2000f;
     }
 
     private static final Rand rand = new Rand();
     private static final Vec2 rv = new Vec2();
 
-    public float width = 24f;
+    public float width = 8f;
     public float generalLength = 720f;
-    public float stroke = 1f;
+    public float stroke = 2f;
     public float lengthFrom = 20f;
     public float lengthTo = 5f;
-    public int particles = 40;
     public Color colorFrom = Color.valueOf("ffd9a0").mul(1.2f);
     public Color colorTo = Color.valueOf("ffa665");
     public Interp interp = Interp.circleOut;
     public Interp sizeInterp = Interp.pow2In;
     public Interp colorInterp = Interp.linear;
     public float cone = 0;
+    /** 每跨越这么多像素铺一个粒子 */
+    public float particlePerPixel = 14.4f;
 
     @Override
     public void render(EffectContainer e){
+        float glen = WarpEffects.data(e, generalLength);
+        if(glen <= 0.01f) return;
+
+        int count = Mathf.clamp(Mathf.ceil(glen / particlePerPixel), 1, 200);
+        Color to = e.color == null ? colorTo : e.color;
+
         float rawfin = e.fin();
         float fin = e.fin(interp);
         float colFin = e.fin(colorInterp);
-        Draw.color(colorFrom, colorTo, colFin);
+        Draw.color(colorFrom, to, colFin);
         Lines.stroke(sizeInterp.apply(stroke, 0, rawfin));
         float len = sizeInterp.apply(lengthFrom, lengthTo, rawfin);
 
         // 用特效 id 做种子，保证同一发跃迁每次重绘的粒子分布完全一致，不会闪
         rand.setSeed(e.id);
-        for(int i = 0; i < particles; i++){
-            float l = generalLength * fin;
+        for(int i = 0; i < count; i++){
+            float l = glen * fin;
             float c = rand.random(-1f, 1f);
             float lm = rand.random(0.5f, 2f);
             rv.trns(e.rotation + rand.range(cone), rand.random(l) * Mathf.pow(Mathf.clamp(1f - Math.abs(c)), 0.5f));
             float x = rv.x + width * 0.5f * c * Mathf.cosDeg(e.rotation - 90f), y = rv.y + width * 0.5f * c * Mathf.sinDeg(e.rotation - 90f);
 
             Lines.lineAngle(e.x + x, e.y + y, e.rotation, Mathf.clamp(e.fout() - (1 - lm)) * len * Mathf.pow(Mathf.clamp(1.25f - Math.abs(c)), 0.5f), 0);
-            Drawf.light(e.x + x, e.y + y, len, Draw.getColor(), 1f);
         }
+
+        // 光照整条通道只画一次。原来每个粒子各画一个 additive 光斑，
+        // 一次 1200px 的跃迁就是八十多个大 quad 叠加，是这里最贵的一笔开销，
+        // 而屏幕上根本分辨不出它们的区别。
+        Drawf.light(e.x, e.y, Math.min(120f, glen * 0.3f) * e.fout(), Draw.getColor(), 0.5f);
     }
 }

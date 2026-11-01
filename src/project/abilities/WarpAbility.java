@@ -7,16 +7,18 @@ import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Lines;
 import arc.input.KeyCode;
 import arc.math.Angles;
+import arc.math.Interp;
 import arc.math.Mathf;
 import arc.scene.ui.layout.Table;
 import arc.struct.Seq;
+import arc.util.Log;
 import arc.util.Strings;
 import arc.util.Time;
+import arc.util.Tmp;
 import mindustry.Vars;
 import mindustry.ai.UnitCommand;
 import mindustry.ai.UnitStance;
 import mindustry.ai.types.CommandAI;
-import mindustry.content.Fx;
 import mindustry.content.StatusEffects;
 import mindustry.entities.Effect;
 import mindustry.entities.abilities.Ability;
@@ -24,8 +26,14 @@ import mindustry.entities.part.DrawPart;
 import mindustry.gen.Sounds;
 import mindustry.gen.Unit;
 import mindustry.graphics.Drawf;
+import mindustry.graphics.Layer;
 import mindustry.type.StatusEffect;
 import project.SSWarpSettings;
+import project.graphics.DistortionFx;
+import project.graphics.WarpEffects.WarpArriveEffect;
+import project.graphics.WarpEffects.WarpBurstEffect;
+import project.graphics.WarpEffects.WarpChargeEffect;
+import project.graphics.WarpEffects.WarpTrailEffect;
 import project.graphics.WarpParticleEffect;
 
 import static mindustry.Vars.tilesize;
@@ -63,21 +71,35 @@ public class WarpAbility extends Ability{
     public float warpMaxDistance = 0f;
 
     public Seq<DrawPart> warpEndParts = new Seq<>();
-    public Effect warpEndEffect = Fx.shootBigColor;
-    public Effect warpBeginEffect = Fx.circleColorSpark;
-    public Effect warpPrepareEffect = Fx.none;
-    public float warpPrepareEffectChance = 0.25f;
-    public float warpPrepareEffectSpread = 6f;
+    // 三段专用特效（见 WarpEffects），不再借用炮口火花和大炮爆炸
+    public Effect warpEndEffect = new WarpArriveEffect();
+    public Effect warpBeginEffect = new WarpBurstEffect();
+    public Effect warpPrepareEffect = new WarpChargeEffect();
+    public float warpPrepareEffectChance = 0.22f;
+    public float warpPrepareEffectSpread = 4f;
     public Sound warpSound = Sounds.massdriver;
+    /** 起跳 / 落地音效：mod 自带的 stAstroWarp1、stAstroWarp2，加载失败时退回 massdriver */
+    public static Sound warpStartSound, warpEndSound;
+    /**
+     * 起跳撕开 / 落点合拢的屏幕扭曲。
+     * 必须做成静态单例：Effect 的构造器会把自己加进 Effect.all，
+     * 每次跃迁 new 一个等于往全局表里塞垃圾，越玩越卡。
+     * 开关由 DistortionRenderer.addDistortion 自己判断，没开实验性渲染时是空转。
+     */
+    public static final Effect warpOutDistortion =
+        new DistortionFx(72f, 1.3f, 14f, DistortionFx.TYPE_OUTWARD, 0.15f, 1.2f, Interp.pow2Out);
+    public static final Effect warpInDistortion =
+        new DistortionFx(96f, 1.7f, 20f, DistortionFx.TYPE_INWARD, 1.1f, 0f, Interp.pow3In);
     public float warpShake = 10f;
     public StatusEffect warpStatus = StatusEffects.none;
 
     public Color warpEffectColor = Color.valueOf("ffa665");
-    public Color warpTrailColor1 = Color.valueOf("ffa665").a(0.45f);
-    public Color warpTrailColor2 = Color.valueOf("ffb87a").a(0.7f);
-    public Color warpTrailColor3 = Color.white;
-    public float warpTrailStroke = 18f;
-    public float warpTrailLife = 28f;
+    /**
+     * 能量轨迹与通道粒子也是静态单例，长度通过 at(..., data) 传。
+     * 原因同上：Effect 构造器会把自己注册进 Effect.all，运行时 new 就是泄漏。
+     */
+    public static final Effect warpTrailEffect = new WarpTrailEffect();
+    public static final Effect warpParticleEffect = new WarpParticleEffect();
     public boolean useAutoWarpEffect = true;
 
     /** 被指挥时是否允许自动跃迁 */
@@ -105,6 +127,28 @@ public class WarpAbility extends Ability{
     private float wx, wy, wRot;
     private boolean rotAllowWarp, warpCharging, autoWarping;
     private float mobileAutoWarpTimer, mobileCamXLast, mobileCamYLast;
+
+    /**
+     * 把 mod 自带的跃迁音效挂进来，由 ShatteredStarMod.init() 调用。
+     *
+     * <p>stAstroWarp1 前 0.5 秒就是全部能量的八成，收得干净，拿来做「起跳」；
+     * stAstroWarp2 有一层拖到两秒的低频余韵，放在「落地」正好收尾。
+     * headless 下 loadSound 返回空音效，服务端不会炸。
+     */
+    public static void loadSounds(){
+        warpStartSound = loadSoundOr("stAstroWarp1");
+        warpEndSound = loadSoundOr("stAstroWarp2");
+    }
+
+    private static Sound loadSoundOr(String name){
+        try{
+            Sound s = Vars.tree.loadSound(name);
+            if(s != null) return s;
+        }catch(Throwable t){
+            Log.warn("[ss] 跃迁音效 @ 加载失败，退回 massdriver", name);
+        }
+        return Sounds.massdriver;
+    }
 
     @Override
     public void addStats(Table t){
@@ -210,7 +254,8 @@ public class WarpAbility extends Ability{
 
             wRot = Mathf.atan2(wx - unit.x, wy - unit.y) * Mathf.radiansToDegrees;
             if(SSWarpSettings.effects && Mathf.chanceDelta(warpPrepareEffectChance)){
-                warpPrepareEffect.at(unit.x + Mathf.range(warpPrepareEffectSpread), unit.y + Mathf.range(warpPrepareEffectSpread));
+                warpPrepareEffect.at(unit.x + Mathf.range(warpPrepareEffectSpread), unit.y + Mathf.range(warpPrepareEffectSpread),
+                    unit.rotation, warpEffectColor);
             }
             rotateToWarp(unit);
             if(warpStatus != StatusEffects.none){
@@ -246,35 +291,14 @@ public class WarpAbility extends Ability{
         if(SSWarpSettings.effects){
             warpBeginEffect.at(x1, y1, r, warpEffectColor);
             warpEndEffect.at(x2, y2, r, warpEffectColor);
+            // 屏幕扭曲叠在粒子下面：起跳是空间被撕开，落地是空间合拢
+            warpOutDistortion.at(x1, y1);
+            warpInDistortion.at(x2, y2);
 
-            // 三层同线、逐层变细变亮，叠起来就是一束带核心高光的能量轨迹
-            Effect line = new Effect(warpTrailLife, 80000f, e -> {
-                Drawf.light(x1, y1, x2, y2, warpTrailStroke * e.fout(), warpEffectColor, 1f);
-                Lines.stroke(warpTrailStroke * e.fout());
-                Draw.color(warpTrailColor1);
-                Lines.line(x1, y1, x2, y2);
-                Lines.stroke(warpTrailStroke * e.fout() * 0.6f);
-                Draw.color(warpTrailColor2);
-                Lines.line(x1, y1, x2, y2);
-                Lines.stroke(warpTrailStroke * e.fout() * 0.3f);
-                Draw.color(warpTrailColor3);
-                Lines.line(x1, y1, x2, y2);
-            });
-            line.at(x1, y1);
-
+            // 轨迹与通道粒子：长度塞在 data 里，Effect 本体是复用的单例
+            warpTrailEffect.at(x1, y1, r, warpEffectColor, d);
             if(useAutoWarpEffect){
-                WarpParticleEffect wp = new WarpParticleEffect(){{
-                    generalLength = d;
-                    lengthFrom = Math.min(20f, d / 36f);
-                    lengthTo = Math.min(5f, d / 144f);
-                    stroke = 2f;
-                    colorFrom = warpEffectColor;
-                    colorTo = warpEffectColor;
-                    lifetime = 60f;
-                    particles = Mathf.ceil(d / 14.4f);
-                    width = unit.hitSize() * 0.8f;
-                }};
-                wp.at(x1, y1, r);
+                warpParticleEffect.at(x1, y1, r, warpEffectColor, d);
             }
 
             Effect.shake(warpShake, warpShake * 2f, x1, y1);
@@ -283,8 +307,9 @@ public class WarpAbility extends Ability{
 
         if(SSWarpSettings.volume > 0.01f){
             float vol = SSWarpSettings.volume * Math.max(0.33f, d / warpMinWarmupDistance);
-            warpSound.at(x1, y1, 1f, vol);
-            warpSound.at(x2, y2, 1f, vol);
+            // 起点与终点各一声：起点短促（stAstroWarp1），终点带余韵（stAstroWarp2）
+            (warpStartSound == null ? warpSound : warpStartSound).at(x1, y1, 1f, vol);
+            (warpEndSound == null ? warpSound : warpEndSound).at(x2, y2, 1f, vol * 0.95f);
         }
     }
 
@@ -314,5 +339,56 @@ public class WarpAbility extends Ability{
                 p.draw(DrawPart.params);
             }
         }
+
+        if(!warpCharging || !SSWarpSettings.effects) return;
+
+        // 蓄力期间在落点上画准星：光靠机体冒粒子，玩家判断不出会跳到哪
+        float dist = Mathf.dst(unit.x, unit.y, wx, wy);
+        float need = warpBaseWarmup + warpMinWarmup * (dist / warpMinWarmupDistance);
+        float prog = Mathf.clamp(warpWarmup / Math.max(need, 1f));
+        float pulse = 0.65f + 0.35f * Mathf.sin(Time.time * 0.22f);
+
+        float oldZ = Draw.z();
+        Draw.z(Layer.effect);
+
+        // 单位到落点的虚线，颜色随脉冲呼吸
+        Tmp.c1.set(warpEffectColor).a(0.35f + 0.3f * pulse);
+        Drawf.dashLine(Tmp.c1, unit.x, unit.y, wx, wy);
+
+        // 落点双环
+        Draw.color(warpEffectColor);
+        Draw.alpha(0.8f * pulse);
+        Lines.stroke(1.6f);
+        Lines.circle(wx, wy, 11f + pulse * 2f);
+        Draw.alpha(0.3f * pulse);
+        Lines.stroke(1f);
+        Lines.circle(wx, wy, 17f + pulse * 3f);
+
+        // 两段反向旋转的弧：蓄力越满，弧越长，看起来像在慢慢「咬合」
+        Draw.alpha(0.9f);
+        Lines.stroke(2f);
+        float arc = 0.16f + 0.14f * prog;
+        float rot = Time.time * 2.2f;
+        Lines.arc(wx, wy, 15f, arc, rot);
+        Lines.arc(wx, wy, 15f, arc, rot + 180f);
+
+        // 十字准星
+        Lines.stroke(1.4f);
+        Lines.line(wx - 6f, wy, wx - 2f, wy);
+        Lines.line(wx + 2f, wy, wx + 6f, wy);
+        Lines.line(wx, wy - 6f, wx, wy - 2f);
+        Lines.line(wx, wy + 2f, wx, wy + 6f);
+
+        // 机头已经对准：整圈闪白，等于告诉玩家「现在松手就能跳」
+        if(rotAllowWarp){
+            Draw.color(Color.white);
+            Draw.alpha(0.75f * pulse);
+            Lines.stroke(1.2f);
+            Lines.circle(wx, wy, 20f + pulse * 2f);
+        }
+
+        Draw.z(oldZ);
+        Draw.color();
+        Draw.alpha(1f);
     }
 }
