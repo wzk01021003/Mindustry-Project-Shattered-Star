@@ -133,16 +133,17 @@ public class WarpAbility extends Ability{
         if(!unit.isPlayer() && commandAutoWarp && unit.isCommandable() && unit.command().targetPos != null){
             CommandAI c = unit.command();
             boolean boosting = commandAutoWarpBoost && c.hasStance(UnitStance.boost);
-            boolean payloadActing = commandAutoWarpPayload &&
+            // 括号不能省：&& 优先级高于 ||，写成 flat 版本会让开关只作用于第一个条件
+            boolean payloadActing = commandAutoWarpPayload && (
                 c.command == UnitCommand.loopPayloadCommand ||
                 c.command == UnitCommand.loadUnitsCommand ||
                 c.command == UnitCommand.loadBlocksCommand ||
-                c.command == UnitCommand.unloadPayloadCommand;
-            boolean supportActing = commandAutoWarpSupport &&
+                c.command == UnitCommand.unloadPayloadCommand);
+            boolean supportActing = commandAutoWarpSupport && (
                 c.command == UnitCommand.mineCommand ||
                 c.command == UnitCommand.rebuildCommand ||
                 c.command == UnitCommand.assistCommand ||
-                c.command == UnitCommand.repairCommand;
+                c.command == UnitCommand.repairCommand);
 
             float d = Mathf.dst(c.targetPos.getX(), c.targetPos.getY(), unit.x, unit.y);
             boolean shouldWarp = (boosting && d > commandAutoWarpBoostDistance) ||
