@@ -21,10 +21,22 @@ import mindustry.graphics.Drawf;
 public class WarpParticleEffect extends Effect{
 
     public WarpParticleEffect(){
+        this(1f);
+    }
+
+    /**
+     * @param scale 通道宽度倍率。小飞机钻过去只要一条缝，
+     *              日蚀这种 320px 的机体整台搬走，缝得开到机身那么宽才说得通。
+     *              线宽只跟着放大一点点：通道再宽，那些短线本身还是「细裂口」，
+     *              按宽度同比例放大只会变成四根粗柱子。
+     */
+    public WarpParticleEffect(float scale){
         // 这个类现在做成静态单例，长度、粒子数这类每发不同的参数
         // 由 at(x, y, rot, color, data) 的 data 传进来（见 WarpEffects.data）。
         // 原来是把参数写进匿名子类的实例字段，代价是每次跃迁 new 一个 Effect，
         // 而 Effect 的构造器会把自己永久塞进 Effect.all——等于每跳一次漏一个对象。
+        this.width = 8f * scale;
+        this.stroke = 2f * Mathf.clamp(scale * 0.4f, 1f, 2.5f);
         lifetime = 60f;
         clip = 2000f;
     }

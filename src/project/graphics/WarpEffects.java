@@ -66,8 +66,15 @@ public class WarpEffects{
         public Color c1 = Color.valueOf("ffa665").a(0.45f);
         public Color c2 = Color.valueOf("ffb87a").a(0.7f);
         public Color c3 = Color.white;
+        /** 轨迹粗细倍率：日蚀这类大机体需要更宽的一束，否则像根线 */
+        public float scale = 1f;
 
         public WarpTrailEffect(){
+            this(1f);
+        }
+
+        public WarpTrailEffect(float scale){
+            this.scale = scale;
             lifetime = 28f;
             clip = 2000f;
         }
@@ -80,17 +87,18 @@ public class WarpEffects{
             float dx = Mathf.cosDeg(e.rotation) * len, dy = Mathf.sinDeg(e.rotation) * len;
             float x2 = e.x + dx, y2 = e.y + dy;
             float f = e.fout();
+            float s = stroke * scale;
 
-            Drawf.light(e.x, e.y, x2, y2, stroke * f, main(e), 1f);
+            Drawf.light(e.x, e.y, x2, y2, s * f, main(e), 1f);
 
             // 三层同线、逐层变细变亮，叠起来就是一束带核心高光的能量轨迹
-            Lines.stroke(stroke * f);
+            Lines.stroke(s * f);
             Draw.color(c1);
             Lines.line(e.x, e.y, x2, y2);
-            Lines.stroke(stroke * f * 0.6f);
+            Lines.stroke(s * f * 0.6f);
             Draw.color(c2);
             Lines.line(e.x, e.y, x2, y2);
-            Lines.stroke(stroke * f * 0.3f);
+            Lines.stroke(s * f * 0.3f);
             Draw.color(c3);
             Lines.line(e.x, e.y, x2, y2);
         }
@@ -103,34 +111,48 @@ public class WarpEffects{
         public float radius = 20f;
         public float stroke = 2.2f;
         public int spikes = 9;
+        /**
+         * 整体尺寸倍率。
+         *
+         * <p>特效是静态单例，不能按单位改半径，所以把「多大」做成构造参数：
+         * 星辉（hitSize 9）用 1，异构日蚀（hitSize 58）用 4，
+         * 同一个类就能同时服务小飞机和 T5 轰炸机，不必复制一份代码。
+         */
+        public float scale = 1f;
 
         public WarpChargeEffect(){
+            this(1f);
+        }
+
+        public WarpChargeEffect(float scale){
+            this.scale = scale;
             lifetime = 22f;
-            clip = 320f;
+            clip = 320f * scale;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
+            float R = radius * scale, S = stroke * scale;
             float shrink = 1f - Interp.pow3In.apply(p);
-            float r = radius * shrink;
+            float r = R * shrink;
             float fade = 1f - p * 0.75f;
             Color c = main(e);
 
             // 主环：越收越细
             Draw.color(CORE, c, p);
             Draw.alpha(fade);
-            Lines.stroke(stroke * shrink);
+            Lines.stroke(S * shrink);
             Lines.circle(e.x, e.y, r);
 
             // 被吸进来的短线，方向固定（用 id 做种子），看起来像能量流而不是噪点
             rand.setSeed(e.id);
-            Lines.stroke(stroke * 0.65f * shrink);
+            Lines.stroke(S * 0.65f * shrink);
             Draw.color(c);
             Draw.alpha(fade * 0.85f);
             for(int i = 0; i < spikes; i++){
                 float ang = rand.random(360f);
-                float len = rand.random(5f, 13f) * shrink;
+                float len = rand.random(5f, 13f) * shrink * scale;
                 float rr = r + len;
                 Lines.lineAngle(e.x + Mathf.cosDeg(ang) * rr, e.y + Mathf.sinDeg(ang) * rr, ang + 180f, len);
             }
@@ -138,8 +160,8 @@ public class WarpEffects{
             // 中心的一点余烬
             Draw.color(CORE);
             Draw.alpha(0.5f * shrink * shrink);
-            Fill.circle(e.x, e.y, radius * 0.4f * shrink);
-            Drawf.light(e.x, e.y, radius * 1.8f * shrink, c, 0.35f * fade);
+            Fill.circle(e.x, e.y, R * 0.4f * shrink);
+            Drawf.light(e.x, e.y, R * 1.8f * shrink, c, 0.35f * fade);
         }
     }
 
@@ -156,15 +178,23 @@ public class WarpEffects{
         public float radius = 42f;
         public float stroke = 4f;
         public int spikes = 14;
+        /** 整体尺寸倍率，见 {@link WarpChargeEffect#scale} */
+        public float scale = 1f;
 
         public WarpBurstEffect(){
+            this(1f);
+        }
+
+        public WarpBurstEffect(float scale){
+            this.scale = scale;
             lifetime = 26f;
-            clip = 420f;
+            clip = 420f * scale;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
+            float R = radius * scale, S = stroke * scale;
             float out = Interp.pow3Out.apply(p);
             float fade = 1f - p;
             Color c = main(e);
@@ -173,12 +203,12 @@ public class WarpEffects{
             rand.setSeed(e.id);
             Draw.color(CORE, c, p);
             Draw.alpha(fade * 0.8f);
-            Lines.stroke(stroke * 0.55f * fade);
+            Lines.stroke(S * 0.55f * fade);
             for(int i = 0; i < spikes; i++){
                 float ang = 360f / spikes * i + rand.random(-9f, 9f);
-                float len = radius * rand.random(0.65f, 1.45f) * out * (1f - p * 0.45f);
+                float len = R * rand.random(0.65f, 1.45f) * out * (1f - p * 0.45f);
                 // 从接近中心的地方射出去，起点露在外面会变成车轮辐条
-                float r0 = radius * 0.04f * out;
+                float r0 = R * 0.04f * out;
                 Lines.lineAngle(e.x + Mathf.cosDeg(ang) * r0, e.y + Mathf.sinDeg(ang) * r0, ang, len);
             }
 
@@ -186,11 +216,11 @@ public class WarpEffects{
             float flash = 1f - Interp.pow2In.apply(p);
             Draw.color(Color.white);
             Draw.alpha(flash);
-            Fill.circle(e.x, e.y, stroke * 1.7f * flash);
+            Fill.circle(e.x, e.y, S * 1.7f * flash);
             Draw.alpha(flash * flash);
-            Fill.circle(e.x, e.y, stroke * 0.85f * flash * flash);
+            Fill.circle(e.x, e.y, S * 0.85f * flash * flash);
 
-            Drawf.light(e.x, e.y, radius * 2f * fade + 10f, c, 0.9f * fade);
+            Drawf.light(e.x, e.y, R * 2f * fade + 10f, c, 0.9f * fade);
         }
     }
 
@@ -200,15 +230,23 @@ public class WarpEffects{
     public static class WarpArriveEffect extends Effect{
         public float radius = 38f;
         public float stroke = 3.4f;
+        /** 整体尺寸倍率，见 {@link WarpChargeEffect#scale} */
+        public float scale = 1f;
 
         public WarpArriveEffect(){
+            this(1f);
+        }
+
+        public WarpArriveEffect(float scale){
+            this.scale = scale;
             lifetime = 32f;
-            clip = 460f;
+            clip = 460f * scale;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
+            float R = radius * scale, S = stroke * scale;
             Color c = main(e);
 
             // 1. 收束环：快速收到脚下，制造「被压缩」的错觉。
@@ -217,8 +255,8 @@ public class WarpEffects{
             float pin = Mathf.clamp(p / 0.4f);
             Draw.color(c);
             Draw.alpha(1f - pin);
-            Lines.stroke(stroke * (1f - pin * 0.65f));
-            Lines.circle(e.x, e.y, radius * (1f - Interp.pow3In.apply(pin)) + 3f);
+            Lines.stroke(S * (1f - pin * 0.65f));
+            Lines.circle(e.x, e.y, R * (1f - Interp.pow3In.apply(pin)) + 3f * scale);
 
             // 2. 落地火花：一圈向外的小点，比线条更碎
             rand.setSeed(e.id);
@@ -228,8 +266,8 @@ public class WarpEffects{
                 Draw.alpha(0.9f * (1f - spark));
                 for(int i = 0; i < 10; i++){
                     float ang = rand.random(360f);
-                    float d = radius * rand.random(0.5f, 1.3f) * Interp.pow2Out.apply(spark);
-                    Fill.circle(e.x + Mathf.cosDeg(ang) * d, e.y + Mathf.sinDeg(ang) * d, 1.4f * (1f - spark) + 0.4f);
+                    float d = R * rand.random(0.5f, 1.3f) * Interp.pow2Out.apply(spark);
+                    Fill.circle(e.x + Mathf.cosDeg(ang) * d, e.y + Mathf.sinDeg(ang) * d, (1.4f * (1f - spark) + 0.4f) * scale);
                 }
             }
 
@@ -237,9 +275,9 @@ public class WarpEffects{
             float flash = 1f - Interp.pow2In.apply(Mathf.clamp(p / 0.45f));
             Draw.color(Color.white);
             Draw.alpha(flash);
-            Fill.circle(e.x, e.y, stroke * 1.8f * flash);
+            Fill.circle(e.x, e.y, S * 1.8f * flash);
 
-            Drawf.light(e.x, e.y, radius * 2.2f * (1f - p) + 10f, c, 0.85f * (1f - p));
+            Drawf.light(e.x, e.y, R * 2.2f * (1f - p) + 10f, c, 0.85f * (1f - p));
         }
     }
 }

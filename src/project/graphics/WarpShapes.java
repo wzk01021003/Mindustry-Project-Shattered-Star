@@ -47,10 +47,7 @@ public class WarpShapes{
      * <p>层数刻意压到两层（另一层是手写的向心环）：蓄力特效每 8 帧就生成一个，
      * 同屏本来就会叠 2~3 个，再往上加只会糊成一坨。
      */
-    public static final Effect CHARGE = new MultiEffect(
-        new WarpEffects.WarpChargeEffect(),
-        wave(24, 22f, 22f, 1.1f, 0f, 20f, 0f, Interp.linear, tint(CORE, 0.95f), tint(MAIN, 0f), 0f)
-    );
+    public static final Effect CHARGE = charge(1f);
 
     /**
      * 起跳：主环 + 光刃。
@@ -64,13 +61,7 @@ public class WarpShapes{
      * 圆环、尖刺、白闪交给 {@link WarpEffects.WarpBurstEffect}，
      * 两边不重复画环，否则三圈同心环会互相糊掉。
      */
-    public static final Effect BURST = new MultiEffect(
-        new WarpEffects.WarpBurstEffect(),
-        wave(48, 16f, 80f, 1.25f, 3.5f, 15f, 0f, Interp.linear, tint(MAIN, 1f), tint(MAIN, 0f), 0f),
-        // 余波：主膜 15 帧就没了，留一圈更慢更细的环继续往外走，收尾不至于突然空掉
-        wave(0, 8f, 108f, 1.8f, 0f, 34f, 8f, Interp.pow2Out, tint(MAIN, 0.45f), tint(MAIN, 0f), 0f),
-        blades()
-    );
+    public static final Effect BURST = burst(1f);
 
     /**
      * 落点：一圈迟到的能量膜。
@@ -81,10 +72,72 @@ public class WarpShapes{
      * 落地的那四个机体残影不在这里，它们是 unit 贴图的副本，得由
      * {@code WarpAbility.draw} 画（Effect 拿不到单位引用，也没法每帧跟着机体）。
      */
-    public static final Effect ARRIVE = new MultiEffect(
-        new WarpEffects.WarpArriveEffect(),
-        wave(48, 16f, 80f, 1.25f, 3.5f, 15f, 4f, Interp.linear, tint(CORE, 0.9f), tint(MAIN, 0f), 0f)
-    );
+    public static final Effect ARRIVE = arrive(1f);
+
+    // ============================================================
+    //  大型机体（异构日蚀，hitSize 58）
+    // ============================================================
+    /*
+     * 为什么不能直接复用上面三件套：那套环是按 48px 的星辉调出来的，
+     * 半径 80px 差不多是机身的三倍；日蚀的贴图有 320px 宽，机身是它的六倍多，
+     * 同样半径的环套上去只有机身的三分之一，看起来像在原地图了个小靶标。
+     *
+     * 这里不复制代码，而是把上面三段拆成工厂方法，按 4 倍重新生成一份。
+     * 4 不是拍脑袋：星辉「蓄力膜」半径 22 约等于机身半径 24，日蚀机身半径 160，
+     * 按同比例要 6.7 倍，但那个尺度下起跳环会扩到 530px、糊满半个屏幕；
+     * 取 4 倍的结果是蓄力膜 88px（包在机身内圈）、起跳环收到 320px（略大于机身），
+     * 既有「整台机器被罩住」的份量，又不至于把战场遮死。
+     *
+     * 另外单独加了一层「同心大环」：大型单位跃迁的质量感主要来自这圈
+     * 慢慢推开、推得很远、压得很淡的环 —— VE 幻象和超维的入场演出里，
+     * 最占屏幕的也是这种低透明度大环，而不是亮环。
+     */
+    /** 大型机体的尺寸倍率 */
+    public static final float LARGE_SCALE = 4f;
+
+    public static final Effect CHARGE_LARGE = charge(LARGE_SCALE);
+    public static final Effect BURST_LARGE = burst(LARGE_SCALE);
+    public static final Effect ARRIVE_LARGE = arrive(LARGE_SCALE);
+
+    private static Effect charge(float scale){
+        return new MultiEffect(
+            new WarpEffects.WarpChargeEffect(scale),
+            wave(24, 22f * scale, 22f * scale, 1.1f * scale, 0f, 20f, 0f, Interp.linear,
+                tint(CORE, 0.95f), tint(MAIN, 0f), 0f)
+        );
+    }
+
+    private static Effect burst(float scale){
+        Effect base = new MultiEffect(
+            new WarpEffects.WarpBurstEffect(scale),
+            wave(48, 16f * scale, 80f * scale, 1.25f * scale, 3.5f * scale, 15f, 0f, Interp.linear,
+                tint(MAIN, 1f), tint(MAIN, 0f), 0f),
+            // 余波：主膜 15 帧就没了，留一圈更慢更细的环继续往外走，收尾不至于突然空掉
+            wave(0, 8f * scale, 108f * scale, 1.8f * scale, 0f, 34f, 8f, Interp.pow2Out,
+                tint(MAIN, 0.45f), tint(MAIN, 0f), 0f),
+            blades(scale)
+        );
+        if(scale <= 1.01f) return base;
+
+        // 大机体专用：一圈几乎不发光、推得极远的低压环，负责「气浪」那口气
+        return new MultiEffect(base,
+            wave(0, 40f * scale, 210f * scale, 6f * scale, 0f, 46f, 2f, Interp.pow3Out,
+                tint(MAIN, 0.22f), tint(MAIN, 0f), 0f));
+    }
+
+    private static Effect arrive(float scale){
+        Effect base = new MultiEffect(
+            new WarpEffects.WarpArriveEffect(scale),
+            wave(48, 16f * scale, 80f * scale, 1.25f * scale, 3.5f * scale, 15f, 4f, Interp.linear,
+                tint(CORE, 0.9f), tint(MAIN, 0f), 0f)
+        );
+        if(scale <= 1.01f) return base;
+
+        // 落点的第二层：晚 10 帧才起、扩到 230px 的薄环，落地后还有余波在走
+        return new MultiEffect(base,
+            wave(0, 30f * scale, 230f * scale, 5f * scale, 0f, 40f, 10f, Interp.pow2Out,
+                tint(CORE, 0.35f), tint(MAIN, 0f), 0f));
+    }
 
     /**
      * 造一圈多边形描边环。
@@ -142,18 +195,18 @@ public class WarpShapes{
      * <p>{@code RadialEffect} 只负责把同一份效果按角度复制 N 份，
      * 自身不渲染，所以 clip 无所谓。
      */
-    private static RadialEffect blades(){
+    private static RadialEffect blades(float scale){
         TriangleEffect blade = new TriangleEffect();
         blade.useRotation = true;
         blade.interp = Interp.pow2Out;
-        blade.startX = 4f;
+        blade.startX = 4f * scale;
         blade.startY = 0f;
-        blade.endX = 52f;
+        blade.endX = 52f * scale;
         blade.endY = 0f;
-        blade.widthFrom = 2.5f;
-        blade.widthTo = 11f;
-        blade.heightFrom = 38f;
-        blade.heightTo = 8f;
+        blade.widthFrom = 2.5f * scale;
+        blade.widthTo = 11f * scale;
+        blade.heightFrom = 38f * scale;
+        blade.heightTo = 8f * scale;
         blade.colorFrom = tint(CORE, 0.85f);
         blade.colorTo = tint(MAIN, 0f);
         // 关掉自带光照：六片刀光各打一个光斑比环还贵，观感上又看不出
@@ -161,7 +214,7 @@ public class WarpShapes{
         blade.lightOpacityFrom = 0f;
         blade.lightOpacityTo = 0f;
         blade.lifetime = 18f;
-        blade.clip = 140f;
+        blade.clip = 140f * scale;
         blade.init();
 
         RadialEffect r = new RadialEffect();

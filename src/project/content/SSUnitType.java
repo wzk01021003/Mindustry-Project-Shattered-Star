@@ -93,6 +93,7 @@ import mindustry.world.meta.Env;
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
+import project.graphics.WarpShapes;
 import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
 import project.content.units.CarrierUnitType;
@@ -124,7 +125,7 @@ public class SSUnitType {
     public static UnitType eludeSerpulo;
     public static GlowErekirLegsUnitType meruiSerpulo;
     // 异构
-    public static UnitType daggerAT, novaAT, flareAT;
+    public static UnitType daggerAT, novaAT, flareAT, eclipseAT;
     // 测试
     public static MissileUnitType test1, test3;
     public static UnitType test2;
@@ -718,6 +719,187 @@ public class SSUnitType {
                 // 蓄力时间随距离增长、要求先转到目标方向、结束后进入冷却，
                 // 三点共同防止它变成无脑贴脸闪避。数值在 WarpAbility 里改。
                 abilities.add(new WarpAbility());
+            }
+        };
+
+        // ============================================================
+        //  空军重型：eclipseAT (异构 · 日蚀)
+        // ============================================================
+        /*
+         * 原版塞普罗 T5 轰炸机的异构版本。机体、三门武器、飞行手感全部照搬原版
+         * （22000 血 / 22 护甲 / 0.54 速度 / hitSize 58），只做两件事：
+         *  1. 加一层橙金辉光 RegionPart，让它的暖色线条跟其他异构单位一样自发光
+         *  2. 挂上主动跃迁，参数按「大型单位」单独调，不复用星辉那套小飞机的数值
+         *
+         * 跃迁手感为什么不照抄星辉：星辉是 9 号机体、5 的转速，0.5 秒就能把机头掰过来，
+         * 蓄力 15 帧起跳，本质是「战术闪避」。日蚀转 180° 要 3 秒、机身比星辉大六倍，
+         * 同样一套参数套上去，玩家按住 Alt 会先卡在转向里，一辈子跳不出去。
+         * 所以这里换一套思路：慢蓄力、不要求对准、落点带气浪，把它做成「重型单位的长途投送」。
+         */
+        eclipseAT = new UnitType("eclipse-at") {
+            {
+                speed = 0.54f;
+                accel = 0.04f;
+                drag = 0.04f;
+                rotateSpeed = 1f;
+                flying = true;
+                lowAltitude = true;
+                health = 22000f;
+                engineOffset = 38f;
+                engineSize = 7.3f;
+                hitSize = 58f;
+                armor = 22f;
+                targetFlags = new BlockFlag[]{BlockFlag.reactor, BlockFlag.battery, BlockFlag.core, null};
+
+                loopSound = Sounds.loopHover;
+                outlineColor = Color.valueOf("202026");
+
+                // 异构标志性的自发光层：贴图里所有暖色线条单独抽出来做 additive
+                parts.add(new RegionPart("-glow") {
+                        {
+                            x = 0f;
+                            y = 0f;
+                            color = Color.valueOf("FFA665AA");
+                            colorTo = Color.valueOf("FFA665AA");
+                            outline = false;
+                            blending = Blending.additive;
+                            layerOffset = 0.001f;
+                        }
+                    });
+
+                // 副炮炮弹：原版的破片弹，三门武器共用
+                BulletType fragBullet = new FlakBulletType(4f, 15) {
+                    {
+                        shootEffect = Fx.shootBig;
+                        ammoMultiplier = 4f;
+                        splashDamage = 65f;
+                        splashDamageRadius = 25f;
+                        collidesGround = true;
+                        lifetime = 47f;
+
+                        status = StatusEffects.blasted;
+                        statusDuration = 60f;
+                    }
+                };
+
+                weapons.add(
+                    // 主炮：加大版激光
+                    new Weapon(ShatteredStarMod.name("large-laser-mount")) {
+                        {
+                            shake = 4f;
+                            shootY = 9f;
+                            x = 18f;
+                            y = 5f;
+                            rotateSpeed = 2f;
+                            reload = 45f;
+                            recoil = 4f;
+                            shootSound = Sounds.shootEclipse;
+                            shadow = 20f;
+                            rotate = true;
+
+                            bullet = new LaserBulletType() {
+                                {
+                                    damage = 115f;
+                                    sideAngle = 20f;
+                                    sideWidth = 1.5f;
+                                    sideLength = 80f;
+                                    width = 25f;
+                                    length = 230f;
+                                    shootEffect = Fx.shockwave;
+                                    colors = new Color[]{Color.valueOf("ec7458aa"), Color.valueOf("ff9c5a"), Color.white};
+                                }
+                            };
+                        }
+                    },
+                    // 上副炮
+                    new Weapon(ShatteredStarMod.name("large-artillery")) {
+                        {
+                            x = 11f;
+                            y = 27f;
+                            rotateSpeed = 2f;
+                            reload = 9f;
+                            shootSound = Sounds.shootCyclone;
+                            shadow = 7f;
+                            rotate = true;
+                            recoil = 0.5f;
+                            shootY = 7.25f;
+                            bullet = fragBullet;
+                        }
+                    },
+                    // 下副炮
+                    new Weapon(ShatteredStarMod.name("large-artillery")) {
+                        {
+                            y = -13f;
+                            x = 20f;
+                            reload = 12f;
+                            ejectEffect = Fx.casing1;
+                            rotateSpeed = 7f;
+                            shake = 1f;
+                            shootSound = Sounds.shootCyclone;
+                            rotate = true;
+                            shadow = 12f;
+                            shootY = 7.25f;
+                            bullet = fragBullet;
+                        }
+                    });
+
+                abilities.add(new WarpAbility() {
+                    {
+                        // —— 特效尺寸 ——
+                        // 普通那套环是按 48px 的星辉调的，套到 320px 的日蚀上只有机身三分之一，
+                        // 所以整组换成 4 倍的大号版本（WarpShapes 里的 *_LARGE）
+                        warpBeginEffect = WarpShapes.BURST_LARGE;
+                        warpEndEffect = WarpShapes.ARRIVE_LARGE;
+                        warpPrepareEffect = WarpShapes.CHARGE_LARGE;
+                        // 机体大，蓄力粒子得铺开在机身上，不能只从中心冒
+                        warpPrepareEffectChance = 0.18f;
+                        warpPrepareEffectSpread = 62f;
+                        trailEffect = WarpAbility.warpTrailEffectLarge;
+                        trailParticleEffect = WarpAbility.warpParticleEffectLarge;
+
+                        // —— 节奏 ——
+                        // 数值参考 VE 的 lacuna/thunder（hitSize 68）：基础蓄力 2 秒、冷却 1.5 秒，
+                        // 距离项基本不生效（它的基准给到 102400），等于「巨型单位一律蓄力这么久」。
+                        // 日蚀取 110 帧（1.83 秒），保留一小段距离项（800px 加 60 帧），
+                        // 让超远距离稍微贵一点，但不至于要等三秒才跳得出去。
+                        warpBaseWarmup = 110f;
+                        warpMinWarmup = 60f;
+                        warpMinWarmupDistance = 6400f;
+                        // 手动 5 秒 / 自动 2 秒：T5 要是 2.5 秒就能再跳一次，
+                        // 它会变成一台会瞬移的轰炸机，正面战场没有解法
+                        warpCooldown = 300f;
+                        autoWarpCooldown = 120f;
+                        // 距离封顶 1100px（137 格）：够跨过一条战线，又不至于从地图这头跳到那头
+                        warpMaxDistance = 1100f;
+
+                        // —— 手感 ——
+                        // 不要求机头对准，理由见 WarpAbility.warpRequireFacing
+                        warpRequireFacing = false;
+                        // 三门炮塔全程自动索敌，要求「停火才能跃迁」等于永远按不出来；
+                        // 改成允许边打边跳，代价是落地后所有炮塔压 36 帧装填
+                        warpRequireIdleWeapons = false;
+                        // 蓄力时轻微刹车，像在定锚；不刹的话两秒蓄力期机体能飘出去半个屏
+                        warpChargeBrake = 0.985f;
+                        warpShake = 22f;
+
+                        // —— 落点气浪 ——
+                        // 只推不伤：日蚀本身火力已经够 T5，再送免费 AOE 会让它变成一次性炸弹
+                        warpImpactRadius = 130f;
+                        warpImpactForce = 6f;
+
+                        // —— 残影 ——
+                        // 影子本身是 320px 的机体贴图，散开半径必须大于贴图半径才分得开；
+                        // 45% 不透明度是因为四份叠加后会互相加亮，按小飞机那样给会白成一片
+                        ghostCount = 4;
+                        ghostRadius = 210f;
+                        ghostLife = 46f;
+                        ghostAlpha = 0.42f;
+                        ghostColor = Color.valueOf("ffe2bc");
+
+                        // 大机体落地压一层 stAstroWarp3，份量跟体型对上
+                        useHeavyLandingSound = true;
+                    }
+                });
             }
         };
     }
