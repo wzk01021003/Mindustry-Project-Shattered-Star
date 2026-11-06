@@ -86,15 +86,26 @@ public class WarpAbility extends Ability{
     /** 单次跃迁的最大距离（像素）。0 = 不限，VE 原版就是不限的 */
     public float warpMaxDistance = 0f;
     /**
+     * 蓄力时是否主动把机头转向跃迁方向。
+     *
+     * <p>这一项管「转不转」，{@link #warpRequireFacing} 管「转不到就不许起跳」，两件事。
+     * 开着它，玩家按住 Alt 之后机体会自己朝落点扭头，松手瞬移出去时是朝前飞的；
+     * 关掉就是保持原朝向平移，视觉上像被一只看不见的手拎走。
+     */
+    public boolean warpTurnToTarget = true;
+    /**
      * 是否要求机头先对准目标才允许跃迁。
      *
      * <p>小机体（星辉 rotateSpeed 5）转 180° 只要 0.6 秒，蓄力期顺手就转完了，
      * 要求对准能防止背对着瞬移造成的朝向突变。
      * 但日蚀这种 T5 轰炸机 rotateSpeed 只有 1，转 180° 要整整 3 秒 ——
      * 比蓄力还久，玩家按住 Alt 会先卡在转向里，跃迁等于不可用。
-     * 大型机体的跃迁是「整台机体被传送场包住搬走」，本来就不该受机头朝向约束，
-     * 所以日蚀这类单位把这一项关掉；它的武器是 rotate = true 的炮塔，
-     * 落地后照样能立刻开火，不会因为朝向不对而哑火。
+     *
+     * <p>所以日蚀把这一项关掉。关掉不等于不转：它会走
+     * {@link #rotateToWarp(Unit, WarpState, float)} 的自适应转速，
+     * 把剩余角度摊到剩余蓄力帧上，蓄力结束时刚好对正，起跳前再硬对齐一次兜底。
+     * 也就是说「不管现在朝哪，跳出去一定是朝落点的」。
+     * 它的武器是 rotate = true 的炮塔，落地后照样能立刻开火，不会因为朝向不对而哑火。
      */
     public boolean warpRequireFacing = true;
     /**
@@ -167,18 +178,33 @@ public class WarpAbility extends Ability{
     public boolean useAutoWarpEffect = true;
 
     /*
-     * 落地残影：四份机体剪影，从落点向外推开再收回来。
-     * 做法抄 VE 磁暴单位（lacuna/surge）warpEndParts 里的「sin 呼吸」——
-     * 那边用 progress = sin(life * 0.5) * mag + offset 让零件半径先涨后落，
-     * 这里把零件换成机体自己的贴图，看起来像「人还留在原地慢慢散掉」。
+     * 落地残影：同一张机体贴图分两批，一批向外推开，一批晚 20 帧从最远处收回。
+     *
+     * <p>结构照 VE 幻象（strengthened/meta-spawn.json）的入场：那边是 8 个 RadialEffect，
+     * 每个都拿整张机体贴图当 ParticleEffect —— 4 个 circleOut 向外走（21 帧），
+     * 4 个延迟 20 帧用 circleIn 反向走（20 帧）。两条曲线一放一收，
+     * 叠起来就是「散开 → 停一拍 → 收拢」。
+     * 我原来只写了一条 sin 曲线，四个影子同出同回，缺少中间那一拍。
+     *
+     * <p>尺寸按机体原贴图 1:1 画（{@code reg.width/height}），不再缩到 0.88：
+     * 影子比本体小一圈，看起来像远处的另一架飞机，而不是「我刚从这里离开」。
+     *
+     * <p>为什么不写成 Effect：Effect 是全局单例，既不能持有单位引用
+     * （单位会被对象池复用），也拿不到每帧的朝向和 region。
      */
-    /** 残影个数 */
+    /** 每一批的残影个数（外扩、内收各这么多份） */
     public int ghostCount = 4;
-    /** 残影向外扩散的最大半径（像素） */
+    /** 残影离机体的最大距离（像素） */
     public float ghostRadius = 58f;
-    /** 残影存活帧数，从落点开始算 */
-    public float ghostLife = 34f;
-    /** 残影最亮时的不透明度 */
+    /** 外扩批次的扩散时长（帧） */
+    public float ghostExpandTime = 21f;
+    /** 内收批次晚多少帧开始 */
+    public float ghostContractDelay = 20f;
+    /** 内收批次收回中心的时长（帧） */
+    public float ghostContractTime = 20f;
+    /** 残影存活帧数；比「延迟 + 内收时长」短时会被顶到那个值 */
+    public float ghostLife = 41f;
+    /** 残影最亮时的不透明度（外扩批次起点） */
     public float ghostAlpha = 0.75f;
     public Color ghostColor = Color.valueOf("ffe2bc");
 
@@ -410,11 +436,16 @@ public class WarpAbility extends Ability{
                 warpPrepareEffect.at(unit.x + Mathf.range(warpPrepareEffectSpread), unit.y + Mathf.range(warpPrepareEffectSpread),
                     unit.rotation, warpEffectColor);
             }
-            if(warpRequireFacing){
-                rotateToWarp(unit, s);
+
+            float d = Mathf.dst(unit.x, unit.y, s.wx, s.wy);
+            float need = warmupNeeded(d);
+
+            if(warpTurnToTarget){
+                // 把「还要多少帧才起跳」交给转向，让它自己决定要不要提速。
+                // 以前这里只在 warpRequireFacing 时转，不要求对准的单位全程保持原朝向，
+                // 瞬移出去就是倒着飞 / 侧着飞，落点一转身三门炮还要再找一次目标
+                rotateToWarp(unit, s, need - s.warmup);
             }else{
-                // 不要求对准时也允许跃迁，但绝不主动扭机头 ——
-                // 大机体转向慢，硬扭会让它看起来像被鼠标拽着转的陀螺
                 s.rotAllow = true;
             }
 
@@ -427,8 +458,7 @@ public class WarpAbility extends Ability{
                 unit.vel.scl(Mathf.pow(warpChargeBrake, Time.delta));
             }
 
-            float d = Mathf.dst(unit.x, unit.y, s.wx, s.wy);
-            if(s.rotAllow && s.warmup >= warpMinWarmup * (d / warpMinWarmupDistance) + (warpBaseWarmup > 0 ? warpBaseWarmup : 0f)){
+            if(s.rotAllow && s.warmup >= need){
                 warp(unit, s);
             }
         }else{
@@ -442,6 +472,17 @@ public class WarpAbility extends Ability{
         }
     }
 
+    /**
+     * 按距离算出这次跃迁需要蓄多少帧。
+     *
+     * <p>原来这串表达式直接写在 if 里，转向也要用它（要算出「还剩多少帧」），
+     * 提出来避免两处各写一遍、以后改参数只改一处漏一处。
+     */
+    private float warmupNeeded(float dist){
+        return warpMinWarmup * (dist / Math.max(warpMinWarmupDistance, 1f))
+            + (warpBaseWarmup > 0f ? warpBaseWarmup : 0f);
+    }
+
     public void warp(Unit unit, WarpState s){
         s.cooldown = s.auto ? autoWarpCooldown : warpCooldown;
         float x1 = unit.x, y1 = unit.y;
@@ -449,11 +490,16 @@ public class WarpAbility extends Ability{
         float r = s.wRot;
         float d = Mathf.dst(x1, y1, x2, y2);
 
+        // 起跳前硬对齐：自适应转速理论上已经转到位，但玩家最后几帧还在甩鼠标的话，
+        // 目标方向本身就在变。这里兜一次底，保证瞬移出去一定朝着落点，
+        // 而不是带着一个正在追的偏角飞出去
+        if(warpTurnToTarget) unit.rotation(r);
+
         unit.x(x2);
         unit.y(y2);
 
         // 四份剪影从落点散开再收回，和下面的落点特效同时起步
-        s.ghostTimer = ghostLife;
+        s.ghostTimer = ghostTotalLife();
         s.ghostRot = r;
 
         // 允许边打边跳的单位：落地立刻把炮塔压进空窗，位移的代价从「不能开火」换成「跳完要重新装」
@@ -509,19 +555,39 @@ public class WarpAbility extends Ability{
         }
     }
 
-    /** 转向目标，转到足够接近才放开跃迁许可 */
-    public void rotateToWarp(Unit unit, WarpState s){
+    /**
+     * 转向目标。
+     *
+     * <p>基础转速是单位自己的 {@code rotateSpeed}，但只有「转得到就转、转不到就算了」时够用。
+     * 日蚀 rotateSpeed = 1，蓄力 120 帧最多转 120°，背对目标时根本对不正，
+     * 起跳瞬间硬掰就会看到机头「啪」地跳 60°。
+     *
+     * <p>所以加一道自适应：把当前剩余角度摊到剩余蓄力帧上，得到「刚好能转完」的转速，
+     * 取它和原转速的较大值。角度越接近目标，这个值越小，最后自然会回落到原转速附近，
+     * 曲线是收敛的，不会来回摆。
+     *
+     * @param remain 蓄力还剩多少帧（&lt;= 0 表示已经到点，交给调用方处理）
+     */
+    public void rotateToWarp(Unit unit, WarpState s, float remain){
         s.rotAllow = false;
-        if(Angles.angleDist(s.wRot, unit.rotation()) < unit.type.rotateSpeed * unit.speedMultiplier() * Time.delta){
+        float spd = unit.type.rotateSpeed * unit.speedMultiplier() * Time.delta;
+        float dist = Angles.angleDist(s.wRot, unit.rotation());
+
+        // 不强制对准的单位不会等，必须在这点时间里把角度吃完；
+        // 强制对准的单位保持原转速，让「转够了才亮白圈」这个节奏不变
+        if(!warpRequireFacing && remain > 0f){
+            spd = Math.max(spd, dist / remain);
+        }
+
+        if(dist <= spd){
             unit.rotation(s.wRot);
             s.rotAllow = true;
             return;
         }
-        if(Mathf.sinDeg(s.wRot - unit.rotation()) > 0){
-            unit.rotation(unit.rotation() + unit.type.rotateSpeed * unit.speedMultiplier() * Time.delta);
-        }else{
-            unit.rotation(unit.rotation() - unit.type.rotateSpeed * unit.speedMultiplier() * Time.delta);
-        }
+        // sinDeg 取方向：正数说明目标在顺时针一侧。
+        // spd 已经是「本帧应转的角度」（rotateSpeed 以 60fps 为基准，乘过 Time.delta），
+        // 自适应那一项是角度除以帧数，单位同样是「度/帧」，两者可以直接比
+        unit.rotation(unit.rotation() + (Mathf.sinDeg(s.wRot - unit.rotation()) > 0 ? spd : -spd));
     }
 
     @Override
@@ -604,32 +670,42 @@ public class WarpAbility extends Ability{
     }
 
     /**
-     * 落地残影：{@link #ghostCount} 份机体剪影，从落点向外推开再收回来。
+     * 落地残影：{@link #ghostCount} 份机体剪影向外推开，
+     * 延迟后再来一批从最远处收回中心（结构见字段上方的注释）。
      *
-     * <p>抄的是 VE 磁暴单位 lacuna/surge 的 warpEndParts：那边四个零件都用
-     * {@code progress = sin(life * 0.5) * mag + offset} 让半径先涨后落，
-     * 机体周围始终有东西在收放。这里把零件换成机体自己的贴图，
-     * 比纯几何线条更像「人还留在原地、慢慢散掉」。
+     * <p>两批共用同一条半径 R：外扩批在 {@code ghostExpandTime} 帧时正好停在 R，
+     * 内收批在 {@code ghostContractDelay} 帧时也正好从 R 起步，
+     * 位置和亮度都接得上，看上去是一批影子停了一拍之后被吸回去，而不是换了一批。
      *
-     * <p>为什么不写成 Effect：Effect 是全局单例，既不能持有单位引用
-     * （单位会被回收复用），也拿不到每帧的朝向和 region。
-     *
-     * <p>{@code sin(πt)} 是这里的关键：t 从 0 走到 1 时它先增后减，
-     * 一次函数就能把「散开—缩回」讲完，两端的值为 0，天然没有突兀的起止。
+     * <p>亮度：外扩段从 {@code ghostAlpha} 淡到它的一半，内收段接着从一半淡到 0。
+     * 首尾相接，中间没有跳变。
      */
     private void drawGhosts(Unit unit, WarpState s){
         if(s.ghostTimer <= 0f || !SSWarpSettings.effects || ghostCount <= 0) return;
         TextureRegion reg = unit.type.region;
         if(reg == null) return;
 
-        float t = Mathf.clamp(1f - s.ghostTimer / Math.max(ghostLife, 1f));
-        float wave = Mathf.sin(t * Mathf.pi);
-        // 位移开 0.6 次方：影子更快离身，否则大半段时间都挤在机体旁边，看着只是抖了一下
-        float r = ghostRadius * Mathf.pow(wave, 0.6f);
-        // 亮度单独再压一道曲线，两端收得比位移更快，起落不会突然冒出来
-        float alpha = ghostAlpha * Mathf.pow(wave, 1.15f);
-        // 越到后面越收缩一点，像影子被拉回机身
-        float scl = 1f - 0.12f * t;
+        float life = ghostTotalLife();
+        float elapsed = life - s.ghostTimer;
+        if(elapsed < 0f) return;
+
+        // 两批严格交接：外扩在 handoff 帧走到头，内收在 handoff 帧从最远处接手。
+        // 如果让两组各按各的时长跑，中段会有几帧同时出现 8 份 320px 贴图，
+        // 叠起来就是一团深色，既看不清轮廓也看不出「四份」
+        float handoff = Math.max(1f, Math.min(ghostExpandTime, ghostContractDelay));
+        float contractT = Math.max(ghostContractTime, 1f);
+
+        // 外扩：circleOut 起步快、收尾慢，影子「弹」出去之后稳稳停住
+        float ep = Interp.circleOut.apply(Mathf.clamp(elapsed / handoff, 0f, 1f));
+        // 内收：circleIn 起步慢、收尾快，像被机体吸回去
+        float cp = Mathf.clamp((elapsed - ghostContractDelay) / contractT, 0f, 1f);
+        float cpi = Interp.circleIn.apply(cp);
+
+        boolean expanding = elapsed < handoff;
+        boolean contracting = elapsed >= ghostContractDelay && cp < 1f;
+
+        float ea = ghostAlpha * (1f - 0.5f * ep);
+        float ca = ghostAlpha * 0.5f * (1f - cp);
 
         // Ability.draw 被调用时 Draw.z 就是本单位所在层，往下压一点让影子排在机体后面
         float oldZ = Draw.z();
@@ -638,20 +714,33 @@ public class WarpAbility extends Ability{
         Draw.color(ghostColor);
 
         for(int i = 0; i < ghostCount; i++){
-            // 从 45° 起均分，末尾那个 t * 26f 让四个影子整体缓慢转一点，不然像静态图标
-            float ang = 45f + 360f / ghostCount * i + t * 26f;
-            Draw.alpha(alpha);
-            Draw.rect(reg,
-                unit.x + Mathf.cosDeg(ang) * r,
-                unit.y + Mathf.sinDeg(ang) * r,
-                reg.width * scl, reg.height * scl,
-                s.ghostRot - 90f);
+            // 从 45° 起，四个影子落在斜向，不会正压住机头和机尾
+            float ang = 45f + 360f / ghostCount * i;
+            float cx = Mathf.cosDeg(ang), cy = Mathf.sinDeg(ang);
+
+            // 两批会有一两帧重叠：外扩还没完全停住、内收已经开始，
+            // 交接处不是硬切，看起来是「散到位的同时就被往回吸」
+            if(expanding && ea > 0.01f){
+                float r = ghostRadius * ep;
+                Draw.alpha(ea);
+                Draw.rect(reg, unit.x + cx * r, unit.y + cy * r, reg.width, reg.height, s.ghostRot - 90f);
+            }
+            if(contracting && ca > 0.01f){
+                float r = ghostRadius * (1f - cpi);
+                Draw.alpha(ca);
+                Draw.rect(reg, unit.x + cx * r, unit.y + cy * r, reg.width, reg.height, s.ghostRot - 90f);
+            }
         }
 
         Draw.blend();
         Draw.color();
         Draw.alpha(1f);
         Draw.z(oldZ);
+    }
+
+    /** 两批加起来的总帧数；配置写小了就以总时长为准，避免内收批画到一半被切断 */
+    public float ghostTotalLife(){
+        return Math.max(ghostLife, ghostContractDelay + ghostContractTime + 1f);
     }
 
     /**
