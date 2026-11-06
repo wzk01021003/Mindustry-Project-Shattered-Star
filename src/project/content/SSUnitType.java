@@ -755,6 +755,9 @@ public class SSUnitType {
                                     // 原版这里两个特效都是空的（只剩一个弹壳），打击感全靠伤害数字。
                                     // 换成带方向的枪口锥焰和命中火花，见 FireFx 的类注释
                                     shootEffect = FireFx.MUZZLE;
+                                    // 每发跟在焰后面留一缕余烟。Weapon.shoot 里会在同一枪口坐标、
+                                    // 同一角度触发 bullet.smokeEffect，不用自己算位置
+                                    smokeEffect = FireFx.MUZZLE_SMOKE;
                                     hitEffect = FireFx.HIT;
                                     // 弹道跟着机体走橙金，不再用原版那套冷黄
                                     frontColor = FireFx.CORE;

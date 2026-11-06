@@ -44,6 +44,8 @@ public class FireFx{
     public static final Color MAIN = Color.valueOf("ffa665");
     /** 暗红余烬 */
     public static final Color DEEP = Color.valueOf("d9542a");
+    /** 烟色。暖灰而不是中性灰：纯灰放在橙金机体旁边会显脏，暖灰是同一色温 */
+    public static final Color SMOKE = Color.valueOf("8a8078");
 
     private static final Rand rand = new Rand();
 
@@ -102,8 +104,10 @@ public class FireFx{
             Draw.blend(Blending.additive);
 
             // 外层：橙→暗红，长度随 out 拉满，根部随时间收窄
-            float w = halfWidth * fade;
-            float tip = len * (0.35f + 0.65f * out);
+            // 宽度收到 45% 就打住、长度也回收 45%：只靠 fade 乘的话，最后两帧会缩成一根
+            // 一像素宽的针，看起来像炮口还挂着一根线，而不是「焰要散了」
+            float w = halfWidth * (0.45f + 0.55f * fade);
+            float tip = len * (0.35f + 0.65f * out) * (0.55f + 0.45f * fade);
             Draw.color(main(e), DEEP, p);
             Draw.alpha(fade * 0.9f);
             tri(e.x + cx * 2f, e.y + cy * 2f, nx, ny, w, cx, cy, tip);
@@ -136,6 +140,110 @@ public class FireFx{
         private void tri(float bx, float by, float nx, float ny, float hw, float cx, float cy, float len){
             Fill.tri(bx + nx * hw, by + ny * hw, bx - nx * hw, by - ny * hw,
                 bx + cx * len, by + cy * len);
+        }
+    }
+
+    // ============================================================
+    //  枪口小烟
+    // ============================================================
+    /**
+     * 炮口余烟。
+     *
+     * <p>枪口焰只有 6 帧，是「砰」的那一下；烟活 30 帧，是「砰」之后留在原地的痕迹。
+     * 两者寿命差五倍，正好把连发的节奏串起来：焰负责每一发的点，烟负责整串的线。
+     * 只有焰没有烟的话，速射武器看起来像在戳空气——每一下都干净利落地消失，
+     * 没有任何东西证明上一发刚刚发生过。
+     *
+     * <p>必须用 {@link Blending#normal}。additive 会把灰烟加成白雾，
+     * 在暗色地形上等于贴了一块发光板，比不加更糟；这也是原版 {@code Fx.smoke}
+     * 虽然丑但没改混合方式的原因。
+     *
+     * <p>烟团不做旋转贴图，而是三层同心圆叠出柔边：小尺寸（半径不到 10px）下
+     * 硬边圆的锯齿比贴图糊边更容易看出来，三层递减正好把边缘磨掉。
+     */
+    public static class MuzzleSmokeEffect extends Effect{
+        /** 单团终态半径 */
+        public float size = 7f;
+        /** 团数。再少就凑不出梯度，再多会糊成一片 */
+        public int puffs = 3;
+        /** 沿炮管方向漂出的距离 */
+        public float drift = 20f;
+        /** 垂直于炮管的散开量 */
+        public float spread = 6f;
+        /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
+        public float opacity = 0.42f;
+
+        public MuzzleSmokeEffect(){
+            this(1f);
+        }
+
+        public MuzzleSmokeEffect(float scale){
+            size *= scale;
+            drift *= scale;
+            spread *= scale;
+            lifetime = 30f;
+            clip = (drift + spread + size * 2f) * 2f + 40f;
+        }
+
+        @Override
+        public void render(EffectContainer e){
+            float p = e.fin();
+            float rot = e.rotation;
+            float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
+            float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
+
+            Draw.blend(Blending.normal);
+            Draw.color(SMOKE);
+
+            rand.setSeed(e.id);
+            for(int i = 0; i < puffs; i++){
+                // 第 0 团是主团：压在轴线上、最大最浓、立刻出现；
+                // 其余是碎絮：往两侧散、更小更淡、稍晚才冒出来。
+                // 早先让三团平等随机，结果它们各自都往轴线附近挤，读起来是一颗球——
+                // 枪口烟本来就是「一股主线 + 边缘碎絮」，不是三个并列的团
+                boolean core = i == 0;
+                float along = core ? 0.72f : rand.random(0.2f, 0.55f);
+                float side = core ? rand.random(-0.15f, 0.15f) : rand.random(-1f, 1f);
+                float delay = core ? 0f : rand.random(0.04f, 0.12f);
+                float sz = core ? 1f : rand.random(0.6f, 0.85f);
+                // 越外层越淡；主团不衰减，碎絮只有它的一半上下
+                float dim = core ? 1f : rand.random(0.7f, 0.9f);
+
+                float pp = Mathf.clamp((p - delay) / (1f - delay));
+                // 沿轴先快后慢（被膛压顶出去），侧向越飘越散（之后靠自身扩散）
+                float dist = drift * along * Interp.pow2Out.apply(pp);
+                float sideD = spread * side * Interp.pow2In.apply(pp) * 1.6f;
+                float x = e.x + cx * dist + nx * sideD;
+                float y = e.y + cy * dist + ny * sideD;
+                float r = size * sz * (0.34f + 0.66f * Interp.pow3Out.apply(pp));
+
+                // 起手两帧涨到满不透明度，之后缓慢消。这个 0.07 别调大：
+                // 烟比焰亮得还慢的话，第一帧炮口是空的，像没打出去
+                float a = Mathf.clamp(pp / 0.07f) * Mathf.pow(1f - pp, 1.3f) * opacity * dim;
+
+                // 四层递减：最外那层只有 0.1a，专门用来磨掉边缘。
+                // 之前三层时最外圈直接从 0 跳到 0.4a，小半径下能看出锯齿状的硬边
+                //
+                // 每层画两个沿轴错开 r*0.45 的圆，叠成一个长宽比约 1.5 的椭圆：
+                // 烟是被气流推着走的，形状本来就被拉长。单个正圆不管怎么调 alpha 都是一颗球，
+                // 这正是它上一版看起来像「贴上去的灰点」的原因
+                float er = r * 0.82f;
+                float eo = r * 0.45f;
+                float ax = x + cx * eo, ay = y + cy * eo;
+                float bx = x - cx * eo, by = y - cy * eo;
+
+                Draw.alpha(a * 0.1f);
+                Fill.circle(ax, ay, er * 1.35f);
+                Fill.circle(bx, by, er * 1.35f);
+                Draw.alpha(a * 0.3f);
+                Fill.circle(ax, ay, er);
+                Fill.circle(bx, by, er);
+                Draw.alpha(a * 0.22f);
+                Fill.circle(ax, ay, er * 0.6f);
+                Fill.circle(bx, by, er * 0.6f);
+            }
+
+            Draw.blend();
         }
     }
 
@@ -213,12 +321,19 @@ public class FireFx{
     // ============================================================
     /** 小口径（hitSize ≈ 8）的枪口焰，机甲 / T1 单位直接用 */
     public static final Effect MUZZLE = new MuzzleEffect(1f);
+    /** 小口径枪口余烟，配合 {@link #MUZZLE} 一起用 */
+    public static final Effect MUZZLE_SMOKE = new MuzzleSmokeEffect(1f);
     /** 小口径命中火花 */
     public static final Effect HIT = new HitSparkEffect(1f);
 
     /** 按尺寸取枪口焰。同一 scale 每次调用都会新建，别在 update 里反复调 */
     public static Effect muzzle(float scale){
         return new MuzzleEffect(scale);
+    }
+
+    /** 按尺寸取枪口余烟 */
+    public static Effect muzzleSmoke(float scale){
+        return new MuzzleSmokeEffect(scale);
     }
 
     /** 按尺寸取命中火花 */
