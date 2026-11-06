@@ -99,6 +99,16 @@ public class WarpShapes{
     public static final Effect BURST_LARGE = burst(LARGE_SCALE);
     public static final Effect ARRIVE_LARGE = arrive(LARGE_SCALE);
 
+    /**
+     * 蓄力时在机体周围飘的棱形碎片（单片，由 WarpAbility 按概率反复生成）。
+     *
+     * <p>VE 幻象的入场演出里，机体周围几乎每一帧都在冒这种菱形光片，
+     * 蓄力阶段铺一点，玩家能看出「这台机器正在把空间撕开」，而不只是机身里冒粒子。
+     * 只给日蚀配：星辉机身才 48px，飘这么大的棱形会盖住整个机体。
+     */
+    public static final Effect SPLINTER_CHARGE_LARGE =
+        splinter(1, 8f * LARGE_SCALE, 26f * LARGE_SCALE, 10f * LARGE_SCALE, 26f);
+
     private static Effect charge(float scale){
         return new MultiEffect(
             new WarpEffects.WarpChargeEffect(scale),
@@ -133,10 +143,35 @@ public class WarpShapes{
         );
         if(scale <= 1.01f) return base;
 
-        // 落点的第二层：晚 10 帧才起、扩到 230px 的薄环，落地后还有余波在走
+        // 落点的第二层：晚 10 帧才起、扩到 230px 的薄环，落地后还有余波在走；
+        // 再叠一圈从落点飞散的棱形碎片（VE 幻象同款，见 splinter 的注释）。
+        // 棱形起点给到半径一半以外、长度控制在机体半径以内，机体只被围住不被盖住
         return new MultiEffect(base,
             wave(0, 30f * scale, 230f * scale, 5f * scale, 0f, 40f, 10f, Interp.pow2Out,
-                tint(CORE, 0.35f), tint(MAIN, 0f), 0f));
+                tint(CORE, 0.35f), tint(MAIN, 0f), 0f),
+            splinter(10, 78f * scale, 30f * scale, 9f * scale, 32f));
+    }
+
+    /**
+     * 造一组棱形碎片。
+     *
+     * @param count  片数
+     * @param radius 每片从中心飞出的距离；0 = 原地旋转缩小
+     * @param from   起始长度（长轴）
+     * @param to     结束长度
+     * @param life   生命周期（帧）
+     */
+    private static Effect splinter(int count, float radius, float from, float to, float life){
+        WarpEffects.WarpSplinterEffect s = new WarpEffects.WarpSplinterEffect();
+        s.count = count;
+        s.radius = radius;
+        s.lenFrom = from;
+        s.lenTo = to;
+        s.lifetime = life;
+        // clip 必须盖住「飞散半径 + 单片长度」，否则边缘的棱形会被视锥裁掉
+        s.clip = radius + from + 80f;
+        s.init();
+        return s;
     }
 
     /**

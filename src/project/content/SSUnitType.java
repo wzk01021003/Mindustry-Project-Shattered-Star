@@ -634,6 +634,9 @@ public class SSUnitType {
                         // 机体大，蓄力粒子得铺开在机身上，不能只从中心冒
                         warpPrepareEffectChance = 0.18f;
                         warpPrepareEffectSpread = 62f;
+                        // 蓄力时周围持续飘棱形碎片（VE 幻象同款），落点那圈由 WARRIVE_LARGE 自己带
+                        warpPrepareSplinter = WarpShapes.SPLINTER_CHARGE_LARGE;
+                        warpPrepareSplinterChance = 0.2f;
                         trailEffect = WarpAbility.warpTrailEffectLarge;
                         trailParticleEffect = WarpAbility.warpParticleEffectLarge;
 

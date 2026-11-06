@@ -143,6 +143,15 @@ public class WarpAbility extends Ability{
     /** 蓄力特效每帧生成概率。0.12 在 60fps 下约每 8 帧一发，同屏叠 2~3 个，不会糊成一团 */
     public float warpPrepareEffectChance = 0.12f;
     public float warpPrepareEffectSpread = 4f;
+    /**
+     * 蓄力期间在机体周围额外刷的棱形碎片（VE 幻象同款）。
+     *
+     * <p>VE 幻象入场时，机体周围每一帧都在冒小菱形光片，那是它「空间在碎」的主要观感来源。
+     * 星辉机身只有 48px，飘这么大的棱形会盖住整个机体，所以默认 null；
+     * 日蚀（320px）配 {@code WarpShapes.SPLINTER_CHARGE_LARGE}。
+     */
+    public Effect warpPrepareSplinter;
+    public float warpPrepareSplinterChance = 0.18f;
     public Sound warpSound = Sounds.massdriver;
     /** 起跳 / 落地音效：mod 自带的 stAstroWarp1、stAstroWarp2，加载失败时退回 massdriver */
     public static Sound warpStartSound, warpEndSound;
@@ -435,6 +444,12 @@ public class WarpAbility extends Ability{
             if(SSWarpSettings.effects && Mathf.chanceDelta(warpPrepareEffectChance)){
                 warpPrepareEffect.at(unit.x + Mathf.range(warpPrepareEffectSpread), unit.y + Mathf.range(warpPrepareEffectSpread),
                     unit.rotation, warpEffectColor);
+            }
+            // 棱形碎片铺得比粒子更开：粒子是机身内部在震，棱形是机体周围的空间在裂，
+            // 两者贴在一起反而分不出谁是谁
+            if(SSWarpSettings.effects && warpPrepareSplinter != null && Mathf.chanceDelta(warpPrepareSplinterChance)){
+                warpPrepareSplinter.at(unit.x + Mathf.range(warpPrepareEffectSpread * 2f),
+                    unit.y + Mathf.range(warpPrepareEffectSpread * 2f), unit.rotation, warpEffectColor);
             }
 
             float d = Mathf.dst(unit.x, unit.y, s.wx, s.wy);

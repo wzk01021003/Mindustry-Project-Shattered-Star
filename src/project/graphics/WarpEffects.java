@@ -1,9 +1,12 @@
 package project.graphics;
 
+import arc.Core;
+import arc.graphics.Blending;
 import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
+import arc.graphics.g2d.TextureRegion;
 import arc.math.Interp;
 import arc.math.Mathf;
 import arc.math.Rand;
@@ -279,5 +282,112 @@ public class WarpEffects{
 
             Drawf.light(e.x, e.y, R * 2.2f * (1f - p) + 10f, c, 0.85f * (1f - p));
         }
+    }
+
+    // ============================================================
+    //  棱形碎片：VE 幻象跃迁时在机体周围飘的那一层
+    // ============================================================
+    /**
+     * 会转、会缩、会淡的棱形光片。
+     *
+     * <p>照 VE 幻象（strengthened/meta-spawn.json）的 parts 抄的：那边在整个入场过程中
+     * 按 0.5 / 0.8 的帧概率往外刷 ve-warp1 / ve-warp2 两张菱形贴图 ——
+     * 随机朝向（effectRandRot 360）、尺寸 64→48、16 帧、slope 曲线、lightScl 8。
+     * 单看一片就是块很暗的菱形，靠「同时飘着七八片」才堆出空间正在碎裂的观感，
+     * 所以 {@link #count} 默认就给 8，少于此数看起来只是往屏幕上贴了块玻璃。
+     *
+     * <p>两种用法共用同一个类：
+     * <ul>
+     *   <li>{@code radius > 0}：从中心向外飞散，落点用（日蚀跃迁的那一圈）</li>
+     *   <li>{@code radius = 0}：原地旋转缩小，蓄力用（贴在机体周围持续冒）</li>
+     * </ul>
+     *
+     * <p>贴图是自己画的 {@code assets/sprites/effects/warp-shard.png}：
+     * 128×64 的硬边菱形，中心亮、边缘略淡。没有直接用 VE 的 ve-warp1/2，
+     * 那两张是对方的美术资源。
+     *
+     * <p>关于混合模式：棱形必须走 additive。普通混合下它是一块实心色块，
+     * 压在任何背景上都像贴纸；additive 才会跟机身辉光、能量环融成一体。
+     */
+    public static class WarpSplinterEffect extends Effect{
+        /** 一次生成多少片 */
+        public int count = 8;
+        /** 每片从中心飞出的距离；0 = 原地旋转缩小 */
+        public float radius = 0f;
+        /**
+         * 起始位置占 {@link #radius} 的比例。
+         *
+         * <p>不能从 0 起步：十几片棱形同时出现在机体中心，additive 叠起来就是一团白，
+         * 看起来像爆炸而不是碎片。让它们一出生就落在机体轮廓之外，
+         * 机体只被棱形围住、不被盖住，才看得出是「空间碎片被推开」。
+         */
+        public float innerRatio = 0.7f;
+        /** 起始 / 结束长度（像素，长轴） */
+        public float lenFrom = 52f, lenTo = 14f;
+        /** 短轴 / 长轴。贴图本身是 128×64，所以默认 0.5 */
+        public float widthRatio = 0.5f;
+        /** 每片在生命周期内额外自转的角度 */
+        public float spin = 55f;
+        /** 每片延后启动的上限（占生命周期比例），让爆发不是一次齐射 */
+        public float maxDelay = 0.28f;
+        /** 整体不透明度。additive 下 0.6 左右已经开始发白，再高就化成一块光斑 */
+        public float alpha = 0.6f;
+
+        public WarpSplinterEffect(){
+            lifetime = 30f;
+            // clip 决定这发特效在创建时会不会被视锥剔除（Effect.create 里用它做矩形裁剪），
+            // 基类默认 0，不改的话整发都不渲染
+            clip = 320f;
+        }
+
+        @Override
+        public void render(EffectContainer e){
+            TextureRegion reg = shard();
+            if(reg == null) return;
+
+            float p = e.fin();
+            Color c = main(e);
+            rand.setSeed(e.id);
+
+            Draw.blend(Blending.additive);
+            for(int i = 0; i < count; i++){
+                // 方向和大小都用 id 做种子，同一发每次重绘位置一致，不会抖
+                float ang = rand.random(360f);
+                float spread = rand.random(0.78f, 1.18f);
+                float delay = rand.random(maxDelay);
+                float q = Mathf.clamp((p - delay) / Math.max(1f - delay, 0.01f));
+
+                float out = Interp.pow2Out.apply(q);
+                float len = (lenFrom + (lenTo - lenFrom) * Interp.pow2In.apply(q)) * spread;
+                float wid = len * widthRatio;
+                float rot = ang + rand.random(-28f, 28f) + spin * q;
+                float dist = radius * spread * (innerRatio + (1f - innerRatio) * out);
+
+                // 恒用主色，不再从白色插值：白棱形叠在机身上跟爆炸的闪光分不开，
+                // 橙金色才能读成「同一台机器身上的能量」
+                Draw.color(c);
+                Draw.alpha(alpha * (1f - q * q));
+                Draw.rect(reg, e.x + Mathf.cosDeg(ang) * dist,
+                    e.y + Mathf.sinDeg(ang) * dist, len, wid, rot);
+            }
+            Draw.blend();
+
+            // 整发只打一次光：每片都打的话，同屏十几片的时候光斑比环还贵
+            Drawf.light(e.x, e.y, (radius + lenFrom) * 1.3f * (1f - p) + 30f, c, 0.45f * (1f - p));
+        }
+    }
+
+    /** 棱形贴图缓存：preload 之后 atlas 才有内容，所以不能在静态初始化里取 */
+    private static TextureRegion shardRegion;
+
+    /** 棱形贴图。mod 的 sprite 在 atlas 里带 ss- 前缀，取不到再用原名兜底 */
+    public static TextureRegion shard(){
+        if(shardRegion == null){
+            TextureRegion r = Core.atlas.find("ss-warp-shard");
+            if(!r.found()) r = Core.atlas.find("warp-shard");
+            shardRegion = r.found() ? r : Core.atlas.find("error");
+        }
+        // 缺图时返回 null，让调用方整发跳过：画一堆 error 白方块比不画更糟
+        return shardRegion.found() ? shardRegion : null;
     }
 }
