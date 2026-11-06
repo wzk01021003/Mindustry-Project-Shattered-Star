@@ -100,12 +100,24 @@ public class WarpShapes{
     public static final Effect ARRIVE_LARGE = arrive(LARGE_SCALE);
 
     /**
-     * 落点棱形符印：4 份从落点向外撑开，停一拍再收拢（VE 幻象 meta-spawn 的形式）。
+     * 落地合拢：4 份符印从外圈收回落点中心，20 帧（VE 幻象 meta-spawn 的后半段）。
+     *
+     * <p>撑开那半不在这里 —— 它在蓄力期由 {@code WarpAbility} 直接画，
+     * 因为落点必须在跃迁之前就被标出来。这里只负责「机体落地、空间合上」。
      *
      * <p>不乘 {@link #LARGE_SCALE}：符印是「坐标标记」不是机体贴图，
      * 150px 铺在 320px 的日蚀外围刚好，乘 4 会变成满屏的菱形。
      */
-    public static final Effect MARK_BURST = new WarpEffects.WarpMarkBurstEffect();
+    public static final Effect MARK_COLLAPSE = new WarpEffects.WarpMarkCollapseEffect();
+
+    /**
+     * 蓄力期在落点外圈反复生成的小棱形碎片（单片）。
+     *
+     * <p>对应 VE 幻象载体上那两个 {@code EffectSpawnerPart}（{@code ve-warp1} / {@code ve-warp2}）：
+     * 载体本身隐形，玩家看到的就是落点上凭空有一圈菱形碎片在翻。
+     * 靠 {@code WarpAbility} 按帧概率生成，不是一次性铺满。
+     */
+    public static final Effect MARK_MOTE = new WarpEffects.WarpMoteEffect();
 
     private static Effect charge(float scale){
         return new MultiEffect(

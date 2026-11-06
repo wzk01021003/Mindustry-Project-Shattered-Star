@@ -635,11 +635,14 @@ public class SSUnitType {
                         warpPrepareEffectChance = 0.18f;
                         warpPrepareEffectSpread = 62f;
                         // —— 落点预示 ——
-                        // 蓄力时目标坐标上铺一张棱形符印（210px）并持续冒内向扭曲，
-                        // 落地瞬间符印四散再收拢；形式照 VE 幻象的 meta-spawn
-                        warpMarkSize = 210f;
+                        // 蓄力一开始就在目标坐标把 4 份棱形符印撑开（21 帧），外圈持续翻小碎片、
+                        // 每 12 帧补一发内向扭曲；落地瞬间符印往回合拢。
+                        // 形式照 VE 幻象 meta-spawn：撑开在跃迁前，机体出现的那一下只负责合拢
+                        warpMarkSize = 180f;
+                        warpMarkRadius = 220f;
+                        warpTargetMote = WarpShapes.MARK_MOTE;
                         warpTargetDistortion = true;
-                        warpMarkBurst = WarpShapes.MARK_BURST;
+                        warpMarkCollapse = WarpShapes.MARK_COLLAPSE;
                         trailEffect = WarpAbility.warpTrailEffectLarge;
                         trailParticleEffect = WarpAbility.warpParticleEffectLarge;
 

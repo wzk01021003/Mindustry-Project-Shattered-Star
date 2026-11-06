@@ -153,10 +153,31 @@ public class WarpAbility extends Ability{
      * 只给日蚀这种一次跃迁要蓄两秒的大机体配。
      */
     public float warpMarkSize = 0f;
+    /**
+     * 蓄力期间 4 份符印撑开到多大半径。
+     *
+     * <p>撑开这一半放在蓄力期，是刻意的：VE 幻象那 8 份棱形是挂在隐形载体上的，
+     * 载体存在 3 秒、棱形一直在它周围撑开翻涌，等载体死了机体才被 {@code despawnUnit} 放出来。
+     * 也就是说玩家先看到「落点被撑开」，再看到机体 —— 不是机体先到、棱形后炸。
+     * 所以这里的展开必须发生在 {@code warmup} 期间，落地只负责合拢（见 {@link #warpMarkCollapse}）。
+     */
+    public float warpMarkRadius = 220f;
+    /** 蓄力期撑开用多少帧。VE 的 circleOut 是 21 */
+    public float warpMarkExpandTime = 21f;
     /** 蓄力期间是否在落点持续冒内向扭曲，作为「这里要被撕开」的定位预示 */
     public boolean warpTargetDistortion = false;
-    /** 落点符印的扩散 / 收拢特效（VE 幻象 meta-spawn 的形式），null = 不播放 */
-    public Effect warpMarkBurst;
+    /** 落地瞬间 4 份符印收回中心的合拢特效，null = 不播放 */
+    public Effect warpMarkCollapse;
+    /**
+     * 蓄力期间在落点外圈反复生成的小棱形碎片（单片，靠 {@link #warpTargetMoteChance} 控密度）。
+     *
+     * <p>这是 VE 幻象「进场前那圈翻涌的菱形」的直接对应物：那台载体本身隐形，
+     * 玩家看到的全是它身上 {@code EffectSpawnerPart} 甩出来的 {@code ve-warp1/2}。
+     * null = 不冒。
+     */
+    public Effect warpTargetMote;
+    /** 碎片每帧生成概率。VE 是 0.5 + 0.8 两路，这里只有一张贴图，0.55 差不多 */
+    public float warpTargetMoteChance = 0.55f;
     /** 落点扭曲每多少帧补一发 */
     public float warpMarkDistortionInterval = 12f;
     public Sound warpSound = Sounds.massdriver;
@@ -458,19 +479,28 @@ public class WarpAbility extends Ability{
             float d = Mathf.dst(unit.x, unit.y, s.wx, s.wy);
             float need = warmupNeeded(d);
 
-            // 落点定位预示：每 12 帧在目标坐标补一发内向扭曲，强度随蓄力上涨。
-            // 不走 Effect 而是直接调 DistortionRenderer：Effect 每发都要进全局容器池，
-            // 蓄力两秒要生成十几发，纯属浪费；没开「实验性渲染」时 addDistortion 自己空转
-            if(warpTargetDistortion && SSWarpSettings.effects){
-                s.markTimer += Time.delta;
-                if(s.markTimer >= warpMarkDistortionInterval){
-                    s.markTimer -= warpMarkDistortionInterval;
-                    float mp = Mathf.clamp(s.warmup / Math.max(need, 1f));
-                    DistortionRenderer.addDistortion(s.wx, s.wy, 92f, 0.35f + 0.5f * mp, 26f,
-                        DistortionFx.TYPE_INWARD, 1.2f, 0f, 0.22f, Interp.pow2In, 1.1f);
+            // 落点预示：外圈小棱形碎片 + 内向扭曲，两样都只在蓄力期生成，落地后不再补。
+            // 碎片密度随蓄力上涨：刚开始只是零星几片，快起跳时整圈都在翻
+            if(SSWarpSettings.effects){
+                if(warpTargetMote != null){
+                    float mp0 = Mathf.clamp(s.warmup / Math.max(need, 1f));
+                    if(Mathf.chanceDelta(warpTargetMoteChance * (0.35f + 0.65f * mp0))){
+                        warpTargetMote.at(s.wx, s.wy, warpEffectColor);
+                    }
                 }
-            }else{
-                s.markTimer = 0f;
+                if(warpTargetDistortion){
+                    // 不走 Effect 而是直接调 DistortionRenderer：Effect 每发都要进全局容器池，
+                    // 蓄力两秒要生成十几发，纯属浪费；没开「实验性渲染」时 addDistortion 自己空转
+                    s.markTimer += Time.delta;
+                    if(s.markTimer >= warpMarkDistortionInterval){
+                        s.markTimer -= warpMarkDistortionInterval;
+                        float mp = Mathf.clamp(s.warmup / Math.max(need, 1f));
+                        DistortionRenderer.addDistortion(s.wx, s.wy, 92f, 0.35f + 0.5f * mp, 26f,
+                            DistortionFx.TYPE_INWARD, 1.2f, 0f, 0.22f, Interp.pow2In, 1.1f);
+                    }
+                }else{
+                    s.markTimer = 0f;
+                }
             }
 
             if(warpTurnToTarget){
@@ -563,8 +593,9 @@ public class WarpAbility extends Ability{
         if(SSWarpSettings.effects){
             warpBeginEffect.at(x1, y1, r, warpEffectColor);
             warpEndEffect.at(x2, y2, r, warpEffectColor);
-            // 符印四散再收拢，和残影、能量环同时起步（形式见 WarpMarkBurstEffect）
-            if(warpMarkBurst != null) warpMarkBurst.at(x2, y2, r, warpEffectColor);
+            // 符印合拢：4 份从外圈收回落点中心，和能量环、残影同帧起步。
+            // 这是「机体挤进缝里、空间合上」，不是落地后的装饰（形式见 WarpMarkCollapseEffect）
+            if(warpMarkCollapse != null) warpMarkCollapse.at(x2, y2, r, warpEffectColor);
             // 屏幕扭曲叠在粒子下面：起跳是空间被撕开，落地是空间合拢
             warpOutDistortion.at(x1, y1);
             warpInDistortion.at(x2, y2);
@@ -663,17 +694,31 @@ public class WarpAbility extends Ability{
         float oldZ = Draw.z();
         Draw.z(Layer.effect);
 
-        // 落点棱形符印：VE 幻象是「先把落点撑开、机体再从里面出来」，
-        // 这里把「撑开」提前到蓄力阶段，玩家一眼能看到坐标被锁定在哪
+        // 落点棱形：4 份符印从中心撑开，撑满就停在 warpMarkRadius 上缓慢自转。
+        // 这一段必须在跃迁之前演完 —— 它是「落点已被锁定」的标记，
+        // 落地那一下交给 warpMarkCollapse 往回合拢，不再向外炸
         if(warpMarkSize > 0f){
             TextureRegion mark = WarpEffects.mark();
             if(mark != null){
-                float ms = warpMarkSize * (0.94f + 0.06f * pulse);
+                float ex = Interp.circleOut.apply(Mathf.clamp(s.warmup / Math.max(warpMarkExpandTime, 1f), 0f, 1f));
+                // 起点留 16% 半径，尺寸同时从 55% 长到 100%：
+                // 四份 180px 的符印全叠在圆心会糊成一团白，从小尺寸散开才看得出是「裂成四片」
+                float mr = warpMarkRadius * (0.16f + 0.84f * ex);
+                float ms = warpMarkSize * (0.55f + 0.45f * ex);
+                // 撑开过程中四份是叠在一起的，alpha 得压住，否则 additive 会把中心烧成一块白
+                float ma = (0.12f + 0.40f * prog) * (0.85f + 0.15f * pulse) * (0.45f + 0.55f * ex);
+                // 0.25°/帧 的慢转：静止的符印像贴图，转太快又像洗衣机
+                float rot = Time.time * 0.25f;
+
                 Draw.blend(Blending.additive);
                 Draw.color(warpEffectColor);
-                Draw.alpha((0.14f + 0.46f * prog) * pulse);
-                // 0.25°/帧 的慢转：静止的符印像贴图，转太快又像洗衣机
-                Draw.rect(mark, s.wx, s.wy, ms, ms, Time.time * 0.25f);
+                for(int i = 0; i < 4; i++){
+                    // 从 45° 起，四份符印落在斜向，不会正压在机头和机尾上
+                    float ang = 45f + 90f * i;
+                    Draw.alpha(ma);
+                    Draw.rect(mark, s.wx + Mathf.cosDeg(ang) * mr, s.wy + Mathf.sinDeg(ang) * mr,
+                        ms, ms, rot);
+                }
                 Draw.blend();
                 Draw.color();
                 Draw.alpha(1f);

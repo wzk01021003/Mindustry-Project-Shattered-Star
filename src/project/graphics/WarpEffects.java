@@ -285,56 +285,47 @@ public class WarpEffects{
     }
 
     // ============================================================
-    //  落点棱形：VE 幻象 meta-spawn 的「四散再收拢」
+    //  落点棱形：VE 幻象 meta-spawn 的「先撑开，机体再从里面出来」
     // ============================================================
     /**
-     * 在跃迁落点铺开的棱形符印。
+     * 落点合拢：4 份棱形符印从外圈收回落点中心。
      *
-     * <p>形式照抄 VE 幻象（strengthened/meta-spawn.json）的入场：
-     * 那边是 4 个 RadialEffect 拿整张机体贴图（ve-meta-full）从中心向外走 48 px、21 帧
-     * （circleOut），另外 4 个延迟 20 帧用 circleIn 反向收回、20 帧。
-     * 两条曲线一放一收，读起来是「空间被撑开 → 停一拍 → 合拢」。
+     * <p>VE 幻象（strengthened/meta-spawn.json）的入场是这么走的：
+     * 隐形载体死亡 → 子弹 {@code despawnUnit} 把幻象放在落点 → 同一发 {@code shootEffect} 里，
+     * 4 个 {@code RadialEffect} 拿整张机体贴图（{@code ve-meta-full}）用 {@code circleOut}
+     * 向外走 48px、21 帧，另外 4 个晚 20 帧用 {@code circleIn} 反向收回、20 帧。
      *
-     * <p>这里把贴图换成本 mod 自己画的棱形符印
-     * （{@code assets/sprites/effects/warp-mark.png}）：双层菱形 + 四角刻线 + 中心菱形，
-     * 语义是「坐标已被锁定」，而不是把一台机体复制四份。
+     * <p>关键在时序：那 8 份棱形全部压在「机体出现的那一瞬间」附近，
+     * 撑开段与机体同帧起步，收拢段在机体站稳之后才结束。读起来是
+     * 「空间先被撑开一道缝 → 机体从缝里挤出来 → 缝合上」，
+     * 是**抵达**本身的演出，不是抵达之后在机体周围摆一圈装饰。
      *
-     * <p>尺寸全程恒定（幻象那边 sizeFrom / sizeTo 都是 72），只有位置和透明度在动。
-     * 符印如果边飞边缩，看起来是被吹走的气球；恒定尺寸才像空间本身在往外撑。
+     * <p>所以这里只保留「合拢」这一半。撑开那半由
+     * {@code WarpAbility.draw} 在蓄力期直接画（见 {@code warpMarkRadius}）——
+     * 落点必须在跃迁之前就被标出来，等机体落地再撑开就晚了。
      */
-    public static class WarpMarkBurstEffect extends Effect{
+    public static class WarpMarkCollapseEffect extends Effect{
         /** 几份符印 */
         public int count = 4;
-        /** 外扩到多远 */
-        public float radius = 190f;
-        /**
-         * 外扩起点占 {@link #radius} 的比例。
-         *
-         * <p>不能从 0 起步：四份符印同时压在机体中心，additive 叠起来是一团亮斑，
-         * 而且会盖住刚落地的那台机器。从 0.35 起步，符印一出现就贴着机体轮廓外沿。
-         */
-        public float innerRatio = 0.35f;
+        /** 合拢起点半径 */
+        public float radius = 220f;
         /** 符印尺寸（正方形） */
-        public float size = 150f;
-        /** 外扩时长（帧） */
-        public float expandTime = 21f;
-        /** 内收批晚多少帧开始 */
-        public float contractDelay = 20f;
-        /** 内收时长（帧） */
+        public float size = 180f;
+        /** 合拢时长（帧）。VE 是 20 */
         public float contractTime = 20f;
-        /** 最亮时的不透明度 */
-        public float alpha = 0.42f;
-        /** 每份符印在生命周期内自转的角度 */
-        public float spin = 18f;
+        /** 起始不透明度 */
+        public float alpha = 0.4f;
+        /** 合拢期间额外自转的角度 */
+        public float spin = 10f;
 
-        public WarpMarkBurstEffect(){
+        public WarpMarkCollapseEffect(){
             this(1f);
         }
 
-        public WarpMarkBurstEffect(float scale){
+        public WarpMarkCollapseEffect(float scale){
             size *= scale;
             radius *= scale;
-            lifetime = Math.max(expandTime, contractDelay + contractTime) + 1f;
+            lifetime = contractTime;
             // clip 决定这发特效在创建时会不会被视锥剔除（Effect.create 里用它做矩形裁剪）
             clip = radius + size + 80f;
         }
@@ -345,49 +336,93 @@ public class WarpEffects{
             if(reg == null) return;
 
             float p = e.fin();
-            float elapsed = p * lifetime;
-            Color c = main(e);
-
-            // 与 WarpAbility.drawGhosts 一致的交接逻辑：
-            // 外扩在 handoff 帧停住，内收同帧从最远处接手，位置和亮度都接得上
-            float handoff = Math.max(1f, Math.min(expandTime, contractDelay));
-            float ep = Interp.circleOut.apply(Mathf.clamp(elapsed / handoff, 0f, 1f));
-            float cp = Mathf.clamp((elapsed - contractDelay) / Math.max(contractTime, 1f), 0f, 1f);
-            float cpi = Interp.circleIn.apply(cp);
-
-            boolean expanding = elapsed < handoff;
-            boolean contracting = elapsed >= contractDelay && cp < 1f;
-
-            float ea = alpha * (1f - 0.5f * ep);
-            float ca = alpha * 0.5f * (1f - cp);
+            // circleIn：起步几乎不动、越往后收得越快，和 VE 那条曲线一致。
+            // 换成线性会变成匀速吸进去，像被绳子拽，不像空间自己在合
+            float k = Interp.circleIn.apply(p);
+            // 收到机体内侧时如果还亮着，就成了「机体上盖了四个框」，所以淡出比收缩快，
+            // 尺寸也一起收 35%：单靠位置收，符印边缘会先在机体上拖出一道亮边
+            float a = alpha * (1f - p) * (1f - p);
+            float sz = size * (1f - 0.35f * p);
 
             Draw.blend(Blending.additive);
-            Draw.color(c);
+            Draw.color(main(e));
 
             for(int i = 0; i < count; i++){
                 // 从 45° 起，四份符印落在斜向，不会正压在机头和机尾上
                 float ang = 45f + 360f / count * i;
-                float cx = Mathf.cosDeg(ang), cy = Mathf.sinDeg(ang);
-                float rot = ang + spin * p;
-
-                if(expanding && ea > 0.01f){
-                    float r = radius * (innerRatio + (1f - innerRatio) * ep);
-                    Draw.alpha(ea);
-                    Draw.rect(reg, e.x + cx * r, e.y + cy * r, size, size, rot);
-                }
-                if(contracting && ca > 0.01f){
-                    Draw.alpha(ca);
-                    Draw.rect(reg, e.x + cx * radius * (1f - cpi), e.y + cy * radius * (1f - cpi), size, size, rot);
-                }
+                float r = radius * (1f - k);
+                if(r < 1f) continue;
+                Draw.alpha(a);
+                Draw.rect(reg, e.x + Mathf.cosDeg(ang) * r, e.y + Mathf.sinDeg(ang) * r,
+                    sz, sz, ang + spin * p);
             }
 
             Draw.blend();
-            Drawf.light(e.x, e.y, radius + size * 0.5f, c, 0.5f * (1f - p));
+            Drawf.light(e.x, e.y, radius + size * 0.5f, main(e), 0.45f * (1f - p));
         }
     }
 
-    /** 落点符印贴图缓存：preload 之后 atlas 才有内容，所以不能在静态初始化里取 */
-    private static TextureRegion markRegion;
+    // ============================================================
+    //  落点周围的小棱形碎片（蓄力期持续生成）
+    // ============================================================
+    /**
+     * 单片小棱形，在落点外圈闪一下就缩掉。
+     *
+     * <p>对应 VE 幻象载体上挂的两个 {@code EffectSpawnerPart}：{@code ve-warp1} / {@code ve-warp2}
+     * 每帧按 0.5 / 0.8 的概率生成在机体半径 60~90px 处，{@code effectRandRot} 随机朝向，
+     * 尺寸 48→32，寿命 16 帧。那台载体是隐形的，所以玩家看到的是
+     * 「落点上凭空有一圈菱形碎片在翻」—— 这才是幻象出现之前的定位感来源。
+     *
+     * <p>只负责单片。要铺满一圈靠调用方按帧概率反复 {@code at()}，不是一次生成十几片：
+     * 一次性生成会在某一帧突然全亮，按帧概率生成才是持续翻涌。
+     */
+    public static class WarpMoteEffect extends Effect{
+        /** 出现位置到落点的距离 */
+        public float ringRadius = 108f;
+        /** 距离抖动，让碎片不是一个正圆环 */
+        public float ringJitter = 40f;
+        /** 长轴：起始 / 结束 */
+        public float lenFrom = 52f, lenTo = 32f;
+        /** 短轴 / 长轴。贴图本身是 128×64，所以默认 0.5 */
+        public float widthRatio = 0.5f;
+        /** 起始不透明度 */
+        public float alpha = 0.62f;
+        /** 生命周期内自转的角度 */
+        public float spin = 110f;
+        /** 生命周期内朝落点收进来多少（0 = 原地不动，1 = 收到中心） */
+        public float inward = 0.55f;
+
+        public WarpMoteEffect(){
+            lifetime = 16f;
+            clip = ringRadius + ringJitter + lenFrom + 40f;
+        }
+
+        @Override
+        public void render(EffectContainer e){
+            TextureRegion reg = shard();
+            if(reg == null) return;
+
+            // 方向和距离都用 id 做种子：同一片碎片重绘时位置一致，不会每帧乱跳
+            rand.setSeed(e.id);
+            float ang = rand.random(360f);
+            float dist = ringRadius + rand.range(ringJitter);
+            float p = e.fin();
+
+            float d = dist * (1f - inward * Interp.pow2Out.apply(p));
+            float len = lenFrom + (lenTo - lenFrom) * p;
+            float rot = ang + spin * p;
+
+            Draw.blend(Blending.additive);
+            Draw.color(CORE, main(e), p);
+            Draw.alpha(alpha * (1f - p * p));
+            Draw.rect(reg, e.x + Mathf.cosDeg(ang) * d, e.y + Mathf.sinDeg(ang) * d,
+                len, len * widthRatio, rot);
+            Draw.blend();
+        }
+    }
+
+    /** 落点贴图缓存：preload 之后 atlas 才有内容，所以不能在静态初始化里取 */
+    private static TextureRegion markRegion, shardRegion;
 
     /** 落点符印贴图。mod 的 sprite 在 atlas 里带 ss- 前缀，取不到再用原名兜底 */
     public static TextureRegion mark(){
@@ -398,5 +433,15 @@ public class WarpEffects{
         }
         // 缺图时返回 null，让调用方整发跳过：画一堆 error 白方块比不画更糟
         return markRegion.found() ? markRegion : null;
+    }
+
+    /** 小棱形碎片贴图，缺图同样返回 null */
+    public static TextureRegion shard(){
+        if(shardRegion == null){
+            TextureRegion r = Core.atlas.find("ss-warp-shard");
+            if(!r.found()) r = Core.atlas.find("warp-shard");
+            shardRegion = r.found() ? r : Core.atlas.find("error");
+        }
+        return shardRegion.found() ? shardRegion : null;
     }
 }

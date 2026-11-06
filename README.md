@@ -33,7 +33,7 @@
 - 在原版全谱系单位基础上重做的 **R 系列单位**（id 带 `-r` 后缀），含原版复刻的 **日蚀**
 - **5 套单位指令**（狩猎 / 保护 / 定点防御 / 进入运输 / 卸载载荷）
 - **运输 / 载具系统**（单位可进入运输车并卸载载荷）
-- **星辉跃迁（WarpAbility）系统**：异构-星辉（`flare-at`）与日蚀（`eclipse-r`）搭载主动跃迁，按住 Alt 蓄力投送至鼠标位置；含 9 项专属设置、指挥 / 移动端自动跃迁、两批机体残影与落点棱形符印（详见「星辉跃迁（WarpAbility）系统」章）
+- **星辉跃迁（WarpAbility）系统**：异构-星辉（`flare-at`）与日蚀（`eclipse-r`）搭载主动跃迁，按住 Alt 蓄力投送至鼠标位置；含 9 项专属设置、指挥 / 移动端自动跃迁、两批机体残影与落点棱形定位（详见「星辉跃迁（WarpAbility）系统」章）
 - **屏幕扭曲（Distortion）实验性渲染系统**及其全套设置
 
 ---
@@ -214,7 +214,7 @@ cd Mindustry-Project-Shattered-Star
 | 单位（中文名）| 内容 id | 定位 | 跃迁特性（代码字段 / 默认值）|
 | --- | --- | --- | --- |
 | 异构-星辉 | `flare-at` | AT1 轻型侦查空战战机 | 默认 `WarpAbility` 数值：基础蓄力 15 帧、每 800 px 追加 15 帧、冷却 150 帧；**需机头先对准**（`warpRequireFacing` 默认 true）；无落地气浪（`warpImpactRadius 0`）；距离不限（默认 `warpMaxDistance 0`）。 |
-| 日蚀 | `eclipse-r` | 塞普罗 T5 重型轰炸机的原版复刻（22000 结构值 / 22 护甲 / hitSize 58），归在 R 系列 | 大型参数：`warpBaseWarmup 110`、`warpMinWarmup 60`（每 6400 px 追加）、`warpCooldown 300`（自动 120）、`warpMaxDistance 1100`（约 137 格）；**无需提前对准**（`warpRequireFacing false`，蓄力期自适应转向 + 起跳硬对齐）；**可边打边跳**（`warpRequireIdleWeapons false`，落地炮塔压 36 帧装填）；**落地掀气浪** `warpImpactRadius 130`（约 16 格）/`warpImpactForce 6`，只推不伤；大机体专用的更强落地震屏、重音，以及落点棱形符印 + 持续扭曲预示。 |
+| 日蚀 | `eclipse-r` | 塞普罗 T5 重型轰炸机的原版复刻（22000 结构值 / 22 护甲 / hitSize 58），归在 R 系列 | 大型参数：`warpBaseWarmup 110`、`warpMinWarmup 60`（每 6400 px 追加）、`warpCooldown 300`（自动 120）、`warpMaxDistance 1100`（约 137 格）；**无需提前对准**（`warpRequireFacing false`，蓄力期自适应转向 + 起跳硬对齐）；**可边打边跳**（`warpRequireIdleWeapons false`，落地炮塔压 36 帧装填）；**落地掀气浪** `warpImpactRadius 130`（约 16 格）/`warpImpactForce 6`，只推不伤；大机体专用的更强落地震屏、重音，以及蓄力期就在落点撑开的棱形符印 + 碎片翻涌 + 持续扭曲预示。 |
 
 > 注意：**Distortion（屏幕扭曲）是另一套渲染系统，与跃迁无关**。跃迁单位在起跳 / 落地时也会叠一层屏幕扭曲，但那是复用 Distortion 的视觉，未开启「实验性渲染」时不显示。
 
@@ -254,9 +254,12 @@ cd Mindustry-Project-Shattered-Star
 - **三段式能量环**：起跳 `WarpShapes.BURST`、蓄力 `WarpShapes.CHARGE`、落点 `WarpShapes.ARRIVE`；大型单位改用大号版本 `BURST_LARGE` / `CHARGE_LARGE` / `ARRIVE_LARGE`。
 - **能量轨迹与通道粒子**：`WarpEffects.WarpTrailEffect` 与 `WarpParticleEffect`（日蚀用放大版 `warpTrailEffectLarge` / `warpParticleEffectLarge`）。
 - **落点残影**：数份机体剪影分两批——先 4 份从落点向外推开，延迟后再 4 份从最远处收回，结构与 VE 幻象的 `meta-spawn` 一致（星辉 4 份 / 半径 58 px / 不透明度 0.75；日蚀 4 份 / 半径 210 px / 0.42，贴图 1:1 不缩放）。
-- **落点棱形符印**：`WarpEffects.WarpMarkBurstEffect`，贴图为自绘的 `assets/sprites/effects/warp-mark.png`（512×512 竖长棱形符印：双层菱形 + 四角刻线 + 中心菱形，additive、染橙金）。
-  - **蓄力**：目标坐标上铺一张 210px 符印（`warpMarkSize`），缓慢自转、随蓄力进度增亮；同时每 12 帧在落点补一发内向扭曲（`warpTargetDistortion`，走 `DistortionRenderer`），构成「坐标已被锁定」的预示。
-  - **落地**：4 份符印从机体轮廓外（`innerRatio 0.35`）撑到 190px，停一拍后收拢 —— `expandTime 21` / `contractDelay 20` / `contractTime 20`，结构与 VE 幻象的 `meta-spawn` 一致。
+- **落点棱形符印**：贴图为自绘的 `assets/sprites/effects/warp-mark.png`（512×512 竖长棱形符印：双层菱形 + 四角刻线 + 中心菱形，additive、染橙金）。
+  - **蓄力（定位）**：4 份符印在落点从中心裂开、21 帧撑到 220px（`warpMarkRadius`），同时尺寸从 55% 长到 180px（`warpMarkSize`），撑满后缓慢自转并随蓄力增亮 —— 落点必须在跃迁之前就被标出来。
+  - **蓄力（碎片）**：`WarpEffects.WarpMoteEffect`，贴图为 `assets/sprites/effects/warp-shard.png`（128×64 硬边菱形）。对应 VE 幻象载体上挂的 `ve-warp1` / `ve-warp2`：每帧按概率在落点 108±40px 处生成一片，随机朝向、边自转边向内收、16 帧淡出，密度随蓄力从 35% 涨到 100%。
+  - **蓄力（扭曲）**：每 12 帧在落点补一发内向扭曲（`warpTargetDistortion`，走 `DistortionRenderer`），强度随蓄力从 0.35 涨到 0.85。
+  - **落地（合拢）**：`WarpEffects.WarpMarkCollapseEffect`，4 份符印用 `circleIn` 从 220px 收回中心、20 帧，尺寸同步收 35%、透明度按 `(1-p)²` 掉 —— 读作「缝在合上」，不是落地后的装饰。
+  - 整体结构照 VE 幻象的 `meta-spawn`，但时序是反过来的：那边载体在落点隐形站 3 秒冒碎片，死亡才把机体放出来并撑开棱形；这里把「撑开」提前到蓄力期，落地只保留「合拢」，因为跃迁是瞬时的，没有 3 秒可以铺陈。
 - **震屏**：`Effect.shake`，星辉 `warpShake 10`、日蚀 `warpShake 22`。
 - **屏幕扭曲**：起跳 `warpOutDistortion`、落地 `warpInDistortion`（复用 Distortion 系统），未开启「实验性渲染」时不显示。
 - **音效**：起跳 `stAstroWarp1`、落地 `stAstroWarp2`（加载失败退回 `massdriver`）；日蚀落地额外叠一层重音 `stAstroWarp3`（`useHeavyLandingSound`）。音量由 `ss-warp-volume` 控制。
