@@ -164,8 +164,8 @@ public class FireFx{
     public static class MuzzleSmokeEffect extends Effect{
         /** 单团终态半径 */
         public float size = 7f;
-        /** 团数。再少就凑不出梯度，再多会糊成一片 */
-        public int puffs = 3;
+        /** 团数：1 主团 + 1 炮口团 + 其余碎絮 */
+        public int puffs = 4;
         /** 沿炮管方向漂出的距离 */
         public float drift = 20f;
         /** 垂直于炮管的散开量 */
@@ -202,12 +202,18 @@ public class FireFx{
                 // 早先让三团平等随机，结果它们各自都往轴线附近挤，读起来是一颗球——
                 // 枪口烟本来就是「一股主线 + 边缘碎絮」，不是三个并列的团
                 boolean core = i == 0;
-                float along = core ? 0.72f : rand.random(0.2f, 0.55f);
-                float side = core ? rand.random(-0.15f, 0.15f) : rand.random(-1f, 1f);
-                float delay = core ? 0f : rand.random(0.04f, 0.12f);
-                float sz = core ? 1f : rand.random(0.6f, 0.85f);
-                // 越外层越淡；主团不衰减，碎絮只有它的一半上下
-                float dim = core ? 1f : rand.random(0.7f, 0.9f);
+                // 第二团钉死在炮口，专门负责让烟「从枪口长出来」。
+                // 只有主团时它的中心离炮口 7~13px，靠自身柔边接不上，中间会空一段，
+                // 看着像烟飘在枪口前面，而不是从枪口冒出来
+                boolean root = i == 1;
+                float along = core ? 0.62f : root ? 0.1f : rand.random(0.2f, 0.5f);
+                // 碎絮上下交替，而不是纯随机：随机时两团可能同时偏同一侧，
+                // 整条烟就斜着往外飘，看着像没对准炮管中轴线
+                float side = (core || root) ? 0f : (i % 2 == 0 ? 1f : -1f) * rand.random(0.55f, 0.95f);
+                float delay = (core || root) ? 0f : rand.random(0.04f, 0.12f);
+                float sz = core ? 1f : root ? 0.62f : rand.random(0.6f, 0.85f);
+                // 越外层越淡；主团不衰减，碎絮只有它的七成上下
+                float dim = core ? 1f : root ? 0.85f : rand.random(0.7f, 0.9f);
 
                 float pp = Mathf.clamp((p - delay) / (1f - delay));
                 // 沿轴先快后慢（被膛压顶出去），侧向越飘越散（之后靠自身扩散）
