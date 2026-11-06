@@ -251,6 +251,12 @@ cd Mindustry-Project-Shattered-Star
 
 ### 视觉与音效
 
+- **开火与打击（FireFx）**：把原版那几只给全体单位共用的通用 `Fx` 换成本 mod 自己的矢量特效，先在异构·尖刀（`dagger-at`）上试点。
+  - **枪口焰** `FireFx.MuzzleEffect`：沿炮管方向的锥形，外层橙→暗红、内层白热，根部两侧各甩两条火星；6 帧寿命，比 10 帧的装填短，两发之间不会连成一片。
+  - **命中火花** `FireFx.HitSparkEffect`：6 条短线以弹道反方向（`rot + 180° ± 39°`）散开，前 1/3 叠一个白闪；9 帧。线有方向，才能看出子弹是从哪边打过来的。
+  - 颜色统一走 `CORE(#fff4dc) → WARM(#ffb87a) → MAIN(#ffa665) → DEEP(#d9542a)`，和机体条纹同一条色路，不再混入原版那套冷白。
+  - 尺寸走 `scale` 参数，`hitSize 8` 的机甲用 1，大型单位往上乘。全部是矢量绘制，不依赖贴图。
+
 - **三段式能量环**：起跳 `WarpShapes.BURST`、蓄力 `WarpShapes.CHARGE`、落点 `WarpShapes.ARRIVE`；大型单位改用大号版本 `BURST_LARGE` / `CHARGE_LARGE` / `ARRIVE_LARGE`。
 - **能量轨迹与通道粒子**：`WarpEffects.WarpTrailEffect` 与 `WarpParticleEffect`（日蚀用放大版 `warpTrailEffectLarge` / `warpParticleEffectLarge`）。
 - **落点残影**：数份机体剪影分两批——先 4 份从落点向外推开，延迟后再 4 份从最远处收回，结构与 VE 幻象的 `meta-spawn` 一致（星辉 4 份 / 半径 58 px / 不透明度 0.75；日蚀 4 份 / 半径 210 px / 0.42，贴图 1:1 不缩放）。

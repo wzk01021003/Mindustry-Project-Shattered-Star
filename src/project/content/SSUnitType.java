@@ -93,6 +93,7 @@ import mindustry.world.meta.Env;
 import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
+import project.graphics.FireFx;
 import project.graphics.WarpShapes;
 import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
@@ -750,6 +751,16 @@ public class SSUnitType {
                                     width = 7f;
                                     height = 9f;
                                     lifetime = 30f;
+
+                                    // 原版这里两个特效都是空的（只剩一个弹壳），打击感全靠伤害数字。
+                                    // 换成带方向的枪口锥焰和命中火花，见 FireFx 的类注释
+                                    shootEffect = FireFx.MUZZLE;
+                                    hitEffect = FireFx.HIT;
+                                    // 弹道跟着机体走橙金，不再用原版那套冷黄
+                                    frontColor = FireFx.CORE;
+                                    backColor = FireFx.MAIN;
+                                    lightColor = FireFx.MAIN;
+                                    lightOpacity = 0.35f;
                                 }
                             };
                         }
