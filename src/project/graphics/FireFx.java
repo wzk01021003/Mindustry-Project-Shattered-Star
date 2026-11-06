@@ -299,11 +299,15 @@ public class FireFx{
             rand.setSeed(e.id);
             Draw.color(CORE, main(e), p);
             Draw.alpha(fade * 0.9f);
+            // 整簇以 rot + 180 为中心：火花是「被打中的东西往回溅」，
+            // 全落在子弹来的那一侧。写成 rot ± 39° 等于让火花跟着子弹往前飞，
+            // 看起来像武器自己在喷东西，方向是反的
             for(int i = 0; i < lines; i++){
-                // 以 rot + 180 为中心散开：火花是「被打中的东西往回溅」，
-                // 所以全落在子弹来的那一侧。之前写成 rot ± 39°，等于让火花跟着子弹一起往前飞，
-                // 看起来像武器自己在喷东西，方向是反的
-                float a = rot + 180f + rand.random(-39f, 39f);
+                // 左右交替，而不是每条各自 random(-39,39)：
+                // 纯随机时 6 条可能全落在同一侧，整簇火花看着就往一边歪，
+                // 像命中点没对上；交替才能保证重心压在弹道法线上
+                float side = i % 2 == 0 ? 1f : -1f;
+                float a = rot + 180f + side * rand.random(8f, 39f);
                 float l = len * out * rand.random(0.4f, 1f);
                 Lines.stroke(1.35f * fade * rand.random(0.7f, 1.1f));
                 Lines.line(e.x + Mathf.cosDeg(a) * l * 0.25f, e.y + Mathf.sinDeg(a) * l * 0.25f,
