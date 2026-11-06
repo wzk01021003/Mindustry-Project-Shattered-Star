@@ -254,7 +254,7 @@ cd Mindustry-Project-Shattered-Star
 - **三段式能量环**：起跳 `WarpShapes.BURST`、蓄力 `WarpShapes.CHARGE`、落点 `WarpShapes.ARRIVE`；大型单位改用大号版本 `BURST_LARGE` / `CHARGE_LARGE` / `ARRIVE_LARGE`。
 - **能量轨迹与通道粒子**：`WarpEffects.WarpTrailEffect` 与 `WarpParticleEffect`（日蚀用放大版 `warpTrailEffectLarge` / `warpParticleEffectLarge`）。
 - **落点残影**：数份机体剪影分两批——先 4 份从落点向外推开，延迟后再 4 份从最远处收回，结构与 VE 幻象的 `meta-spawn` 一致（星辉 4 份 / 半径 58 px / 不透明度 0.75；日蚀 4 份 / 半径 210 px / 0.42，贴图 1:1 不缩放）。
-- **棱形碎片**：`WarpEffects.WarpSplinterEffect`，贴图为自绘的 `assets/sprites/effects/warp-shard.png`（128×64 硬边菱形，中心亮、边缘略淡），additive 混合、随机朝向、边飞散边旋转缩小。日蚀落点一次炸出 12 片（`ARRIVE_LARGE` 自带），蓄力期还会以 20% 帧概率在机体周围持续生成单片（`SPLINTER_CHARGE_LARGE`）。
+- **棱形碎片**：`WarpEffects.WarpSplinterEffect`，贴图为自绘的 `assets/sprites/effects/warp-shard.png`（128×64 硬边菱形，中心亮、边缘略淡），additive 混合、随机朝向、边飞散边旋转缩小。日蚀落点一次炸出 10 片（`ARRIVE_LARGE` 自带，起始就在机体轮廓之外），蓄力期还会以 20% 帧概率在机体周围持续生成单片（`SPLINTER_CHARGE_LARGE`）。
 - **震屏**：`Effect.shake`，星辉 `warpShake 10`、日蚀 `warpShake 22`。
 - **屏幕扭曲**：起跳 `warpOutDistortion`、落地 `warpInDistortion`（复用 Distortion 系统），未开启「实验性渲染」时不显示。
 - **音效**：起跳 `stAstroWarp1`、落地 `stAstroWarp2`（加载失败退回 `massdriver`）；日蚀落地额外叠一层重音 `stAstroWarp3`（`useHeavyLandingSound`）。音量由 `ss-warp-volume` 控制。
