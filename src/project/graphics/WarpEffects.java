@@ -285,109 +285,118 @@ public class WarpEffects{
     }
 
     // ============================================================
-    //  棱形碎片：VE 幻象跃迁时在机体周围飘的那一层
+    //  落点棱形：VE 幻象 meta-spawn 的「四散再收拢」
     // ============================================================
     /**
-     * 会转、会缩、会淡的棱形光片。
+     * 在跃迁落点铺开的棱形符印。
      *
-     * <p>照 VE 幻象（strengthened/meta-spawn.json）的 parts 抄的：那边在整个入场过程中
-     * 按 0.5 / 0.8 的帧概率往外刷 ve-warp1 / ve-warp2 两张菱形贴图 ——
-     * 随机朝向（effectRandRot 360）、尺寸 64→48、16 帧、slope 曲线、lightScl 8。
-     * 单看一片就是块很暗的菱形，靠「同时飘着七八片」才堆出空间正在碎裂的观感，
-     * 所以 {@link #count} 默认就给 8，少于此数看起来只是往屏幕上贴了块玻璃。
+     * <p>形式照抄 VE 幻象（strengthened/meta-spawn.json）的入场：
+     * 那边是 4 个 RadialEffect 拿整张机体贴图（ve-meta-full）从中心向外走 48 px、21 帧
+     * （circleOut），另外 4 个延迟 20 帧用 circleIn 反向收回、20 帧。
+     * 两条曲线一放一收，读起来是「空间被撑开 → 停一拍 → 合拢」。
      *
-     * <p>两种用法共用同一个类：
-     * <ul>
-     *   <li>{@code radius > 0}：从中心向外飞散，落点用（日蚀跃迁的那一圈）</li>
-     *   <li>{@code radius = 0}：原地旋转缩小，蓄力用（贴在机体周围持续冒）</li>
-     * </ul>
+     * <p>这里把贴图换成本 mod 自己画的棱形符印
+     * （{@code assets/sprites/effects/warp-mark.png}）：双层菱形 + 四角刻线 + 中心菱形，
+     * 语义是「坐标已被锁定」，而不是把一台机体复制四份。
      *
-     * <p>贴图是自己画的 {@code assets/sprites/effects/warp-shard.png}：
-     * 128×64 的硬边菱形，中心亮、边缘略淡。没有直接用 VE 的 ve-warp1/2，
-     * 那两张是对方的美术资源。
-     *
-     * <p>关于混合模式：棱形必须走 additive。普通混合下它是一块实心色块，
-     * 压在任何背景上都像贴纸；additive 才会跟机身辉光、能量环融成一体。
+     * <p>尺寸全程恒定（幻象那边 sizeFrom / sizeTo 都是 72），只有位置和透明度在动。
+     * 符印如果边飞边缩，看起来是被吹走的气球；恒定尺寸才像空间本身在往外撑。
      */
-    public static class WarpSplinterEffect extends Effect{
-        /** 一次生成多少片 */
-        public int count = 8;
-        /** 每片从中心飞出的距离；0 = 原地旋转缩小 */
-        public float radius = 0f;
+    public static class WarpMarkBurstEffect extends Effect{
+        /** 几份符印 */
+        public int count = 4;
+        /** 外扩到多远 */
+        public float radius = 190f;
         /**
-         * 起始位置占 {@link #radius} 的比例。
+         * 外扩起点占 {@link #radius} 的比例。
          *
-         * <p>不能从 0 起步：十几片棱形同时出现在机体中心，additive 叠起来就是一团白，
-         * 看起来像爆炸而不是碎片。让它们一出生就落在机体轮廓之外，
-         * 机体只被棱形围住、不被盖住，才看得出是「空间碎片被推开」。
+         * <p>不能从 0 起步：四份符印同时压在机体中心，additive 叠起来是一团亮斑，
+         * 而且会盖住刚落地的那台机器。从 0.35 起步，符印一出现就贴着机体轮廓外沿。
          */
-        public float innerRatio = 0.7f;
-        /** 起始 / 结束长度（像素，长轴） */
-        public float lenFrom = 52f, lenTo = 14f;
-        /** 短轴 / 长轴。贴图本身是 128×64，所以默认 0.5 */
-        public float widthRatio = 0.5f;
-        /** 每片在生命周期内额外自转的角度 */
-        public float spin = 55f;
-        /** 每片延后启动的上限（占生命周期比例），让爆发不是一次齐射 */
-        public float maxDelay = 0.28f;
-        /** 整体不透明度。additive 下 0.6 左右已经开始发白，再高就化成一块光斑 */
-        public float alpha = 0.6f;
+        public float innerRatio = 0.35f;
+        /** 符印尺寸（正方形） */
+        public float size = 150f;
+        /** 外扩时长（帧） */
+        public float expandTime = 21f;
+        /** 内收批晚多少帧开始 */
+        public float contractDelay = 20f;
+        /** 内收时长（帧） */
+        public float contractTime = 20f;
+        /** 最亮时的不透明度 */
+        public float alpha = 0.42f;
+        /** 每份符印在生命周期内自转的角度 */
+        public float spin = 18f;
 
-        public WarpSplinterEffect(){
-            lifetime = 30f;
-            // clip 决定这发特效在创建时会不会被视锥剔除（Effect.create 里用它做矩形裁剪），
-            // 基类默认 0，不改的话整发都不渲染
-            clip = 320f;
+        public WarpMarkBurstEffect(){
+            this(1f);
+        }
+
+        public WarpMarkBurstEffect(float scale){
+            size *= scale;
+            radius *= scale;
+            lifetime = Math.max(expandTime, contractDelay + contractTime) + 1f;
+            // clip 决定这发特效在创建时会不会被视锥剔除（Effect.create 里用它做矩形裁剪）
+            clip = radius + size + 80f;
         }
 
         @Override
         public void render(EffectContainer e){
-            TextureRegion reg = shard();
+            TextureRegion reg = mark();
             if(reg == null) return;
 
             float p = e.fin();
+            float elapsed = p * lifetime;
             Color c = main(e);
-            rand.setSeed(e.id);
+
+            // 与 WarpAbility.drawGhosts 一致的交接逻辑：
+            // 外扩在 handoff 帧停住，内收同帧从最远处接手，位置和亮度都接得上
+            float handoff = Math.max(1f, Math.min(expandTime, contractDelay));
+            float ep = Interp.circleOut.apply(Mathf.clamp(elapsed / handoff, 0f, 1f));
+            float cp = Mathf.clamp((elapsed - contractDelay) / Math.max(contractTime, 1f), 0f, 1f);
+            float cpi = Interp.circleIn.apply(cp);
+
+            boolean expanding = elapsed < handoff;
+            boolean contracting = elapsed >= contractDelay && cp < 1f;
+
+            float ea = alpha * (1f - 0.5f * ep);
+            float ca = alpha * 0.5f * (1f - cp);
 
             Draw.blend(Blending.additive);
+            Draw.color(c);
+
             for(int i = 0; i < count; i++){
-                // 方向和大小都用 id 做种子，同一发每次重绘位置一致，不会抖
-                float ang = rand.random(360f);
-                float spread = rand.random(0.78f, 1.18f);
-                float delay = rand.random(maxDelay);
-                float q = Mathf.clamp((p - delay) / Math.max(1f - delay, 0.01f));
+                // 从 45° 起，四份符印落在斜向，不会正压在机头和机尾上
+                float ang = 45f + 360f / count * i;
+                float cx = Mathf.cosDeg(ang), cy = Mathf.sinDeg(ang);
+                float rot = ang + spin * p;
 
-                float out = Interp.pow2Out.apply(q);
-                float len = (lenFrom + (lenTo - lenFrom) * Interp.pow2In.apply(q)) * spread;
-                float wid = len * widthRatio;
-                float rot = ang + rand.random(-28f, 28f) + spin * q;
-                float dist = radius * spread * (innerRatio + (1f - innerRatio) * out);
-
-                // 恒用主色，不再从白色插值：白棱形叠在机身上跟爆炸的闪光分不开，
-                // 橙金色才能读成「同一台机器身上的能量」
-                Draw.color(c);
-                Draw.alpha(alpha * (1f - q * q));
-                Draw.rect(reg, e.x + Mathf.cosDeg(ang) * dist,
-                    e.y + Mathf.sinDeg(ang) * dist, len, wid, rot);
+                if(expanding && ea > 0.01f){
+                    float r = radius * (innerRatio + (1f - innerRatio) * ep);
+                    Draw.alpha(ea);
+                    Draw.rect(reg, e.x + cx * r, e.y + cy * r, size, size, rot);
+                }
+                if(contracting && ca > 0.01f){
+                    Draw.alpha(ca);
+                    Draw.rect(reg, e.x + cx * radius * (1f - cpi), e.y + cy * radius * (1f - cpi), size, size, rot);
+                }
             }
-            Draw.blend();
 
-            // 整发只打一次光：每片都打的话，同屏十几片的时候光斑比环还贵
-            Drawf.light(e.x, e.y, (radius + lenFrom) * 1.3f * (1f - p) + 30f, c, 0.45f * (1f - p));
+            Draw.blend();
+            Drawf.light(e.x, e.y, radius + size * 0.5f, c, 0.5f * (1f - p));
         }
     }
 
-    /** 棱形贴图缓存：preload 之后 atlas 才有内容，所以不能在静态初始化里取 */
-    private static TextureRegion shardRegion;
+    /** 落点符印贴图缓存：preload 之后 atlas 才有内容，所以不能在静态初始化里取 */
+    private static TextureRegion markRegion;
 
-    /** 棱形贴图。mod 的 sprite 在 atlas 里带 ss- 前缀，取不到再用原名兜底 */
-    public static TextureRegion shard(){
-        if(shardRegion == null){
-            TextureRegion r = Core.atlas.find("ss-warp-shard");
-            if(!r.found()) r = Core.atlas.find("warp-shard");
-            shardRegion = r.found() ? r : Core.atlas.find("error");
+    /** 落点符印贴图。mod 的 sprite 在 atlas 里带 ss- 前缀，取不到再用原名兜底 */
+    public static TextureRegion mark(){
+        if(markRegion == null){
+            TextureRegion r = Core.atlas.find("ss-warp-mark");
+            if(!r.found()) r = Core.atlas.find("warp-mark");
+            markRegion = r.found() ? r : Core.atlas.find("error");
         }
         // 缺图时返回 null，让调用方整发跳过：画一堆 error 白方块比不画更糟
-        return shardRegion.found() ? shardRegion : null;
+        return markRegion.found() ? markRegion : null;
     }
 }

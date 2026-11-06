@@ -634,9 +634,12 @@ public class SSUnitType {
                         // 机体大，蓄力粒子得铺开在机身上，不能只从中心冒
                         warpPrepareEffectChance = 0.18f;
                         warpPrepareEffectSpread = 62f;
-                        // 蓄力时周围持续飘棱形碎片（VE 幻象同款），落点那圈由 WARRIVE_LARGE 自己带
-                        warpPrepareSplinter = WarpShapes.SPLINTER_CHARGE_LARGE;
-                        warpPrepareSplinterChance = 0.2f;
+                        // —— 落点预示 ——
+                        // 蓄力时目标坐标上铺一张棱形符印（210px）并持续冒内向扭曲，
+                        // 落地瞬间符印四散再收拢；形式照 VE 幻象的 meta-spawn
+                        warpMarkSize = 210f;
+                        warpTargetDistortion = true;
+                        warpMarkBurst = WarpShapes.MARK_BURST;
                         trailEffect = WarpAbility.warpTrailEffectLarge;
                         trailParticleEffect = WarpAbility.warpParticleEffectLarge;
 
