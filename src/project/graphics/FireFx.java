@@ -78,16 +78,16 @@ public class FireFx{
         /** 侧向火星数量（单侧） */
         public int sparks = 2;
         /**
-         * 从子弹中心沿弹道反方向回退的距离。
+         * 从子弹生成点沿弹道反方向回退的距离。默认 0：生成点本身就是枪口。
          *
-         * <p>{@code shootEffect.at()} 拿到的是子弹生成点，不是炮口：Weapon 把弹药放在
-         * 挂点沿炮管 {@code shootY} 处。原版 dagger 的 {@code shootY} 是 3（Weapon 默认值），
-         * 所以这里退 3，焰正好落回挂点的 {@code x/y}，也就是贴图上枪口的锚点。
+         * <p>依据是贴图：{@code large-weapon-allotropes.png} 里那块橙色实心区
+         * （枪口）落在贴图中心上方约 3px，而武器的 {@code shootY} 正好是 3 ——
+         * 也就是说原版把子弹中心直接放在了枪口上，而不是"尾端压枪口"。
          *
-         * <p><b>必须跟武器的 {@code shootY} 保持一致。</b>两个数一旦对不上，整只
-         * 锥形焰就会沿炮管方向平移，看起来像"飘在枪口前面"或者"缩进机体里"。
+         * <p>这个字段留着只是为了某些"子弹很长、必须让步"的武器：那种情况下
+         * 把它设成 {@code shootY - halfHeight}，而不是无脑等于 {@code shootY}。
          */
-        public float back = 3f;
+        public float back = 0f;
 
         public MuzzleEffect(){
             this(1f);
@@ -189,8 +189,8 @@ public class FireFx{
         public float rise = 2.2f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
         public float opacity = 0.46f;
-        /** 从子弹中心沿弹道反退回挂点的距离，同 {@link MuzzleEffect#back}，必须等于武器的 shootY */
-        public float back = 3f;
+        /** 从子弹生成点反退回枪口的距离，同 {@link MuzzleEffect#back}，默认 0 */
+        public float back = 0f;
 
         public MuzzleSmokeEffect(){
             this(1f);
