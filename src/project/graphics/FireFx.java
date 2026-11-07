@@ -77,6 +77,14 @@ public class FireFx{
         public float sparkLen = 3f;
         /** 侧向火星数量（单侧） */
         public int sparks = 2;
+        /**
+         * 从子弹中心沿弹道反方向回退的距离，把特效从子弹中心挪到子弹尾端（＝炮口）。
+         *
+         * <p>子弹不是零长度物体：{@code height 9}，作者让尾端压在炮口上，
+         * 中心自然比炮口靠前 4.5。而 {@code shootEffect.at()} 拿到的正是中心坐标，
+         * 不在这里退回去，焰就会浮在炮口前面一截。
+         */
+        public float back = 4.5f;
 
         public MuzzleEffect(){
             this(1f);
@@ -100,6 +108,8 @@ public class FireFx{
             float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
             // 垂直于炮管的方向，用来撑开锥形的根
             float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
+            // 从子弹中心退回子弹尾端，也就是炮口
+            float ox = e.x - cx * back, oy = e.y - cy * back;
 
             Draw.blend(Blending.additive);
 
@@ -110,12 +120,12 @@ public class FireFx{
             float tip = len * (0.35f + 0.65f * out) * (0.55f + 0.45f * fade);
             Draw.color(main(e), DEEP, p);
             Draw.alpha(fade * 0.9f);
-            tri(e.x + cx * 1f, e.y + cy * 1f, nx, ny, w, cx, cy, tip);
+            tri(ox, oy, nx, ny, w, cx, cy, tip);
 
             // 内层：白热，长度和宽度都打六折，叠在外层中间
             Draw.color(CORE);
             Draw.alpha(fade);
-            tri(e.x + cx * 1f, e.y + cy * 1f, nx, ny, w * 0.55f, cx, cy, tip * 0.58f);
+            tri(ox, oy, nx, ny, w * 0.55f, cx, cy, tip * 0.58f);
 
             // 侧向火星：从根部往两边各甩两条短线，是「火药被挤出来」的那部分
             if(sparks > 0 && p < 0.6f){
@@ -127,9 +137,9 @@ public class FireFx{
                     float side = i % 2 == 0 ? 1f : -1f;
                     float a = rot + side * (sparkAngle + rand.range(16f));
                     float l = sparkLen * (0.4f + 0.6f * out) * rand.random(0.7f, 1.15f);
-                    Lines.line(e.x + cx * 1f, e.y + cy * 1f,
-                        e.x + cx * 1f + Mathf.cosDeg(a) * l,
-                        e.y + cy * 1f + Mathf.sinDeg(a) * l);
+                    Lines.line(ox, oy,
+                        ox + Mathf.cosDeg(a) * l,
+                        oy + Mathf.sinDeg(a) * l);
                 }
             }
 
@@ -176,6 +186,8 @@ public class FireFx{
         public float rise = 2.2f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
         public float opacity = 0.46f;
+        /** 从子弹中心沿弹道反退回子弹尾端（炮口）的距离，同 {@link MuzzleEffect#back} */
+        public float back = 4.5f;
 
         public MuzzleSmokeEffect(){
             this(1f);
@@ -198,6 +210,8 @@ public class FireFx{
             // 不会像之前那样整条跟着炮管横过来
             float rot = e.rotation;
             float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
+            // 烟同样要从子弹中心退回炮口，否则整团烟悬在枪口前方
+            float ox = e.x - cx * back, oy = e.y - cy * back;
 
             Draw.blend(Blending.normal);
             Draw.color(SMOKE);
@@ -230,8 +244,8 @@ public class FireFx{
                 // 侧向散开走世界水平，上浮走世界竖直，两者都与 rot 无关
                 float sideD = spread * side * Interp.pow2In.apply(pp) * 1.6f;
                 float riseD = rise * sz * Interp.pow2In.apply(pp);
-                float x = e.x + cx * travel + sideD;
-                float y = e.y + cy * travel + riseD;
+                float x = ox + cx * travel + sideD;
+                float y = oy + cy * travel + riseD;
                 float r = size * sz * (0.34f + 0.66f * Interp.pow3Out.apply(pp));
 
                 // 起手两帧涨到满不透明度，之后缓慢消。这个 0.07 别调大：

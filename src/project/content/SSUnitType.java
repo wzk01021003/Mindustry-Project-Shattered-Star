@@ -730,15 +730,14 @@ public class SSUnitType {
                 weapons.add(new Weapon(ShatteredStarMod.name("large-weapon-allotropes")) {
                         {
                             reload = 10f;
-                            // 挂点用贴图作者的原值。曾按「不透明区 bbox 顶端」推过一次炮口
-                            // （y 2→0、shootX -2、shootY 4.5→12.5），结果枪口被推出炮管一格，
-                            // 特效与炮口整个错开。这门炮的贴图和机体几乎重合，没有独立可见的
-                            // 管口，按 bbox 反推不成立，改回原值
+                            // 挂点和 shootY 全部用贴图作者原值。炮口位置不是按贴图 bbox 反推的，
+                            // 而是由子弹本身定义的：子弹 height 9，尾端压在炮口上，
+                            // 中心因此比炮口靠前 4.5（正好等于这条子弹的 halfHeight）。
+                            // 所以 shootY 4.5 = 子弹中心，炮口在挂点处
                             x = 4f;
                             y = 2f;
                             rotate = false;
-                            // shootX 横向偏移、shootY 沿炮管方向，两者相对挂点。
-                            // 要微调枪口就动这两个数，1 格 = 8 单位
+                            // shootX 横向偏移、shootY 沿炮管方向，两者相对挂点，单位是像素
                             shootY = 4.5f;
                             top = false;
                             ejectEffect = Fx.casing1;
@@ -759,10 +758,10 @@ public class SSUnitType {
                                     lifetime = 30f;
 
                                     // 原版这里两个特效都是空的（只剩一个弹壳），打击感全靠伤害数字。
-                                    // 换成带方向的枪口锥焰和命中火花，见 FireFx 的类注释
+                                    // 子弹不是零长度物体：height 9，作者让尾端压在炮口，
+                                    // 中心因此比炮口靠前 4.5。shootEffect/smokeEffect 拿到的
+                                    // 是子弹中心，所以两个特效内部都要沿弹道反方向退 back
                                     shootEffect = FireFx.MUZZLE;
-                                    // 每发跟在焰后面留一缕余烟。Weapon.shoot 里会在同一枪口坐标、
-                                    // 同一角度触发 bullet.smokeEffect，不用自己算位置
                                     smokeEffect = FireFx.MUZZLE_SMOKE;
                                     hitEffect = FireFx.HIT;
                                     // 弹道跟着机体走橙金，不再用原版那套冷黄
