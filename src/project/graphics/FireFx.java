@@ -166,10 +166,14 @@ public class FireFx{
         public float size = 2.4f;
         /** 团数：1 主团 + 1 炮口团 + 其余碎絮 */
         public int puffs = 4;
-        /** 沿炮管方向漂出的距离，0.69 格 */
+        /** 沿炮管方向漂出的距离，0.69 格。只在 {@link #followBarrel} 打开时生效 */
         public float drift = 5.5f;
-        /** 垂直于炮管的散开量，0.19 格 */
+        /** 出膛初速是否沿炮管。默认 false：烟只在炮口膨胀上浮，完全不理会炮塔朝向 */
+        public boolean followBarrel = false;
+        /** 侧向散开量，0.19 格。走世界水平方向，不随炮塔转 */
         public float spread = 1.5f;
+        /** 出膛后向世界正上方浮起的距离，0.28 格。烟离开炮口就不再属于炮塔了 */
+        public float rise = 2.2f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
         public float opacity = 0.46f;
 
@@ -181,16 +185,19 @@ public class FireFx{
             size *= scale;
             drift *= scale;
             spread *= scale;
+            rise *= scale;
             lifetime = 30f;
-            clip = (drift + spread + size * 2f) * 2f + 40f;
+            clip = (drift + spread + rise + size * 2f) * 2f + 40f;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
+            // 炮管方向只用来算出膛那一下的初速。形态（椭圆长轴）、侧向散开、上浮
+            // 全部在世界坐标系里算，所以炮塔转到哪儿，这团烟都是一样的竖直形状，
+            // 不会像之前那样整条跟着炮管横过来
             float rot = e.rotation;
             float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
-            float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
 
             Draw.blend(Blending.normal);
             Draw.color(SMOKE);
@@ -216,11 +223,15 @@ public class FireFx{
                 float dim = core ? 1f : root ? 0.85f : rand.random(0.7f, 0.9f);
 
                 float pp = Mathf.clamp((p - delay) / (1f - delay));
-                // 沿轴先快后慢（被膛压顶出去），侧向越飘越散（之后靠自身扩散）
-                float dist = drift * along * Interp.pow2Out.apply(pp);
+                // followBarrel 默认关：烟从炮口原地涨开，不带着炮管方向的初速。
+                // 打开时用 pow3Out，出膛瞬间走完大部分行程就停住——用 pow2Out 的话
+                // 后半段还在往前爬，烟会一路跟着炮口跑，看着像拖尾
+                float travel = followBarrel ? drift * along * Interp.pow3Out.apply(pp) : 0f;
+                // 侧向散开走世界水平，上浮走世界竖直，两者都与 rot 无关
                 float sideD = spread * side * Interp.pow2In.apply(pp) * 1.6f;
-                float x = e.x + cx * dist + nx * sideD;
-                float y = e.y + cy * dist + ny * sideD;
+                float riseD = rise * sz * Interp.pow2In.apply(pp);
+                float x = e.x + cx * travel + sideD;
+                float y = e.y + cy * travel + riseD;
                 float r = size * sz * (0.34f + 0.66f * Interp.pow3Out.apply(pp));
 
                 // 起手两帧涨到满不透明度，之后缓慢消。这个 0.07 别调大：
@@ -230,13 +241,14 @@ public class FireFx{
                 // 四层递减：最外那层只有 0.1a，专门用来磨掉边缘。
                 // 之前三层时最外圈直接从 0 跳到 0.4a，小半径下能看出锯齿状的硬边
                 //
-                // 每层画两个沿轴错开 r*0.45 的圆，叠成一个长宽比约 1.5 的椭圆：
+                // 每层画两个错开的圆，叠成长宽比约 1.5 的椭圆：
                 // 烟是被气流推着走的，形状本来就被拉长。单个正圆不管怎么调 alpha 都是一颗球，
-                // 这正是它上一版看起来像「贴上去的灰点」的原因
+                // 这正是它上一版看起来像「贴上去的灰点」的原因。
+                // 长轴固定竖直（世界 +y），不跟炮管转——否则炮塔一转，烟条就横过来
                 float er = r * 0.82f;
                 float eo = r * 0.45f;
-                float ax = x + cx * eo, ay = y + cy * eo;
-                float bx = x - cx * eo, by = y - cy * eo;
+                float ax = x, ay = y + eo;
+                float bx = x, by = y - eo;
 
                 Draw.alpha(a * 0.1f);
                 Fill.circle(ax, ay, er * 1.35f);
