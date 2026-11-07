@@ -759,14 +759,13 @@ public class SSUnitType {
                                     height = 9f;
                                     lifetime = 30f;
 
-                                    // 对照用：先换回原版特效。
-                                    // 原版 dagger 的子弹连开火特效都没有（只有 casing1 弹壳），
-                                    // 这里用原版小枪的标准三件套。它们全部直接画在 at() 给的点上、
-                                    // 不做任何偏移，所以可以当成「子弹生成点在哪」的探针：
-                                    // 如果这三只看着在枪口上，就说明坐标是对的，问题只在自绘特效内部
-                                    shootEffect = Fx.shootSmall;
-                                    smokeEffect = Fx.shootSmallSmoke;
-                                    hitEffect = Fx.hitBulletSmall;
+                                    // 生成点验证过了：原版 Fx.shootSmall 三件套直接画在 at() 点上，
+                                    // 在游戏里正好落在枪口，说明子弹生成点本身就是枪口，
+                                    // 自绘特效只要不从生成点往回退（FireFx.back = 0）就对齐。
+                                    // 原版那几只留给需要朴素观感的场合，一行就能换回去
+                                    shootEffect = FireFx.MUZZLE;
+                                    smokeEffect = FireFx.MUZZLE_SMOKE;
+                                    hitEffect = FireFx.HIT;
                                     // 弹道跟着机体走橙金，不再用原版那套冷黄
                                     frontColor = FireFx.CORE;
                                     backColor = FireFx.MAIN;
