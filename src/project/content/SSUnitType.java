@@ -730,15 +730,17 @@ public class SSUnitType {
                 weapons.add(new Weapon(ShatteredStarMod.name("large-weapon-allotropes")) {
                         {
                             reload = 10f;
-                            // 挂点和 shootY 全部用贴图作者原值。炮口位置不是按贴图 bbox 反推的，
-                            // 而是由子弹本身定义的：子弹 height 9，尾端压在炮口上，
-                            // 中心因此比炮口靠前 4.5（正好等于这条子弹的 halfHeight）。
-                            // 所以 shootY 4.5 = 子弹中心，炮口在挂点处
+                            // 挂点和 shoot 偏移整套照抄原版 dagger（v160 UnitTypes$1$1）：
+                            //   x = 4, y = 2, top = false, ejectEffect = casing1
+                            //   子弹 width 7 / height 9 / lifetime 60（本 mod 只把速度 2.5→5、寿命 60→30）
+                            // 原版没写 shootX / shootY，取的是 Weapon 的默认值 0 / 3。
+                            // 这里显式写出来，是为了和原版对得上号，不再自己发明 4.5
                             x = 4f;
                             y = 2f;
                             rotate = false;
                             // shootX 横向偏移、shootY 沿炮管方向，两者相对挂点，单位是像素
-                            shootY = 4.5f;
+                            shootX = 0f;
+                            shootY = 3f;
                             top = false;
                             ejectEffect = Fx.casing1;
                             cooldownTime = 20f;
@@ -758,9 +760,9 @@ public class SSUnitType {
                                     lifetime = 30f;
 
                                     // 原版这里两个特效都是空的（只剩一个弹壳），打击感全靠伤害数字。
-                                    // 子弹不是零长度物体：height 9，作者让尾端压在炮口，
-                                    // 中心因此比炮口靠前 4.5。shootEffect/smokeEffect 拿到的
-                                    // 是子弹中心，所以两个特效内部都要沿弹道反方向退 back
+                                    // shootEffect/smokeEffect 拿到的是子弹中心，即挂点沿炮管
+                                    // 前移 shootY 的位置。两个特效内部要沿弹道退回 shootY，
+                                    // 才落回挂点（x/y），也就是贴图上枪口的锚点
                                     shootEffect = FireFx.MUZZLE;
                                     smokeEffect = FireFx.MUZZLE_SMOKE;
                                     hitEffect = FireFx.HIT;

@@ -78,13 +78,16 @@ public class FireFx{
         /** 侧向火星数量（单侧） */
         public int sparks = 2;
         /**
-         * 从子弹中心沿弹道反方向回退的距离，把特效从子弹中心挪到子弹尾端（＝炮口）。
+         * 从子弹中心沿弹道反方向回退的距离。
          *
-         * <p>子弹不是零长度物体：{@code height 9}，作者让尾端压在炮口上，
-         * 中心自然比炮口靠前 4.5。而 {@code shootEffect.at()} 拿到的正是中心坐标，
-         * 不在这里退回去，焰就会浮在炮口前面一截。
+         * <p>{@code shootEffect.at()} 拿到的是子弹生成点，不是炮口：Weapon 把弹药放在
+         * 挂点沿炮管 {@code shootY} 处。原版 dagger 的 {@code shootY} 是 3（Weapon 默认值），
+         * 所以这里退 3，焰正好落回挂点的 {@code x/y}，也就是贴图上枪口的锚点。
+         *
+         * <p><b>必须跟武器的 {@code shootY} 保持一致。</b>两个数一旦对不上，整只
+         * 锥形焰就会沿炮管方向平移，看起来像"飘在枪口前面"或者"缩进机体里"。
          */
-        public float back = 4.5f;
+        public float back = 3f;
 
         public MuzzleEffect(){
             this(1f);
@@ -186,8 +189,8 @@ public class FireFx{
         public float rise = 2.2f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
         public float opacity = 0.46f;
-        /** 从子弹中心沿弹道反退回子弹尾端（炮口）的距离，同 {@link MuzzleEffect#back} */
-        public float back = 4.5f;
+        /** 从子弹中心沿弹道反退回挂点的距离，同 {@link MuzzleEffect#back}，必须等于武器的 shootY */
+        public float back = 3f;
 
         public MuzzleSmokeEffect(){
             this(1f);
@@ -210,7 +213,7 @@ public class FireFx{
             // 不会像之前那样整条跟着炮管横过来
             float rot = e.rotation;
             float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
-            // 烟同样要从子弹中心退回炮口，否则整团烟悬在枪口前方
+            // 烟同样要从子弹生成点退回挂点，否则整团烟悬在枪口前方
             float ox = e.x - cx * back, oy = e.y - cy * back;
 
             Draw.blend(Blending.normal);
