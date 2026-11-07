@@ -64,6 +64,7 @@ jar{
 
     from(projectDir){
         include "mod.hjson"
+        include "README.md"
     }
 
     from("assets/"){
