@@ -730,16 +730,16 @@ public class SSUnitType {
                 weapons.add(new Weapon(ShatteredStarMod.name("large-weapon-allotropes")) {
                         {
                             reload = 10f;
+                            // 挂点用贴图作者的原值。曾按「不透明区 bbox 顶端」推过一次炮口
+                            // （y 2→0、shootX -2、shootY 4.5→12.5），结果枪口被推出炮管一格，
+                            // 特效与炮口整个错开。这门炮的贴图和机体几乎重合，没有独立可见的
+                            // 管口，按 bbox 反推不成立，改回原值
                             x = 4f;
-                            // 挂点回到机体横轴。原先 y = 2f 把整门炮抬高了 2 单位（0.25 格），
-                            // 枪口焰和命中火花都跟着偏高，看着像特效没对准炮管
-                            y = 0f;
+                            y = 2f;
                             rotate = false;
-                            // 贴图 large-weapon-allotropes 是 48×48，炮管不透明区 x 16~28、y 12~37：
-                            // 炮口距贴图中心 12.5 单位，炮管轴线偏左 2 单位。
-                            // 这两个值必须和贴图对上，否则子弹与特效会从炮管中段冒出来
-                            shootX = -2f;
-                            shootY = 12.5f;
+                            // shootX 横向偏移、shootY 沿炮管方向，两者相对挂点。
+                            // 要微调枪口就动这两个数，1 格 = 8 单位
+                            shootY = 4.5f;
                             top = false;
                             ejectEffect = Fx.casing1;
                             cooldownTime = 20f;
