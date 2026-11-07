@@ -760,8 +760,8 @@ public class SSUnitType {
                                     lifetime = 30f;
 
                                     // 生成点验证过了：原版 Fx.shootSmall 三件套直接画在 at() 点上，
-                                    // 在游戏里正好落在枪口，说明子弹生成点本身就是枪口，
-                                    // 自绘特效只要不从生成点往回退（FireFx.back = 0）就对齐。
+                                    // 游戏里正好落在枪口，说明子弹生成点本身就是枪口。
+                                    // 自绘特效全部以这个点为原点绘制，不做任何回退。
                                     // 原版那几只留给需要朴素观感的场合，一行就能换回去
                                     shootEffect = FireFx.MUZZLE;
                                     smokeEffect = FireFx.MUZZLE_SMOKE;

@@ -8,8 +8,10 @@ import arc.graphics.g2d.Lines;
 import arc.math.Interp;
 import arc.math.Mathf;
 import arc.math.Rand;
+import arc.util.Tmp;
 import mindustry.entities.Effect;
 import mindustry.entities.Effect.EffectContainer;
+import mindustry.graphics.Drawf;
 
 /**
  * 开火与打击特效：把原版那几只通用 {@code Fx} 换成本 mod 自己的。
@@ -57,41 +59,35 @@ public class FireFx{
     //  枪口焰
     // ============================================================
     /**
-     * 炮口锥形焰。
+     * 炮口焰。形态照原版 {@code Fx.shootSmall}：一个向前的长三角 + 一个压在枪口后面的短三角，
+     * 8 帧线性收缩。原版只有这两个三角、而且只上纯色；这里在它下面垫了两层发光：
      *
-     * <p>形态是「根部宽、沿炮管迅速收尖」的三角形，两层叠：外层橙、内层白热。
-     * 原版 {@code Fx.shootBig} 是 9 个各向同性的白点，打哪儿都像往空气里吐了口烟；
-     * 锥形能读出「这一炮是朝这个方向打出去的」，这是它和原版最大的区别。
+     * <ul>
+     *   <li><b>自发光光晕</b>：一圈径向渐变的白热球，把三角的硬边糊掉，
+     *       读起来是「从枪口炸开的一团光」，而不是「贴上去的两个三角形」。</li>
+     *   <li><b>场景光</b>：{@link Drawf#light} 注册一个真光源，开火瞬间机体和地面会被照亮。
+     *       原版枪口特效没有这一层，而它恰恰是「发光」最容易被眼睛读到的地方。</li>
+     * </ul>
      *
-     * <p>寿命只有 6 帧：速射武器的枪口焰如果活得比装填久，两发之间会连成一片，
-     * 看起来像炮口一直在喷火，反而失去了每一发的节奏。
+     * <p>颜色不走原版的 {@code Pal.lighterOrange}，仍用机体的橙金三段
+     * （{@link #WARM} → {@link #DEEP}，核心 {@link #CORE}），和机体条纹同一条色路。
+     *
+     * <p>落点就是 {@code shootEffect.at()} 给的子弹生成点，不做任何回退——
+     * 实测原版 {@code Fx.shootSmall} 不做偏移也正好压在枪口上。
      */
     public static class MuzzleEffect extends Effect{
-        /** 焰长（世界单位，1 格 = 8）。0.75 格，略长于机身高 */
-        public float len = 6f;
-        /** 根部半宽，0.16 格：全宽 0.31 格，比机身窄得多，不会盖住机体 */
-        public float halfWidth = 1.25f;
-        /** 侧向火星的张开角度 */
-        public float sparkAngle = 38f;
-        /** 侧向火星长度，0.38 格 */
-        public float sparkLen = 3f;
-        /** 侧向火星数量（单侧） */
-        public int sparks = 2;
-        /**
-         * 从子弹生成点沿弹道反方向回退的距离。默认 0：生成点本身就是枪口。
-         *
-         * <p>实测过的：把 {@code Fx.shootSmall} 挂到同一个 {@code shootEffect} 上，
-         * 游戏里它正好落在枪口 —— 原版特效不做任何偏移，所以生成点 = 枪口。
-         * 反过来说，任何后退都会把焰拉进枪管里。
-         *
-         * <p>依据是贴图：{@code large-weapon-allotropes.png} 里那块橙色实心区
-         * （枪口）落在贴图中心上方约 3px，而武器的 {@code shootY} 正好是 3 ——
-         * 也就是说原版把子弹中心直接放在了枪口上，而不是"尾端压枪口"。
-         *
-         * <p>这个字段留着只是为了某些"子弹很长、必须让步"的武器：那种情况下
-         * 把它设成 {@code shootY - halfHeight}，而不是无脑等于 {@code shootY}。
-         */
-        public float back = 0f;
+        /** 焰长（世界单位，1 格 = 8）。取原版 15px，约 1.9 格 */
+        public float len = 15f;
+        /** 根部全宽。原版 6px */
+        public float width = 6f;
+        /** 枪口后面压着的那一小截尾焰，原版 3px */
+        public float backLen = 3f;
+        /** 场景光半径，0.5 格上下，够把枪口周围一圈照亮 */
+        public float glow = 26f;
+        /** 场景光不透明度。调过 1 就很刺眼，0.7 刚好 */
+        public float glowOpacity = 0.7f;
+        /** 自发光光晕半径，相对焰长 */
+        public float haloScale = 0.35f;
 
         public MuzzleEffect(){
             this(1f);
@@ -99,64 +95,50 @@ public class FireFx{
 
         public MuzzleEffect(float scale){
             len *= scale;
-            halfWidth *= scale;
-            sparkLen *= scale;
-            lifetime = 6f;
-            clip = (len + sparkLen) * 2f + 40f;
+            width *= scale;
+            backLen *= scale;
+            glow *= scale;
+            lifetime = 8f;
+            clip = (len + glow) * 2f + 40f;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
-            float fade = 1f - p;
-            // pow2Out：出膛瞬间就接近满长，之后几乎不再长——枪口焰是被「顶」出来的，不是慢慢伸出来的
-            float out = Interp.pow2Out.apply(p);
+            // 原版是线性收缩：出膛第一帧最长，8 帧收到 0
+            float fout = e.fout();
             float rot = e.rotation;
-            float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
-            // 垂直于炮管的方向，用来撑开锥形的根
-            float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
-            // 从子弹中心退回子弹尾端，也就是炮口
-            float ox = e.x - cx * back, oy = e.y - cy * back;
+            float w = width * (0.35f + 0.65f * fout);
+
+            // ① 场景光：真光源，机体和地面会被照亮
+            Drawf.light(e.x, e.y, glow * (0.6f + 0.4f * fout), WARM, glowOpacity * fout);
 
             Draw.blend(Blending.additive);
 
-            // 外层：橙→暗红，长度随 out 拉满，根部随时间收窄
-            // 宽度收到 45% 就打住、长度也回收 45%：只靠 fade 乘的话，最后两帧会缩成一根
-            // 一像素宽的针，看起来像炮口还挂着一根线，而不是「焰要散了」
-            float w = halfWidth * (0.45f + 0.55f * fade);
-            float tip = len * (0.35f + 0.65f * out) * (0.55f + 0.45f * fade);
-            Draw.color(main(e), DEEP, p);
-            Draw.alpha(fade * 0.9f);
-            tri(ox, oy, nx, ny, w, cx, cy, tip);
+            // ② 外辉光：同形状放大一圈、极淡，让火焰轮廓往外"洇"一层。
+            //    只靠底下的白热球做不出这个形状——球是圆的，火焰是尖的
+            Draw.color(WARM, DEEP, p);
+            Draw.alpha(0.3f * fout);
+            Drawf.tri(e.x, e.y, w * 1.45f, len * fout * 1.12f, rot);
 
-            // 内层：白热，长度和宽度都打六折，叠在外层中间
+            // ③ 自发光光晕：径向渐变的白热球，压在根部
+            Tmp.c1.set(CORE).a(0.4f * fout);
+            Tmp.c2.set(DEEP).a(0f);
+            Fill.light(e.x, e.y, 20, len * haloScale * (0.45f + 0.55f * fout), Tmp.c1, Tmp.c2);
+
+            // ④ 主体：前向长三角 + 后向短三角（原版形态）
+            Draw.color(WARM, DEEP, p);
+            Draw.alpha(0.85f * fout);
+            Drawf.tri(e.x, e.y, w, len * fout, rot);
+            Drawf.tri(e.x, e.y, w, backLen * fout, rot + 180f);
+
+            // ⑤ 白热核心：同形状缩到六成，压在最里面
             Draw.color(CORE);
-            Draw.alpha(fade);
-            tri(ox, oy, nx, ny, w * 0.55f, cx, cy, tip * 0.58f);
-
-            // 侧向火星：从根部往两边各甩两条短线，是「火药被挤出来」的那部分
-            if(sparks > 0 && p < 0.6f){
-                rand.setSeed(e.id);
-                Lines.stroke(0.55f * fade);
-                Draw.color(WARM, DEEP, p);
-                Draw.alpha(fade * 0.8f);
-                for(int i = 0; i < sparks; i++){
-                    float side = i % 2 == 0 ? 1f : -1f;
-                    float a = rot + side * (sparkAngle + rand.range(16f));
-                    float l = sparkLen * (0.4f + 0.6f * out) * rand.random(0.7f, 1.15f);
-                    Lines.line(ox, oy,
-                        ox + Mathf.cosDeg(a) * l,
-                        oy + Mathf.sinDeg(a) * l);
-                }
-            }
+            Draw.alpha(fout);
+            Drawf.tri(e.x, e.y, w * 0.5f, len * fout * 0.6f, rot);
+            Drawf.tri(e.x, e.y, w * 0.5f, backLen * fout * 0.6f, rot + 180f);
 
             Draw.blend();
-        }
-
-        /** 以 (bx,by) 为根、沿 (cx,cy) 指向、根部半宽 hw、长 len 的三角形 */
-        private void tri(float bx, float by, float nx, float ny, float hw, float cx, float cy, float len){
-            Fill.tri(bx + nx * hw, by + ny * hw, bx - nx * hw, by - ny * hw,
-                bx + cx * len, by + cy * len);
         }
     }
 
@@ -193,8 +175,6 @@ public class FireFx{
         public float rise = 2.2f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
         public float opacity = 0.46f;
-        /** 从子弹生成点反退回枪口的距离，同 {@link MuzzleEffect#back}，默认 0 */
-        public float back = 0f;
 
         public MuzzleSmokeEffect(){
             this(1f);
@@ -217,8 +197,6 @@ public class FireFx{
             // 不会像之前那样整条跟着炮管横过来
             float rot = e.rotation;
             float cx = Mathf.cosDeg(rot), cy = Mathf.sinDeg(rot);
-            // 烟同样要从子弹生成点退回挂点，否则整团烟悬在枪口前方
-            float ox = e.x - cx * back, oy = e.y - cy * back;
 
             Draw.blend(Blending.normal);
             Draw.color(SMOKE);
@@ -251,8 +229,8 @@ public class FireFx{
                 // 侧向散开走世界水平，上浮走世界竖直，两者都与 rot 无关
                 float sideD = spread * side * Interp.pow2In.apply(pp) * 1.6f;
                 float riseD = rise * sz * Interp.pow2In.apply(pp);
-                float x = ox + cx * travel + sideD;
-                float y = oy + cy * travel + riseD;
+                float x = e.x + cx * travel + sideD;
+                float y = e.y + cy * travel + riseD;
                 float r = size * sz * (0.34f + 0.66f * Interp.pow3Out.apply(pp));
 
                 // 起手两帧涨到满不透明度，之后缓慢消。这个 0.07 别调大：
