@@ -67,14 +67,14 @@ public class FireFx{
      * 看起来像炮口一直在喷火，反而失去了每一发的节奏。
      */
     public static class MuzzleEffect extends Effect{
-        /** 焰长（像素，scale = 1 时） */
-        public float len = 22f;
-        /** 根部半宽 */
-        public float halfWidth = 5.5f;
+        /** 焰长（世界单位，1 格 = 8）。0.75 格，略长于机身高 */
+        public float len = 6f;
+        /** 根部半宽，0.16 格：全宽 0.31 格，比机身窄得多，不会盖住机体 */
+        public float halfWidth = 1.25f;
         /** 侧向火星的张开角度 */
         public float sparkAngle = 38f;
-        /** 侧向火星长度 */
-        public float sparkLen = 12f;
+        /** 侧向火星长度，0.38 格 */
+        public float sparkLen = 3f;
         /** 侧向火星数量（单侧） */
         public int sparks = 2;
 
@@ -110,26 +110,26 @@ public class FireFx{
             float tip = len * (0.35f + 0.65f * out) * (0.55f + 0.45f * fade);
             Draw.color(main(e), DEEP, p);
             Draw.alpha(fade * 0.9f);
-            tri(e.x + cx * 2f, e.y + cy * 2f, nx, ny, w, cx, cy, tip);
+            tri(e.x + cx * 1f, e.y + cy * 1f, nx, ny, w, cx, cy, tip);
 
             // 内层：白热，长度和宽度都打六折，叠在外层中间
             Draw.color(CORE);
             Draw.alpha(fade);
-            tri(e.x + cx * 2f, e.y + cy * 2f, nx, ny, w * 0.55f, cx, cy, tip * 0.58f);
+            tri(e.x + cx * 1f, e.y + cy * 1f, nx, ny, w * 0.55f, cx, cy, tip * 0.58f);
 
             // 侧向火星：从根部往两边各甩两条短线，是「火药被挤出来」的那部分
             if(sparks > 0 && p < 0.6f){
                 rand.setSeed(e.id);
-                Lines.stroke(1.3f * fade);
+                Lines.stroke(0.55f * fade);
                 Draw.color(WARM, DEEP, p);
                 Draw.alpha(fade * 0.8f);
                 for(int i = 0; i < sparks; i++){
                     float side = i % 2 == 0 ? 1f : -1f;
                     float a = rot + side * (sparkAngle + rand.range(16f));
                     float l = sparkLen * (0.4f + 0.6f * out) * rand.random(0.7f, 1.15f);
-                    Lines.line(e.x + cx * 2f, e.y + cy * 2f,
-                        e.x + cx * 2f + Mathf.cosDeg(a) * l,
-                        e.y + cy * 2f + Mathf.sinDeg(a) * l);
+                    Lines.line(e.x + cx * 1f, e.y + cy * 1f,
+                        e.x + cx * 1f + Mathf.cosDeg(a) * l,
+                        e.y + cy * 1f + Mathf.sinDeg(a) * l);
                 }
             }
 
@@ -162,16 +162,16 @@ public class FireFx{
      * 硬边圆的锯齿比贴图糊边更容易看出来，三层递减正好把边缘磨掉。
      */
     public static class MuzzleSmokeEffect extends Effect{
-        /** 单团终态半径 */
-        public float size = 7f;
+        /** 单团终态半径，0.3 格 */
+        public float size = 2.4f;
         /** 团数：1 主团 + 1 炮口团 + 其余碎絮 */
         public int puffs = 4;
-        /** 沿炮管方向漂出的距离 */
-        public float drift = 20f;
-        /** 垂直于炮管的散开量 */
-        public float spread = 6f;
+        /** 沿炮管方向漂出的距离，0.69 格 */
+        public float drift = 5.5f;
+        /** 垂直于炮管的散开量，0.19 格 */
+        public float spread = 1.5f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
-        public float opacity = 0.42f;
+        public float opacity = 0.46f;
 
         public MuzzleSmokeEffect(){
             this(1f);
@@ -203,7 +203,7 @@ public class FireFx{
                 // 枪口烟本来就是「一股主线 + 边缘碎絮」，不是三个并列的团
                 boolean core = i == 0;
                 // 第二团钉死在炮口，专门负责让烟「从枪口长出来」。
-                // 只有主团时它的中心离炮口 7~13px，靠自身柔边接不上，中间会空一段，
+                // 只有主团时它的中心离炮口 2~3px，靠自身柔边接不上，中间会空一段，
                 // 看着像烟飘在枪口前面，而不是从枪口冒出来
                 boolean root = i == 1;
                 float along = core ? 0.62f : root ? 0.1f : rand.random(0.2f, 0.5f);
@@ -267,12 +267,12 @@ public class FireFx{
      * 破片和火花本来就是被打中的东西往回溅的，往前飞反而像武器自己在喷东西。
      */
     public static class HitSparkEffect extends Effect{
-        /** 最长的一条线 */
-        public float len = 14f;
+        /** 最长的一条线，0.48 格 */
+        public float len = 3.8f;
         /** 线条数 */
         public int lines = 6;
         /** 白闪半径。别超过线条的起手长度，否则第一帧会被这颗圆点整个盖住，只剩一片白 */
-        public float flash = 1.8f;
+        public float flash = 0.8f;
 
         public HitSparkEffect(){
             this(1f);
@@ -309,7 +309,7 @@ public class FireFx{
                 float side = i % 2 == 0 ? 1f : -1f;
                 float a = rot + 180f + side * rand.random(8f, 39f);
                 float l = len * out * rand.random(0.4f, 1f);
-                Lines.stroke(1.35f * fade * rand.random(0.7f, 1.1f));
+                Lines.stroke(0.5f * fade * rand.random(0.7f, 1.1f));
                 Lines.line(e.x + Mathf.cosDeg(a) * l * 0.25f, e.y + Mathf.sinDeg(a) * l * 0.25f,
                     e.x + Mathf.cosDeg(a) * l, e.y + Mathf.sinDeg(a) * l);
             }

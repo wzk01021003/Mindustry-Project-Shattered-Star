@@ -731,9 +731,15 @@ public class SSUnitType {
                         {
                             reload = 10f;
                             x = 4f;
-                            y = 2f;
+                            // 挂点回到机体横轴。原先 y = 2f 把整门炮抬高了 2 单位（0.25 格），
+                            // 枪口焰和命中火花都跟着偏高，看着像特效没对准炮管
+                            y = 0f;
                             rotate = false;
-                            shootY = 4.5f;
+                            // 贴图 large-weapon-allotropes 是 48×48，炮管不透明区 x 16~28、y 12~37：
+                            // 炮口距贴图中心 12.5 单位，炮管轴线偏左 2 单位。
+                            // 这两个值必须和贴图对上，否则子弹与特效会从炮管中段冒出来
+                            shootX = -2f;
+                            shootY = 12.5f;
                             top = false;
                             ejectEffect = Fx.casing1;
                             cooldownTime = 20f;
