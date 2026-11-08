@@ -10,6 +10,7 @@ import arc.math.Mathf;
 import arc.math.Rand;
 import arc.util.Tmp;
 import mindustry.entities.Effect;
+import mindustry.entities.bullet.BulletType;
 import mindustry.entities.Effect.EffectContainer;
 import mindustry.graphics.Drawf;
 
@@ -413,5 +414,38 @@ public class FireFx{
     /** 按尺寸取命中火花 */
     public static Effect hit(float scale){
         return new HitSparkEffect(scale);
+    }
+
+    /**
+     * 一次给一颗子弹接上三件套（枪口焰 / 余烟 / 命中火花）。
+     *
+     * <p>三个特效都挂在 {@link BulletType} 上，任何武器、任何单位都能用：
+     * <pre>{@code
+     * bullet = new BasicBulletType(5f, 9){
+     *     {
+     *         // ... 其余参数
+     *         FireFx.attach(this, 1f);
+     *     }
+     * };
+     * }</pre>
+     *
+     * <p><b>装之前先看两件事：</b>
+     *
+     * <ul>
+     *   <li><b>落点</b>：{@code shootEffect} 画在「挂点 + shootY」处，也就是子弹生成点。
+     *       有独立炮管的武器通常正好落在管口；而 {@code x = y = 0} 的内置武器
+     *       （例如 nova-at 的发射口在机体中心）会把火焰画在机身上，糊住单位。
+     *       遇到这种要么改 shootY，要么不要装焰。</li>
+     *   <li><b>射速</b>：烟活 110 帧，{@code reload = 2} 的速射武器会同时存在上百团，
+     *       每团 4 个 puff × 6 个圆。给速射武器装烟请单独 {@code new MuzzleSmokeEffect()}
+     *       并把 {@code life} 压到 30 左右，或者只装焰不装烟。</li>
+     * </ul>
+     *
+     * @param scale 口径系数，hitSize 8 的机甲用 1，大一圈的炮用 1.4 ~ 2.5
+     */
+    public static void attach(BulletType bullet, float scale){
+        bullet.shootEffect = muzzle(scale);
+        bullet.smokeEffect = muzzleSmoke(scale);
+        bullet.hitEffect = hit(scale);
     }
 }
