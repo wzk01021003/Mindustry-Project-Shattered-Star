@@ -148,10 +148,14 @@ public class FireFx{
     /**
      * 炮口余烟。
      *
-     * <p>枪口焰只有 6 帧，是「砰」的那一下；烟活 30 帧，是「砰」之后留在原地的痕迹。
-     * 两者寿命差五倍，正好把连发的节奏串起来：焰负责每一发的点，烟负责整串的线。
-     * 只有焰没有烟的话，速射武器看起来像在戳空气——每一下都干净利落地消失，
-     * 没有任何东西证明上一发刚刚发生过。
+     * <p>这团烟是<b>战场上的东西</b>，不是机体的挂件：它生成在世界坐标里，
+     * 不跟随单位、不跟随炮塔，生成之后就只做三件事——被气流推开、往上浮、被风吹。
+     * 机体开走以后烟还在原处慢慢散。
+     *
+     * <p>枪口焰只有 6 帧，是「砰」的那一下；烟活 110 帧（约 1.7 秒），是「砰」之后
+     * 留在原地的那点痕迹。两者寿命差近二十倍，正好把连发的节奏串起来：
+     * 焰负责每一发的点，烟负责整串的线。只有焰没有烟的话，速射武器看起来像在戳空气——
+     * 每一下都干净利落地消失，没有任何东西证明上一发刚刚发生过。
      *
      * <p>必须用 {@link Blending#normal}。additive 会把灰烟加成白雾，
      * 在暗色地形上等于贴了一块发光板，比不加更糟；这也是原版 {@code Fx.smoke}
@@ -169,12 +173,16 @@ public class FireFx{
         public float drift = 5.5f;
         /** 出膛初速是否沿炮管。默认 false：烟只在炮口膨胀上浮，完全不理会炮塔朝向 */
         public boolean followBarrel = false;
-        /** 侧向散开量，0.19 格。走世界水平方向，不随炮塔转 */
-        public float spread = 1.5f;
-        /** 出膛后向世界正上方浮起的距离，0.28 格。烟离开炮口就不再属于炮塔了 */
-        public float rise = 2.2f;
+        /** 侧向散开量，0.45 格。走世界水平方向，不随炮塔转 */
+        public float spread = 3.6f;
+        /** 出膛后向世界正上方浮起的距离，1.25 格。烟离开炮口就不再属于炮塔了 */
+        public float rise = 10f;
+        /** 世界水平方向的风，把所有团往同一侧慢慢推。这是「属于战场」而不是「属于武器」最直接的信号 */
+        public float wind = 1.4f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
-        public float opacity = 0.46f;
+        public float opacity = 0.42f;
+        /** 寿命，110 帧约 1.7 秒。比枪口焰（6 帧）长一个量级，才可能在原地留下东西 */
+        public float life = 110f;
 
         public MuzzleSmokeEffect(){
             this(1f);
@@ -185,8 +193,14 @@ public class FireFx{
             drift *= scale;
             spread *= scale;
             rise *= scale;
-            lifetime = 30f;
-            clip = (drift + spread + rise + size * 2f) * 2f + 40f;
+            wind *= scale;
+            lifetime = life;
+            // 烟一生成就钉死在世界坐标上：不跟随单位、不跟随炮塔。
+            // Effect 只在 followParent 为真、且 at() 的 data 是单位时才会跟着单位走；
+            // 这里两个开关都显式关掉并留在这里，避免以后随手打开又变成「机体在冒烟」
+            followParent = false;
+            rotWithParent = false;
+            clip = (rise + spread + wind + size * 3f) * 2f + 40f;
         }
 
         @Override
@@ -226,16 +240,27 @@ public class FireFx{
                 // 打开时用 pow3Out，出膛瞬间走完大部分行程就停住——用 pow2Out 的话
                 // 后半段还在往前爬，烟会一路跟着炮口跑，看着像拖尾
                 float travel = followBarrel ? drift * along * Interp.pow3Out.apply(pp) : 0f;
-                // 侧向散开走世界水平，上浮走世界竖直，两者都与 rot 无关
-                float sideD = spread * side * Interp.pow2In.apply(pp) * 1.6f;
-                float riseD = rise * sz * Interp.pow2In.apply(pp);
-                float x = e.x + cx * travel + sideD;
+                // 世界坐标下的三股位移，全部与 rot 无关：
+                //   ① 侧向散开 —— 出膛后被气流推开，越推越远
+                //   ② 上浮 —— 前慢后快，热烟自己往上爬，不是匀速平移
+                //   ③ 风 —— 全场同一个方向，是「这团烟属于战场」最直接的暗示
+                float sideD = spread * side * Interp.pow2Out.apply(pp);
+                float riseD = rise * sz * (0.35f * pp + 0.65f * pp * pp);
+                float windD = wind * pp;
+                // 每团相位不同的小摆动。没有它，四团烟就是四条平行上升的直线；
+                // 相位若相同，会变成整块一起左右摆，更像贴图在动而不是空气在动
+                float turb = Mathf.sin(pp * 3.1f + i * 1.7f) * 0.9f * pp;
+                float x = e.x + cx * travel + sideD + windD + turb;
                 float y = e.y + cy * travel + riseD;
-                float r = size * sz * (0.34f + 0.66f * Interp.pow3Out.apply(pp));
+                // 半径一路长到终态：开火瞬间迅速胀开，之后还在慢慢变大。
+                // 若像焰那样在 30% 内长完，剩下 70% 就是一坨定住不动的灰斑
+                float r = size * sz * (0.3f + 0.7f * Mathf.pow(pp, 0.55f));
 
-                // 起手两帧涨到满不透明度，之后缓慢消。这个 0.07 别调大：
-                // 烟比焰亮得还慢的话，第一帧炮口是空的，像没打出去
-                float a = Mathf.clamp(pp / 0.07f) * Mathf.pow(1f - pp, 1.3f) * opacity * dim;
+                // 起手两帧涨到满不透明度，之后是很长的淡出尾巴。
+                // 这个 0.06 别调大：烟比焰亮得还慢的话，第一帧炮口是空的，像没打出去。
+                // 尾段用 1.2 次幂（不是 1.6）：烟是慢慢散开的，不是到点就熄，
+                // 太陡的衰减会让后一半寿命完全看不见，等于寿命白给
+                float a = Mathf.clamp(pp / 0.06f) * Mathf.pow(1f - pp, 1.2f) * opacity * dim;
 
                 // 四层递减：最外那层只有 0.1a，专门用来磨掉边缘。
                 // 之前三层时最外圈直接从 0 跳到 0.4a，小半径下能看出锯齿状的硬边
@@ -245,7 +270,8 @@ public class FireFx{
                 // 这正是它上一版看起来像「贴上去的灰点」的原因。
                 // 长轴固定竖直（世界 +y），不跟炮管转——否则炮塔一转，烟条就横过来
                 float er = r * 0.82f;
-                float eo = r * 0.45f;
+                // 越老的烟拉得越长：上升时上缘跑得快、下缘被拖住，形状会自己变细长
+                float eo = r * (0.45f + 0.25f * pp);
                 float ax = x, ay = y + eo;
                 float bx = x, by = y - eo;
 
