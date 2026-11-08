@@ -5,6 +5,7 @@ import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
+import arc.math.Angles;
 import arc.math.Interp;
 import arc.math.Mathf;
 import arc.math.Rand;
@@ -58,37 +59,43 @@ public class LaserFx{
     //  枪口脉冲
     // ============================================================
     /**
-     * 激光枪口脉冲。一圈外扩的光圈 + 一颗枪口光球，5 帧收完，<b>没有光束</b>。
+     * 激光枪口脉冲。一圈外扩的光环 + 一束沿弹道喷出去的电弧 + 一颗压心光球，5 帧收完。
      *
-     * <p>光束去掉了。一条等宽的线从枪口直挺挺伸出去 15px，在 8 格机身上不像
-     * 「射出去」，倒像一根发光的棍子支在那儿——它既不是弹道（弹丸自己会飞），
-     * 也不是原版有的东西，纯粹是画蛇添足。
-     *
-     * <p><b>原版的手感只来自一圈环。</b>v160 的 {@code LaserBoltBulletType} 构造里
-     * 写着 {@code smokeEffect = hitEffect = despawnEffect = Fx.hitLaser}——第一项是
-     * <b>枪口</b>：
+     * <p>形态直接照埃里克尔单位。v160 里 {@code elude} / {@code avert} / {@code disrupt}
+     * 这些能量武器的枪口全是同一个 {@code Fx.sparkShoot}：
      *
      * <pre>
-     * color(Color.white, Pal.heal, e.fin());
-     * stroke(0.5f + e.fout());
-     * Lines.circle(e.x, e.y, e.fin() * 5f);
+     * color(Color.white, e.color, e.fin());
+     * stroke(e.fout() * 1.2f + 0.6f);
+     * randLenVectors(e.id, 7, 25f * e.finpow(), e.rotation, 3f, (x, y) -&gt; {
+     *     lineAngle(e.x + x, e.y + y, Mathf.angle(x, y), e.fslope() * 5f + 0.5f);
+     * });
      * </pre>
      *
-     * <p>白→绿、实色、张开就完，没有任何叠加混合，所以在任何地形上都是硬的。
-     * 这里照原样做，只把半径从 5 放大到 9：原版那圈直径只有 10px，套在 8 格机身
-     * 上只够包住枪口，读不出「一次放电」。再补一颗光球压在环心，负责过曝。
+     * <p>七条<b>短线</b>沿弹道散出去，每条最长 5.5px——是一束「呲」出来的电弧，不是
+     * 一根长棍。方向感由此而来，但不会留下任何贯穿画面的直条。大单位 {@code obviate}
+     * 另外叠一圈 {@code WaveEffect}，这里把两样合在一起：环负责「放电」，电弧负责方向。
+     *
+     * <p>两层都走普通混合、alpha 恒 1，和原版一样。叠加混合只在中心那颗光球上用，
+     * 负责过曝——在草地这种中亮地形上，走叠加的东西叠多少都看不出来。
      */
     public static class LaserMuzzleEffect extends Effect{
-        /** 枪口光球基准半径，1.6。光球按 3.2 倍画，实际直径约 10px */
+        /** 电弧散布半径，2.1 格。原版 {@code Fx.sparkShoot} 是 25（3 格），这里按机体略收 */
+        public float reach = 20f;
+        /** 电弧条数，原版 7 */
+        public int sparks = 7;
+        /** 电弧相对弹道的散布角，原版 3°。窄扇形让这几条线沿弹道排开，读成「喷出去」而不是「炸开」 */
+        public float spread = 3f;
+        /** 单根电弧的长度系数。原版 5（最长 5.5px），这里 6：短于 5px 在 1x 下会被采样吃掉 */
+        public float sparkLen = 6f;
+        /** 光圈起始 / 最大半径 */
+        public float ringFrom = 2f, ringTo = 13f;
+        /** 光圈线宽，从 strokeFrom 收到 strokeTo */
+        public float strokeFrom = 2.4f, strokeTo = 0.15f;
+        /** 场景光半径与不透明度 */
+        public float glow = 14f, glowOpacity = 0.5f;
+        /** 中心光球基准半径 */
         public float width = 1.6f;
-        /** 场景光半径 */
-        public float glow = 16f;
-        /** 场景光不透明度 */
-        public float glowOpacity = 0.55f;
-        /** 光圈最大半径。原版 {@code Fx.hitLaser} 是 5，这里 9 */
-        public float ring = 9f;
-        /** 光圈收细量。线宽按 {@code 0.45 + ringStroke * fout} 从 1.8 收到 0.45 */
-        public float ringStroke = 1.35f;
         /** 主色。null 用 {@link LaserFx#GLOW}，换武器时在工厂里设 */
         public Color tint;
 
@@ -97,40 +104,50 @@ public class LaserFx{
         }
 
         public LaserMuzzleEffect(float scale){
-            width *= scale;
+            reach *= scale;
+            sparkLen *= scale;
+            ringFrom *= scale;
+            ringTo *= scale;
             glow *= scale;
-            ring *= scale;
-            // 5 帧。nova 的 reload 是 7 帧，8 帧的特效会首尾相接、一帧不落地糊成常亮；
+            width *= scale;
+            // 5 帧。nova 的 reload 是 7 帧，12 帧的原版时长会首尾相接糊成常亮；
             // 留 2 帧空档，每次开火才有「一下一下」的节奏
             lifetime = 5f;
-            clip = (glow + ring) * 2f + 40f;
+            clip = Math.max(reach, ringTo) * 2f + 40f;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
             float fout = e.fout();
-            // 前 45% 是「过曝」窗口：光球最亮最大，过了才交给衰减
-            float hot = Mathf.clamp(1f - p / 0.45f);
+            float hot = Mathf.clamp(1f - p / 0.5f);
+            Color c = pick(e, tint);
 
-            Drawf.light(e.x, e.y, glow * (0.85f + 0.15f * fout), pick(e, tint),
-                glowOpacity * (0.45f + 0.55f * fout));
+            Drawf.light(e.x, e.y, glow * (0.8f + 0.2f * fout), c,
+                glowOpacity * (0.5f + 0.5f * fout));
 
-            // ① 光圈：原版 Fx.hitLaser 的形态——普通混合、白→主色、张开的同
-            //    时线宽收细。整套特效的「力度」全在这一层：实色、一帧张开，
-            //    比任何叠加辉光都硬
+            // 两层都用普通混合：实色线条在任何地形上都是硬的，叠加混合只留给光球
             Draw.blend(Blending.normal);
-            Draw.color(CORE, pick(e, tint), p);
-            Draw.alpha(1f);
-            Lines.stroke(0.45f + ringStroke * fout);
-            Lines.circle(e.x, e.y, ring * Interp.pow2Out.apply(p));
+            Draw.color(CORE, c, p);
 
-            // ② 枪口光球：压住环心，过曝窗口内几乎全白。去掉光束之后它就是
-            //    唯一的实心亮块，没有它光圈会读成「一圈线」而不是「一下放电」
+            // ① 光环：{@code WaveEffect} 的形态（obviate 那圈），张开的同时线宽收细
+            Lines.stroke(Mathf.lerp(strokeFrom, strokeTo, p));
+            Lines.circle(e.x, e.y, Mathf.lerp(ringFrom, ringTo, p));
+
+            // ② 电弧：原版 Fx.sparkShoot 的原样。每条线从枪口外一点起、朝外再画一小截，
+            //    散布半径随 finpow 张到 reach——离开枪口时是一团，随后被「吹」成扇形
+            // 线宽 1.6 → 0.5，和原版的 0.6 ~ 1.8 同一量级。再粗，第一帧七条线挤在
+            // 枪口那一小块里会糊成一个白团——电弧的「细」正是它和光束的区别
+            Lines.stroke(0.5f + 1.1f * fout);
+            Angles.randLenVectors(e.id, sparks, reach * e.finpow(), e.rotation, spread, (x, y) -> {
+                Lines.lineAngle(e.x + x, e.y + y, Mathf.angle(x, y), e.fslope() * sparkLen + 0.5f);
+            });
+
+            // ③ 压心光球：环心那点过曝。没有它，环 + 电弧会读成「一圈线加几根刺」
             Draw.blend(Blending.additive);
-            Tmp.c1.set(CORE).a(0.6f + 0.4f * hot);
-            Tmp.c2.set(pick(e, tint)).a(0f);
-            Fill.light(e.x, e.y, 20, width * 3.2f * (0.65f + 0.35f * hot), Tmp.c1, Tmp.c2);
+            Tmp.c1.set(CORE).a(0.22f + 0.28f * hot);
+            Tmp.c2.set(c).a(0f);
+            Fill.light(e.x, e.y, 18, width * 1.8f * (0.7f + 0.3f * hot), Tmp.c1, Tmp.c2);
 
             Draw.blend();
         }
