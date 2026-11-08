@@ -71,7 +71,7 @@ public class ShatteredStarMod extends Mod {
         // 0. 实验性渲染
         SSSettings.load();
         DistortionRenderer.init();
-        // 0.05. 扬尘渲染器：把尘从 Layer.effect 挪到单位下面
+        // 0.05. 扬尘渲染器：尘团的层号 / 出生坐标由它统一管
         DustRenderer.init();
         // 0.1. 星辉跃迁设置
         SSWarpSettings.load();

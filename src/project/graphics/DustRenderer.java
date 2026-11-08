@@ -48,10 +48,13 @@ public class DustRenderer{
 
     public static class Puff{
         public int id;
+        /** 出生那一刻记下的世界坐标，之后不再改动 */
         public float x, y, rotation;
         public float age, life;
         public int seed;
         public Painter painter;
+        /** 本帧是否还被 Effect 播放着，由 {@link #retain} 每帧置位 */
+        public boolean touched;
     }
 
     /** 绘制顺序 = 出生顺序 */
@@ -69,19 +72,20 @@ public class DustRenderer{
     }
 
     /**
-     * 按 id 保活一个尘团。由 {@code Effect.render} 每帧调用。
+     * 按 id 保活一个尘团。由 {@code Effect.render} 每帧调用，但<b>只有第一帧有效</b>：
+     * 位置、朝向、寿命都在这一刻定死，之后再调用只是打个标记。
+     *
+     * <p>为什么不能每帧对齐坐标：{@code e.x/e.y} 是炮口位置，随单位和炮塔转动一直在变。
+     * 每帧刷新的结果是已经铺出去的土跟着炮口整片平移 / 旋转，看起来像挂在炮上的
+     * 一团挂件。尘是留在原地的土，生成后就该和炮口脱钩。
      *
      * <p>同一个 Effect 实例被多门炮同时播放时，每次播放的 EffectState id 不同，
-     * 所以互不干扰；同一个 id 重复调用只是刷新位置，不会重复创建——
-     * 这就是不另外写一套「出生 / 存活 / 回收」状态机的原因。
+     * 所以互不干扰。
      */
     public static void retain(int id, float x, float y, float rotation, float life, int seed, Painter painter){
         Puff p = byId.get(id);
         if(p != null){
-            // 位置和朝向每帧对齐一次：炮口相对机体的偏移会随单位转动变化
-            p.x = x;
-            p.y = y;
-            p.rotation = rotation;
+            p.touched = true;
             return;
         }
 
@@ -94,6 +98,7 @@ public class DustRenderer{
         p.life = life;
         p.seed = seed;
         p.painter = painter;
+        p.touched = true;
         byId.put(id, p);
         order.add(p);
     }
@@ -116,11 +121,14 @@ public class DustRenderer{
             Puff p = order.get(i);
             // 和普通 Effect 同一个时间源：暂停时一起冻结，不出现「尘走了、单位没动」
             p.age += Time.delta;
-            if(p.age >= p.life){
+            // touched 由 Effect.render 每帧置位：Effect 一旦不再播放（寿命到、切图、
+            // Effects.clear、单位被删），这里立刻回收，不用等 age 追平 life
+            if(p.age >= p.life || !p.touched){
                 order.remove(i);
                 byId.remove(p.id);
                 recycle(p);
             }
+            p.touched = false;
         }
     }
 
