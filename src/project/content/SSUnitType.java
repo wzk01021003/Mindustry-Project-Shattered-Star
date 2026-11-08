@@ -94,6 +94,7 @@ import project.content.units.GlowLegsUnitType;
 import project.content.units.GlowErekirLegsUnitType;
 import project.graphics.DistortionFx;
 import project.graphics.FireFx;
+import project.graphics.LaserFx;
 import project.graphics.WarpShapes;
 import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
@@ -219,25 +220,14 @@ public class SSUnitType {
 
                             bullet = new ArtilleryBulletType(4f, 20f, "shell") {
                                 {
-                                    // 双层扭曲：内层 13 帧内爆「拧紧」，外层 32 帧锐环外扩。
-                                    // 两者同时触发，靠寿命差自然形成先收后散的双段节奏，
-                                    // 比单一预设更接近铁锈未来科技等离子炮的冲击感。
-                                    // 顺序上外层优先：maxPerFrame 在低画质档仅 2 个槽位，
-                                    // 双层占满时若被限流应保留主视觉（锐环外扩），
-                                    // 丢掉内层只损失层次感，不会退化成「只有内吸」。
-                                    hitEffect = new MultiEffect(
-                                        Fx.blastExplosion,
-                                        DistortionFx.fortressArtilleryImpact,
-                                        DistortionFx.fortressArtilleryImplosion);
-                                    // 炮弹飞抵最大射程未命中时同样播放扭曲，保持观感一致。
-                                    // 落地额外加一圈扬尘：爆炸只有 32 帧，是「光」；
-                                    // 尘 80 帧，是「土」，负责让这一炮看起来真的砸在了地上，
-                                    // 而不是在半空炸开。只挂 despawnEffect 不挂 hitEffect——
-                                    // 后者打中空中单位时也会触发，那时地上没有土可扬
-                                    despawnEffect = new MultiEffect(
-                                        DistortionFx.fortressArtilleryImpact,
-                                        DistortionFx.fortressArtilleryImplosion,
-                                        FireFx.DUST);
+                                    // 命中只留原版爆炸：屏幕空间的扭曲在俯视角下会把地形
+                                    // 连同敌方单位一起「拧」掉，一炮下去看不清打中了什么
+                                    hitEffect = Fx.blastExplosion;
+                                    // 落地单独加一圈扬尘。爆炸 32 帧是「光」，尘 80 帧是「土」，
+                                    // 两者叠在一起这一炮才有重量，不像在半空炸开的烟花。
+                                    // 只挂 despawnEffect 不挂 hitEffect——后者打中空中单位时
+                                    // 也会触发，那时地上没有土可扬
+                                    despawnEffect = FireFx.DUST;
                                     knockback = 0.8f;
                                     lifetime = 53.25f;
                                     maxRange = 240f;
@@ -855,6 +845,12 @@ public class SSUnitType {
                                     lifetime = 15f;
                                     status = StatusEffects.electrified;
                                     statusDuration = 15f;
+
+                                    // 发射脉冲 + 命中光斑，并将 smokeEffect 归零：
+                                    // LaserBoltBulletType 构造里把 smokeEffect 设成了
+                                    // Fx.hitLaser，等于每开一枪都在枪口播一遍「命中」，
+                                    // 这是原版激光枪口看起来乱糟糟的根源。激光没有烟
+                                    LaserFx.attach(this, 0.85f);
                                 }
                             };
                         }
