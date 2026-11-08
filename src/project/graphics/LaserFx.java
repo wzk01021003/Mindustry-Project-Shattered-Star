@@ -58,11 +58,24 @@ public class LaserFx{
     //  枪口脉冲
     // ============================================================
     /**
-     * 激光枪口脉冲。一条细锥 + 一颗枪口光球 + 一道横向能量闪，6 帧内收完。
+     * 激光枪口脉冲。一圈外扩的光圈 + 一条细光束 + 一颗枪口光球，5 帧内收完。
      *
-     * <p>横向那道闪是这套特效里唯一「非物理」的东西：它垂直于弹道，在真实的激光里
-     * 不存在。但它能把枪口从「一个点」变成「一次放电」，速射时尤其明显——
-     * 没有它，每秒八发的武器看起来只是在枪口反复擦亮一颗小灯。
+     * <p><b>光圈才是原版的手感来源。</b>查一下 v160 的源码就清楚了：
+     * {@code LaserBoltBulletType} 的构造里写着
+     * {@code smokeEffect = hitEffect = despawnEffect = Fx.hitLaser}——注意第一项，
+     * 这一项是<b>枪口</b>特效。所以原版激光每开一枪，枪口除了
+     * {@code Fx.shootSmall} 那个橙锥，还会同时播一遍 {@code Fx.hitLaser}：
+     *
+     * <pre>
+     * color(Color.white, Pal.heal, e.fin());
+     * stroke(0.5f + e.fout());
+     * Lines.circle(e.x, e.y, e.fin() * 5f);
+     * </pre>
+     *
+     * <p>白→绿、实色、张开就完。没有任何叠加混合，所以它在任何地形上都是硬的。
+     * 上一版把这层当成「原版在枪口误播命中」删掉了，只剩一条叠加的线——
+     * 手感也就跟着没了。现在把它按原样做回来，只是半径放到 7（光束有 15px 长，
+     * 5 太小包不住），并和光束、光球合成同一个 Effect，时序才对得上。
      */
     public static class LaserMuzzleEffect extends Effect{
         /** 光束长度，2.25 格。和原版 {@code Fx.shootSmall} 的 15 对齐——再短就只是枪口一点绿光 */
@@ -73,8 +86,11 @@ public class LaserFx{
         public float glow = 16f;
         /** 场景光不透明度 */
         public float glowOpacity = 0.55f;
-        /** 横向能量闪的半长，相对宽度 */
-        public float crossScale = 3.2f;
+        /** 光圈最大半径。原版 {@code Fx.hitLaser} 是 5，这里 9：原版那个环只有 10px 直径，
+         *  在 8 格机身上只够包住枪口，读不出「一次放电」 */
+        public float ring = 9f;
+        /** 光圈收细量。线宽按 {@code 0.45 + ringStroke * fout} 从 1.8 收到 0.45 */
+        public float ringStroke = 1.35f;
         /** 主色。null 用 {@link LaserFx#GLOW}，换武器时在工厂里设 */
         public Color tint;
 
@@ -86,10 +102,11 @@ public class LaserFx{
             len *= scale;
             width *= scale;
             glow *= scale;
+            ring *= scale;
             // 5 帧。nova 的 reload 是 7 帧，8 帧的特效会首尾相接、一帧不落地糊成常亮；
             // 留 2 帧空档，每次开火才有「一下一下」的节奏
             lifetime = 5f;
-            clip = (len + glow) * 2f + 40f;
+            clip = (len + glow + ring) * 2f + 40f;
         }
 
         @Override
@@ -99,39 +116,42 @@ public class LaserFx{
             float rot = e.rotation;
             Color glowColor = pick(e, tint);
 
-            // 前 45% 是「过曝」窗口。原版枪口焰之所以硬，是因为它第一帧就已经长满
-            // 6px 宽、15px 长，而且是实色——没有任何一帧是半透明的。这里用 hot
-            // 复刻那段满亮度：窗口内白芯全亮、光球最大、横闪最长，过了才交给衰减
+            // 前 45% 是「过曝」窗口，之后才交给衰减
             float hot = Mathf.clamp(1f - p / 0.45f);
-            // 长度：前 40% 一动不动，之后 3 帧内收完。原来乘 fout 是线性缩水，
-            // 从头到尾都挂着一根越来越短的半透明棍子——「软」有一半是这根棍造成的。
-            // 光束该是「整条亮着，然后整条没了」，不是慢慢缩水
+            // 光束前 40% 钉死、之后一次收回。乘 fout 线性缩水会挂出一根越来越短的棍子
             float shrink = Interp.pow3In.apply(Mathf.clamp((p - 0.4f) / 0.6f));
             float lenD = len * (1f - shrink);
 
             Drawf.light(e.x, e.y, glow * (0.85f + 0.15f * fout), glowColor,
                 glowOpacity * (0.45f + 0.55f * fout));
 
+            // ① 光圈：原版 Fx.hitLaser 的形态——普通混合、白→主色、张开的同
+            //    时线宽收细。这一层是「力度」的主力：实色、一帧张开，比任何叠加辉光都硬
+            Draw.blend(Blending.normal);
+            Draw.color(CORE, glowColor, p);
+            Draw.alpha(1f);
+            Lines.stroke(0.45f + ringStroke * fout);
+            Lines.circle(e.x, e.y, ring * Interp.pow2Out.apply(p));
+
             float tipx = e.x + Mathf.cosDeg(rot) * lenD;
             float tipy = e.y + Mathf.sinDeg(rot) * lenD;
 
             Draw.blend(Blending.additive);
 
-            // ① 外辉光：3.6 倍宽、极淡，负责边缘过曝
+            // ② 外辉光：3.6 倍宽、极淡，负责边缘过曝
             Draw.color(glowColor, DEEP, p);
             Draw.alpha((0.26f + 0.34f * hot) * fout);
             Lines.stroke(width * 3.6f);
             Lines.line(e.x, e.y, tipx, tipy);
 
-            // ② 光束主体
+            // ③ 光束主体
             Draw.color(BEAM, DEEP, p);
             Draw.alpha(0.85f * fout);
             Lines.stroke(width * 2f);
             Lines.line(e.x, e.y, tipx, tipy);
 
-            // ③ 白热芯：普通混合、alpha 接近 1。这一层是「硬」的全部来源——
-            //    之前整条光束都走叠加混合，在草地这种中亮地形上等于往亮处再加亮，
-            //    加多少都看不出来。原版枪口焰是实色三角，从来不叠加
+            // ④ 白热芯：普通混合、alpha 接近 1。这一层是光束的「硬」——
+            //    整条走叠加混合时，在草地这种中亮地形上等于往亮处再加亮，叠多少都看不出来
             Draw.blend(Blending.normal);
             Draw.color(CORE);
             Draw.alpha(Mathf.clamp(1.15f - p * 0.9f));
@@ -143,27 +163,10 @@ public class LaserFx{
 
             Draw.blend(Blending.additive);
 
-            // ④ 枪口光球：过曝窗口内几乎全白，把三条线的根部糊成一个亮点
+            // ⑤ 枪口光球：过曝窗口内几乎全白，把光圈和光束的根部糊成一个亮点
             Tmp.c1.set(CORE).a(0.55f + 0.45f * hot);
             Tmp.c2.set(glowColor).a(0f);
             Fill.light(e.x, e.y, 20, width * 3.2f * (0.6f + 0.4f * hot), Tmp.c1, Tmp.c2);
-
-            // ⑤ 横向能量闪：垂直弹道的一道短线，负责「放电」那一下
-            float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
-            float cl = width * crossScale * (0.35f + 0.65f * hot);
-            Draw.color(BEAM, glowColor, p);
-            Draw.alpha((0.35f + 0.65f * hot) * fout);
-            Lines.stroke(width * 1.1f * (0.6f + 0.4f * hot));
-            Lines.line(e.x - nx * cl, e.y - ny * cl, e.x + nx * cl, e.y + ny * cl);
-
-            // ⑥ 枪口后喷：反向一小截。原版那 3px 的后三角就是干这个的——
-            //    只有前方一条线时，闪光读起来是「亮起来」；有前后不对称才读成「打出去」
-            Draw.color(glowColor, DEEP, p);
-            Draw.alpha(0.55f * hot);
-            Lines.stroke(width * 2.6f * (0.4f + 0.6f * hot));
-            Lines.line(e.x, e.y,
-                e.x - Mathf.cosDeg(rot) * width * 2.2f,
-                e.y - Mathf.sinDeg(rot) * width * 2.2f);
 
             Draw.blend();
         }
@@ -231,13 +234,15 @@ public class LaserFx{
             Tmp.c2.set(glowColor).a(0f);
             Fill.light(e.x, e.y, 24, size * 2.4f * (1f - 0.4f * p), Tmp.c1, Tmp.c2);
 
-            // ③ 能量环：外扩 + 线宽同步变细，读作「沿表面扩散的一圈光」。
-            //    起始半径就给 35%：从 0 长出来的环在前两帧只有几个像素，
-            //    套在白斑上像一枚小铜环，不像扩散
-            Draw.color(BEAM, DEEP, p);
-            Draw.alpha(fade * 0.42f);
-            Lines.stroke(0.6f * fade);
-            Lines.circle(e.x, e.y, ring * (0.35f + 0.65f * out));
+            // ③ 光圈：和枪口同一个道理，普通混合、白→主色、alpha 恒 1。
+            //    这层是原版 Fx.hitLaser 的全部内容，也是命中读起来「硬」的唯一来源
+            Draw.blend(Blending.normal);
+            Draw.color(CORE, glowColor, p);
+            Draw.alpha(1f);
+            Lines.stroke(0.5f + 1.1f * fade);
+            Lines.circle(e.x, e.y, ring * out);
+
+            Draw.blend(Blending.additive);
 
             // ④ 放射光丝：以弹道为轴均分，只抖角度不抖方向——
             //    纯随机时五条可能挤在同一侧，整簇会歪，看着像命中点没对上
