@@ -25,6 +25,15 @@ public class ModuleCurve{
     /** 对应的性能比例，和 {@link #hp} 一一对应 */
     public final float[] effect;
 
+    /**
+     * 形状的人话描述，只给 UI 看（数据库页每行末尾那一小段）。
+     *
+     * <p>不写成「从曲线反推形状」是因为反推不可靠：{@code (1,1)→(0,0)} 的直线
+     * 和一条恰好两点的自定义折线长得一模一样，但玩家该看到的名字不同。
+     * 谁造的曲线谁最清楚，所以名字由工厂自己填。
+     */
+    public String label = "自定义";
+
     public ModuleCurve(float[] hp, float[] effect){
         if(hp.length != effect.length || hp.length < 2){
             throw new IllegalArgumentException("曲线至少两个点，且 hp / effect 必须一一对应");
@@ -56,12 +65,16 @@ public class ModuleCurve{
 
     /** 满血才有满属性：一条直线 */
     public static ModuleCurve linear(){
-        return new ModuleCurve(new float[]{1f, 0f}, new float[]{1f, 0f});
+        ModuleCurve c = new ModuleCurve(new float[]{1f, 0f}, new float[]{1f, 0f});
+        c.label = "线性下降";
+        return c;
     }
 
     /** 掉到 {@code at} 才开始降，之前保持满性能 */
     public static ModuleCurve plateau(float at){
-        return new ModuleCurve(new float[]{1f, at, 0f}, new float[]{1f, 1f, 0f});
+        ModuleCurve c = new ModuleCurve(new float[]{1f, at, 0f}, new float[]{1f, 1f, 0f});
+        c.label = percent(at) + " 以下才掉";
+        return c;
     }
 
     /**
@@ -72,10 +85,16 @@ public class ModuleCurve{
      * 表现出来就是「血量在 5% 以下时性能突然掉一大截」。
      */
     public static ModuleCurve floored(float at, float floor){
-        return new ModuleCurve(
+        ModuleCurve c = new ModuleCurve(
             new float[]{1f, at, 0.001f, 0f},
             new float[]{1f, floor, floor, 0f}
         );
+        c.label = percent(at) + " 以下保 " + percent(floor);
+        return c;
+    }
+
+    private static String percent(float v){
+        return Math.round(v * 100f) + "%";
     }
 
     /** 自定义：{@code hp0, effect0, hp1, effect1, ...}，hp 必须降序、首 1 末 0 */

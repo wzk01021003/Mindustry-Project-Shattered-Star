@@ -43,7 +43,12 @@ public class UnitModule{
 
     /** 血量比例 → 性能比例 */
     public float effect(float hpRatio){
-        return (curve == null ? defaultCurve(kind) : curve).effect(hpRatio);
+        return effectiveCurve().effect(hpRatio);
+    }
+
+    /** 实际生效的曲线：没配就用 {@link #kind} 的默认值。UI 显示用的也是这条 */
+    public ModuleCurve effectiveCurve(){
+        return curve == null ? defaultCurve(kind) : curve;
     }
 
     /**
