@@ -103,6 +103,8 @@ import project.content.units.CarrierUnitType;
 import project.modules.ModuleCurve;
 import project.modules.ModuleSystem;
 import project.modules.ModuleKind;
+import project.modules.ModularMechUnit;
+import project.modules.ModularUnitEntity;
 import project.modules.ModularUnitType;
 import project.modules.UnitModule;
 
@@ -713,7 +715,9 @@ public class SSUnitType {
         // ============================================================
         daggerAT = new ModularUnitType("dagger-at") {
             {
-                constructor = MechUnit::create;
+                // 模块系统的速度 / 护甲只能在实体类的 speed() / armor() 里乘，
+                // 所以这三台异构各自换了带模块的实体类，不再是裸的 MechUnit
+                constructor = ModularMechUnit::create;
                 health = 220f;
                 armor = 1f;
                 speed = 0.8f;
@@ -805,7 +809,7 @@ public class SSUnitType {
         // ============================================================
         novaAT = new ModularUnitType("nova-at") {
             {
-                constructor = MechUnit::create;
+                constructor = ModularMechUnit::create;
                 canBoost = true;
                 boostMultiplier = 2f;
                 speed = 0.55f;
@@ -910,6 +914,8 @@ public class SSUnitType {
         // ============================================================
         flareAT = new ModularUnitType("flare-at") {
             {
+                // 飞行单位默认走 UnitEntity，模块版的 speed() / armor() 在那边
+                constructor = ModularUnitEntity::create;
                 flying = true;
                 health = 150f;
 

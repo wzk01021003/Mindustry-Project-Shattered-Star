@@ -23,8 +23,13 @@ public class ModuleState{
     public final UnitModule[] defs;
     /** 各模块当前血量，和 {@link #defs} 一一对应 */
     public final float[] hp;
-    /** 上一次应用过的移动系数，用来按比例调整 speedMultiplier 而不是每帧覆盖 */
-    public float moveEff = 1f;
+    /**
+     * 这一帧的移动 / 装甲系数，由 {@link ModuleSystem} 每帧写一次。
+     *
+     * <p>不在 {@code speed()} 里现算，是因为那两个方法会被引擎高频调用
+     * （AI、移动、绘制都问），每次都遍历一遍模块表不划算。
+     */
+    public float moveEff = 1f, armorEff = 1f;
 
     private ModuleState(Unit unit, ModularUnitType type){
         this.unit = unit;

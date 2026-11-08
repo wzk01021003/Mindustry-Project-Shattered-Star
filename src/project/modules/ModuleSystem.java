@@ -81,21 +81,25 @@ public class ModuleSystem{
     }
 
     private static void applyMove(ModuleState st){
-        float move = st.effect(ModuleKind.move);
-
-        // 只在数值变化时按比例调整，而不是每帧直接赋值：
-        // speedMultiplier 还可能被减速、地形、状态效果改过，直接写会把这些乘数抹掉
-        if(Math.abs(move - st.moveEff) > 0.001f){
-            float prev = st.moveEff <= 0.001f ? 1f : st.moveEff;
-            st.unit.speedMultiplier *= move / prev;
-            st.moveEff = move;
-        }
+        // 这里只把系数算出来放着，不写 unit.speedMultiplier。
+        //
+        // 走过一次弯路：speedMultiplier 看着像个可以随手乘的字段，实际上是
+        // MechUnit.update() 开头无条件重置成 1 的临时量（字节码里连着
+        // healthMultiplier / damageMultiplier 一起 dup_x1 写回去），之后再乘
+        // 每个 status 的乘数。任何在外面写进去的值活不过一帧，表现就是
+        // 「移动模块报废了但单位照样跑」。
+        //
+        // 真正生效的位置是 ModularMechUnit.speed() / ModularUnitEntity.speed()，
+        // 它们读这个字段再乘上 super.speed()。
+        st.moveEff = st.effect(ModuleKind.move);
     }
 
     private static void applyArmor(ModuleState st){
-        float armor = st.effect(ModuleKind.armor);
-        // -1 是「不覆盖」，0 是「护甲归零」，这两个不能混
-        st.unit.armorOverride = armor >= 0.999f ? -1f : st.type.armor * armor;
+        // 和移动同一个坑：armor 字段也是每帧由 type.armor 重算的，
+        // armorOverride 更是在 update 开头先写 -1 再让 status 覆写。
+        // 所以改 armorOverride 一样没用。而且 damage(float) 是直接读字段的，
+        // 连 armor() 都不调，只能在 ModularMechUnit.damage(float) 里临时替换。
+        st.armorEff = st.effect(ModuleKind.armor);
     }
 
     private static void applyWeapon(ModuleState st){
@@ -125,6 +129,25 @@ public class ModuleSystem{
     public static float effect(Unit unit, ModuleKind kind){
         ModuleState st = ModuleState.get(unit);
         return st == null ? 1f : st.effect(kind);
+    }
+
+    /**
+     * 移动系数，给 {@code ModularMechUnit.speed()} 用。
+     *
+     * <p>先判类型再查表：{@code speed()} 是每帧被问好几次的热路径，
+     * 场上绝大多数单位都没配模块，一个 instanceof 比一次哈希查找便宜。
+     */
+    public static float moveOf(Unit unit){
+        if(unit == null || !(unit.type instanceof ModularUnitType)) return 1f;
+        ModuleState st = ModuleState.get(unit);
+        return st == null ? 1f : st.moveEff;
+    }
+
+    /** 装甲系数，给 {@code ModularMechUnit.damage(float)} 用 */
+    public static float armorOf(Unit unit){
+        if(unit == null || !(unit.type instanceof ModularUnitType)) return 1f;
+        ModuleState st = ModuleState.get(unit);
+        return st == null ? 1f : st.armorEff;
     }
 
     /**
