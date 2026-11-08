@@ -58,13 +58,15 @@ public class LaserFx{
     //  枪口脉冲
     // ============================================================
     /**
-     * 激光枪口脉冲。一圈外扩的光圈 + 一条细光束 + 一颗枪口光球，5 帧内收完。
+     * 激光枪口脉冲。一圈外扩的光圈 + 一颗枪口光球，5 帧收完，<b>没有光束</b>。
      *
-     * <p><b>光圈才是原版的手感来源。</b>查一下 v160 的源码就清楚了：
-     * {@code LaserBoltBulletType} 的构造里写着
-     * {@code smokeEffect = hitEffect = despawnEffect = Fx.hitLaser}——注意第一项，
-     * 这一项是<b>枪口</b>特效。所以原版激光每开一枪，枪口除了
-     * {@code Fx.shootSmall} 那个橙锥，还会同时播一遍 {@code Fx.hitLaser}：
+     * <p>光束去掉了。一条等宽的线从枪口直挺挺伸出去 15px，在 8 格机身上不像
+     * 「射出去」，倒像一根发光的棍子支在那儿——它既不是弹道（弹丸自己会飞），
+     * 也不是原版有的东西，纯粹是画蛇添足。
+     *
+     * <p><b>原版的手感只来自一圈环。</b>v160 的 {@code LaserBoltBulletType} 构造里
+     * 写着 {@code smokeEffect = hitEffect = despawnEffect = Fx.hitLaser}——第一项是
+     * <b>枪口</b>：
      *
      * <pre>
      * color(Color.white, Pal.heal, e.fin());
@@ -72,22 +74,18 @@ public class LaserFx{
      * Lines.circle(e.x, e.y, e.fin() * 5f);
      * </pre>
      *
-     * <p>白→绿、实色、张开就完。没有任何叠加混合，所以它在任何地形上都是硬的。
-     * 上一版把这层当成「原版在枪口误播命中」删掉了，只剩一条叠加的线——
-     * 手感也就跟着没了。现在把它按原样做回来，只是半径放到 7（光束有 15px 长，
-     * 5 太小包不住），并和光束、光球合成同一个 Effect，时序才对得上。
+     * <p>白→绿、实色、张开就完，没有任何叠加混合，所以在任何地形上都是硬的。
+     * 这里照原样做，只把半径从 5 放大到 9：原版那圈直径只有 10px，套在 8 格机身
+     * 上只够包住枪口，读不出「一次放电」。再补一颗光球压在环心，负责过曝。
      */
     public static class LaserMuzzleEffect extends Effect{
-        /** 光束长度，2.25 格。和原版 {@code Fx.shootSmall} 的 15 对齐——再短就只是枪口一点绿光 */
-        public float len = 18f;
-        /** 光束半径基准，1.6。白芯按 1.2 倍画，实际 2px 宽：原版枪口焰起手就是 6px 宽 */
+        /** 枪口光球基准半径，1.6。光球按 3.2 倍画，实际直径约 10px */
         public float width = 1.6f;
         /** 场景光半径 */
         public float glow = 16f;
         /** 场景光不透明度 */
         public float glowOpacity = 0.55f;
-        /** 光圈最大半径。原版 {@code Fx.hitLaser} 是 5，这里 9：原版那个环只有 10px 直径，
-         *  在 8 格机身上只够包住枪口，读不出「一次放电」 */
+        /** 光圈最大半径。原版 {@code Fx.hitLaser} 是 5，这里 9 */
         public float ring = 9f;
         /** 光圈收细量。线宽按 {@code 0.45 + ringStroke * fout} 从 1.8 收到 0.45 */
         public float ringStroke = 1.35f;
@@ -99,74 +97,40 @@ public class LaserFx{
         }
 
         public LaserMuzzleEffect(float scale){
-            len *= scale;
             width *= scale;
             glow *= scale;
             ring *= scale;
             // 5 帧。nova 的 reload 是 7 帧，8 帧的特效会首尾相接、一帧不落地糊成常亮；
             // 留 2 帧空档，每次开火才有「一下一下」的节奏
             lifetime = 5f;
-            clip = (len + glow + ring) * 2f + 40f;
+            clip = (glow + ring) * 2f + 40f;
         }
 
         @Override
         public void render(EffectContainer e){
             float p = e.fin();
             float fout = e.fout();
-            float rot = e.rotation;
-            Color glowColor = pick(e, tint);
-
-            // 前 45% 是「过曝」窗口，之后才交给衰减
+            // 前 45% 是「过曝」窗口：光球最亮最大，过了才交给衰减
             float hot = Mathf.clamp(1f - p / 0.45f);
-            // 光束前 40% 钉死、之后一次收回。乘 fout 线性缩水会挂出一根越来越短的棍子
-            float shrink = Interp.pow3In.apply(Mathf.clamp((p - 0.4f) / 0.6f));
-            float lenD = len * (1f - shrink);
 
-            Drawf.light(e.x, e.y, glow * (0.85f + 0.15f * fout), glowColor,
+            Drawf.light(e.x, e.y, glow * (0.85f + 0.15f * fout), pick(e, tint),
                 glowOpacity * (0.45f + 0.55f * fout));
 
             // ① 光圈：原版 Fx.hitLaser 的形态——普通混合、白→主色、张开的同
-            //    时线宽收细。这一层是「力度」的主力：实色、一帧张开，比任何叠加辉光都硬
+            //    时线宽收细。整套特效的「力度」全在这一层：实色、一帧张开，
+            //    比任何叠加辉光都硬
             Draw.blend(Blending.normal);
-            Draw.color(CORE, glowColor, p);
+            Draw.color(CORE, pick(e, tint), p);
             Draw.alpha(1f);
             Lines.stroke(0.45f + ringStroke * fout);
             Lines.circle(e.x, e.y, ring * Interp.pow2Out.apply(p));
 
-            float tipx = e.x + Mathf.cosDeg(rot) * lenD;
-            float tipy = e.y + Mathf.sinDeg(rot) * lenD;
-
+            // ② 枪口光球：压住环心，过曝窗口内几乎全白。去掉光束之后它就是
+            //    唯一的实心亮块，没有它光圈会读成「一圈线」而不是「一下放电」
             Draw.blend(Blending.additive);
-
-            // ② 外辉光：3.6 倍宽、极淡，负责边缘过曝
-            Draw.color(glowColor, DEEP, p);
-            Draw.alpha((0.26f + 0.34f * hot) * fout);
-            Lines.stroke(width * 3.6f);
-            Lines.line(e.x, e.y, tipx, tipy);
-
-            // ③ 光束主体
-            Draw.color(BEAM, DEEP, p);
-            Draw.alpha(0.85f * fout);
-            Lines.stroke(width * 2f);
-            Lines.line(e.x, e.y, tipx, tipy);
-
-            // ④ 白热芯：普通混合、alpha 接近 1。这一层是光束的「硬」——
-            //    整条走叠加混合时，在草地这种中亮地形上等于往亮处再加亮，叠多少都看不出来
-            Draw.blend(Blending.normal);
-            Draw.color(CORE);
-            Draw.alpha(Mathf.clamp(1.15f - p * 0.9f));
-            Lines.stroke(width * 1.2f);
-            Lines.line(e.x, e.y, tipx, tipy);
-            // 圆头收口：Lines.line 两端是平的，宽到 2px 以上就会露出方角
-            Fill.circle(e.x, e.y, width * 0.6f);
-            Fill.circle(tipx, tipy, width * 0.6f);
-
-            Draw.blend(Blending.additive);
-
-            // ⑤ 枪口光球：过曝窗口内几乎全白，把光圈和光束的根部糊成一个亮点
-            Tmp.c1.set(CORE).a(0.55f + 0.45f * hot);
-            Tmp.c2.set(glowColor).a(0f);
-            Fill.light(e.x, e.y, 20, width * 3.2f * (0.6f + 0.4f * hot), Tmp.c1, Tmp.c2);
+            Tmp.c1.set(CORE).a(0.6f + 0.4f * hot);
+            Tmp.c2.set(pick(e, tint)).a(0f);
+            Fill.light(e.x, e.y, 20, width * 3.2f * (0.65f + 0.35f * hot), Tmp.c1, Tmp.c2);
 
             Draw.blend();
         }
