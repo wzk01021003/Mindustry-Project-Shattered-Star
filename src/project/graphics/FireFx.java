@@ -626,7 +626,7 @@ public class FireFx{
      * <p>挂在 {@code shootEffect} 上（和枪口焰同一个位置）。不要挂 {@code smokeEffect}：
      * 那个位置会被原版 {@code Turret} 在冷却时反复播，土的密度会跟着热量乱跳。
      */
-    public static class MuzzleDustEffect extends Effect{
+    public static class MuzzleDustEffect extends Effect implements DustRenderer.Painter{
         /** 扬尘最远推到炮口外多远，3 格。再远就跟炮口脱节，像地上起了阵风 */
         public float radius = 24f;
         /** 单团半径，0.55 格。比落地扬尘小：炮口掀的是浮土，块头没那么大 */
@@ -690,9 +690,11 @@ public class FireFx{
             radius *= scale;
             size *= scale;
             lift *= scale;
-            // 比落地扬尘少混一点地板色（0.5 对 0.65）：炮口这层压在机甲脚边，
-            // 草地把土染绿之后会和周围的草糊成一片，看起来像喷了口绿烟
-            floor.mix = 0.5f;
+            // 比落地扬尘少混地板色（0.3 对 0.65）。草地色相 97°、土色相 42°，
+            // 五五开之后色相落在 70°——那是一块「更灰的草」，不是土；在草地上
+            // 唯一的可见部分就是它压在机体上的那一层，于是整颗尘读成「机体脏了」。
+            // 0.3 让土色相主导，地板只负责把色相往当地土壤上带一点
+            floor.mix = 0.3f;
             // 兜底土色压暗一档。EARTH 的明度 0.71 比草地（0.59）还亮，
             // 原样用会在草地上读成一团发光的黄雾——尘是暗的，它挡光，不发光
             floor.base = DUST_DARK;
@@ -705,10 +707,16 @@ public class FireFx{
 
         @Override
         public void render(EffectContainer e){
-            float p = e.fin();
+            // 不在这里画：交给 DustRenderer 在单位下面那一层画。这里只按
+            // EffectState 的 id 保活，位置 / 朝向 / 寿命仍由 Effect 提供——
+            // 暂停、切图、单位死亡这些边界情况就不用另写一套回收逻辑
+            DustRenderer.retain(e.id, e.x, e.y, e.rotation, life, e.id, this);
+        }
 
-            // 每帧重算，理由同落地扬尘：单例会被多个开火点同时 render
-            floor.tint(e.x, e.y, tint);
+        @Override
+        public void paint(float x, float y, float rotation, float p, int seed){
+            // 每帧重算，不缓存：单例会被多个开火点同时绘制
+            floor.tint(x, y, tint);
 
             Draw.blend(Blending.normal);
             Draw.color(tint);
@@ -717,23 +725,23 @@ public class FireFx{
             // 主体盖住），也是为了不改主循环的随机序列——见 ringRand 的注释
             if(ring){
                 float rp = Mathf.clamp(p / ringLife);
-                ringRand.setSeed(e.id);
+                ringRand.setSeed(seed);
 
                 // 圆心沿弹道反面退回机体：Effect 只拿得到炮口坐标（堡垒的 weapon.x = 9），
                 // 而这一圈土是被后坐震起来的、贴在整个机体脚下，绕炮口画的话
                 // 机体后半截就一点土都没有了。1.3 个 size ≈ 9.2（scale 1.6），
                 // 刚好抵消那 9 个单位的炮口偏移
-                float bx = e.x - Mathf.cosDeg(e.rotation) * size * 1.3f;
-                float by = e.y - Mathf.sinDeg(e.rotation) * size * 1.3f;
+                float bx = x - Mathf.cosDeg(rotation) * size * 1.3f;
+                float by = y - Mathf.sinDeg(rotation) * size * 1.3f;
 
                 for(int i = 0; i < ringPuffs; i++){
                     // 径向均分再抖 14°。抖太多会几团挤一起、留下空档，圈就断了
                     float a = i * 360f / ringPuffs + ringRand.random(-14f, 14f);
                     // pow2Out：地表波比气压波慢半拍，但也是往外的，不是匀速
                     float d = radius * ringReach * ringRand.random(0.7f, 1f) * Interp.pow2Out.apply(rp);
-                    float x = bx + Mathf.cosDeg(a) * d;
+                    float rx = bx + Mathf.cosDeg(a) * d;
                     // 贴地：这圈是被地面反射带上来的浮土，几乎不离开地表
-                    float y = by + Mathf.sinDeg(a) * d * squash;
+                    float ry = by + Mathf.sinDeg(a) * d * squash;
 
                     float r = size * ringRand.random(0.55f, 1f) * (0.5f + 0.5f * Mathf.pow(rp, 0.5f));
                     // 起手 0.06 比主体的 0.08 还陡：反射波是瞬时起爆，没有加速段
@@ -741,18 +749,18 @@ public class FireFx{
 
                     Tmp.c1.set(tint).a(a0);
                     Tmp.c2.set(tint).a(0f);
-                    Fill.light(x, y, 18, r * 1.3f, Tmp.c1, Tmp.c2);
+                    Fill.light(rx, ry, 18, r * 1.3f, Tmp.c1, Tmp.c2);
                 }
             }
 
-            rand.setSeed(e.id);
+            rand.setSeed(seed);
             for(int i = 0; i < puffs; i++){
                 // 第 0 团压在炮口正下方：气压最先掀的是脚边那层土
                 boolean core = i == 0;
 
                 // 角度在扇形内均分再抖。纯随机会让几团挤在轴线上、两侧空掉，
                 // 扇形读起来就只是「一条往前喷的灰柱」，没有「面」的宽度
-                float a = e.rotation + (core ? rand.random(-spread, spread)
+                float a = rotation + (core ? rand.random(-spread, spread)
                     : Mathf.lerp(-spread, spread, (i - 1f) / Math.max(1f, puffs - 2f))
                         + rand.random(-9f, 9f));
                 // 错开起跑：整排同时炸开像一堵推出去的墙
@@ -760,7 +768,7 @@ public class FireFx{
                 float pp = Mathf.clamp((p - dly) / (1f - dly));
 
                 // 偏离弹道轴线的程度，0 = 正前方，1 = 扇形边缘
-                float off = Mathf.clamp(Math.abs(a - e.rotation) / spread);
+                float off = Mathf.clamp(Math.abs(a - rotation) / spread);
                 // 轴线上的团跑得最远、两侧的近：炮口气压是往前顶的，侧向只分到一点。
                 // 不给这个收窄时，九团等距铺在 ±70° 上，整簇读成一个半圆饼——
                 // 形状是扇的，但没有「往前冲」的方向感
@@ -771,8 +779,8 @@ public class FireFx{
                 // 画面读作「尘土在匀速膨胀」，炮口那一下的爆发感全没了
                 float d = core ? radius * 0.12f
                     : radius * reach * rand.random(0.45f, 1f) * Interp.pow3Out.apply(pp);
-                float x = e.x + Mathf.cosDeg(a) * d;
-                float y = e.y + Mathf.sinDeg(a) * d * squash + lift * pp;
+                float px = x + Mathf.cosDeg(a) * d;
+                float py = y + Mathf.sinDeg(a) * d * squash + lift * pp;
 
                 float r = size * (core ? coreSize : rand.random(0.5f, 1f))
                     * (0.45f + 0.55f * Mathf.pow(pp, 0.5f));
@@ -784,7 +792,7 @@ public class FireFx{
                 // 柔边同样用 Fill.light，理由见 GroundDustEffect：叠同心圆会留下可见的环
                 Tmp.c1.set(tint).a(a0);
                 Tmp.c2.set(tint).a(0f);
-                Fill.light(x, y, 18, r * 1.5f, Tmp.c1, Tmp.c2);
+                Fill.light(px, py, 18, r * 1.5f, Tmp.c1, Tmp.c2);
             }
 
             Draw.blend();
