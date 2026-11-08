@@ -16,10 +16,9 @@ import mindustry.graphics.Layer;
  *
  * <p>为什么要单独一个渲染器：
  * <ul>
- *   <li><b>层</b>：Effect 一律画在 {@code Layer.effect}（110），也就是<b>单位之上</b>。
- *       落地扬尘绕着机体铺开时，这一层土会盖住机体，读成「机体上糊了一层泥」，
- *       单位走到哪糊到哪——问题不在位置，在遮挡关系。尘在地上，必须画在单位
- *       <b>下面</b>、地形上面。（层号见 {@link #layer}）</li>
+ *   <li><b>层</b>：Effect 的层号是写死的 {@code Layer.effect}（110），想换个层只能
+ *       换掉整个绘制路径。这里把层号提成一个常量（见 {@link #layer}），
+ *       尘垫在单位下面还是压在单位上面，改一行就行，绘制逻辑一个字都不用动。</li>
  *   <li><b>顺序</b>：同一帧多门炮开火时，Effect 的播放顺序由 Renderer 决定；
  *       这里按出生顺序画，后起的尘盖在先起的上面，叠加关系是确定的。</li>
  *   <li><b>取色</b>：{@link FireFx.FloorTint} 每帧取一次地板色，单例 Effect 被多个
@@ -32,13 +31,15 @@ import mindustry.graphics.Layer;
 public class DustRenderer{
 
     /**
-     * 尘画在这一层：地面单位（{@link Layer#groundUnit} = 60）下方 5 层。
+     * 尘画在这一层。当前取 {@link Layer#effect}（110），也就是和普通特效一样画在
+     * <b>单位之上</b>：土会落在机体表面，读成「烟从脚边漫上来、糊过机体」。
+     * 代价是机体装甲的明暗会一起被半透明的土压平，看着像机体本身脏了一块。
      *
-     * <p>夹在 turret(50) 和 groundUnit(60) 之间：盖得住炮塔和建筑，盖不住单位。
-     * 再往下会钻到方块底下（{@code blockOver} = 35），土就跑到建筑下面去了，
-     * 俯视角下看起来像土从地板缝里冒出来。
+     * <p>想让尘垫在机体下面，把这里改成 {@code Layer.groundUnit - 5f}（55）：
+     * 夹在 turret(50) 和 groundUnit(60) 之间，盖得住炮塔和建筑、盖不住单位。
+     * 再往下会钻到方块底下（{@code blockOver} = 35），土就跑到建筑下面去了。
      */
-    public static final float layer = Layer.groundUnit - 5f;
+    public static final float layer = Layer.effect;
 
     /** 尘团绘制回调。{@code p} 是 0→1 的寿命进度 */
     public interface Painter{
