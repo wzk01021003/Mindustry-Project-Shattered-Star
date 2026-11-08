@@ -29,6 +29,7 @@ import mindustry.gen.LegsUnit;
 import mindustry.gen.MechUnit;
 import mindustry.gen.PayloadUnit;
 import mindustry.gen.TankUnit;
+import mindustry.gen.Unit;
 import mindustry.gen.UnitWaterMove;
 import mindustry.content.StatusEffects;
 import mindustry.entities.Effect;
@@ -100,6 +101,7 @@ import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
 import project.content.units.CarrierUnitType;
 import project.modules.ModuleCurve;
+import project.modules.ModuleSystem;
 import project.modules.ModuleKind;
 import project.modules.ModularUnitType;
 import project.modules.UnitModule;
@@ -195,7 +197,7 @@ public class SSUnitType {
         // ============================================================
         //  fortress-r
         // ============================================================
-        fortressR = new ModularUnitType("fortress-r") {
+        fortressR = new UnitType("fortress-r") {
             {
                 constructor = MechUnit::create;
                 speed = 0.5f;
@@ -207,21 +209,6 @@ public class SSUnitType {
                 mechFrontSway = 0.55f;
                 stepSound = Sounds.mechStepSmall;
 
-                // 模块表：只有配了这张表的单位才参与受损系统，没配的完全走原生。
-                // 数值按「40 伤子弹 × ratio 0.15 = 每发 6 点模块伤害」估算：
-                // 900 血 9 护甲大约挨 29 发。武器 6×1.2=7.2/发 → 18 发报废，
-                // 装甲 5.4/发 → 20 发报废（之后没护甲，剩下几发掉得更快），
-                // 移动 6/发 → 23 发报废。三个模块都在死之前，读得出「越打越弱」。
-                // 这三个数只是起点，实战一定还要调。
-                modules(
-                    new UnitModule("装甲", ModuleKind.armor, 110f)
-                        .vulnerability(0.9f)
-                        .curve(ModuleCurve.floored(0.3f, 0.5f)),
-                    new UnitModule("武器", ModuleKind.weapon, 130f)
-                        .vulnerability(1.2f),
-                    new UnitModule("移动", ModuleKind.move, 140f)
-                        .curve(ModuleCurve.plateau(0.5f))
-                );
                 stepSoundPitch = 0.8f;
                 stepSoundVolume = 0.65f;
 
@@ -724,7 +711,7 @@ public class SSUnitType {
         // ============================================================
         //  陆军战斗：daggerAT (异构 · 尖刀)
         // ============================================================
-        daggerAT = new UnitType("dagger-at") {
+        daggerAT = new ModularUnitType("dagger-at") {
             {
                 constructor = MechUnit::create;
                 health = 220f;
@@ -732,6 +719,21 @@ public class SSUnitType {
                 speed = 0.8f;
                 hitSize = 8f;
                 stepSoundVolume = 0.4f;
+
+                // 异构三台的模块表——T1 尺度，模块血量按单位血量 1/10 上下排。
+                // 基准：9 伤子弹 × ratio 0.15 = 1.35 点模块伤害。
+                // 尖刀 220 血 1 甲大约挨 24 发，武器 20/(1.35×1.2)=12 发先哑，
+                // 装甲 22/(1.35×0.9)=18 发，移动 24/1.35=18 发——都在死之前，
+                // 挨到后半段能明确读出「这门炮打不动了」。
+                modules(
+                    new UnitModule("装甲", ModuleKind.armor, 22f)
+                        .vulnerability(0.9f)
+                        .curve(ModuleCurve.floored(0.3f, 0.5f)),
+                    new UnitModule("武器", ModuleKind.weapon, 20f)
+                        .vulnerability(1.2f),
+                    new UnitModule("移动", ModuleKind.move, 24f)
+                        .curve(ModuleCurve.plateau(0.5f))
+                );
 
                 outlineColor = Color.valueOf("202026");
 
@@ -801,7 +803,7 @@ public class SSUnitType {
         // ============================================================
         //  陆军辅助：novaAT (异构 · 新星)
         // ============================================================
-        novaAT = new UnitType("nova-at") {
+        novaAT = new ModularUnitType("nova-at") {
             {
                 constructor = MechUnit::create;
                 canBoost = true;
@@ -812,11 +814,31 @@ public class SSUnitType {
                 buildSpeed = 0.3f;
                 armor = 2f;
 
+                // 新星是辅助，模块表故意不给「移动」：它跑不快是设定的一部分，
+                // 再让它被打瘸没有信息量。装甲的止跌取 0.6（比尖刀高），
+                // 因为它只有 2 甲、又常常贴着队友站，线性降会死得太快。
+                // 第三格是能力模块，管治疗场——报废之后 RepairFieldAbility
+                // 直接不再 update，但治疗激光（武器模块）还能用，两条线分开废。
+                modules(
+                    new UnitModule("装甲", ModuleKind.armor, 18f)
+                        .vulnerability(0.8f)
+                        .curve(ModuleCurve.floored(0.3f, 0.6f)),
+                    new UnitModule("武器", ModuleKind.weapon, 20f),
+                    new UnitModule("能力", ModuleKind.ability, 26f)
+                );
+
                 abilities.add(new RepairFieldAbility() {
                         {
                             amount = 30f;
                             reload = 120f;
                             range = 60f;
+                        }
+
+                        // 能力模块报废就停手。整段逻辑还是原生那套，
+                        // 只在入口问一句——不复制、不重写，将来原版改了也跟得上
+                        @Override
+                        public void update(Unit unit){
+                            if(ModuleSystem.enabled(unit, ModuleKind.ability)) super.update(unit);
                         }
                     });
 
@@ -886,10 +908,24 @@ public class SSUnitType {
         // ============================================================
         //  空军战斗：flareAT (异构 · 星辉)
         // ============================================================
-        flareAT = new UnitType("flare-at") {
+        flareAT = new ModularUnitType("flare-at") {
             {
                 flying = true;
                 health = 150f;
+
+                // 星辉只有 150 血，四个模块加起来 74，比尖刀的比例更薄——
+                // 空军本来就该「一被咬住就掉零件」。移动模块管飞行速度，
+                // 能力模块管跃迁：引擎被打烂就先失去保命手段，这个顺序比反过来合理。
+                modules(
+                    new UnitModule("装甲", ModuleKind.armor, 16f)
+                        .vulnerability(0.9f)
+                        .curve(ModuleCurve.floored(0.3f, 0.5f)),
+                    new UnitModule("武器", ModuleKind.weapon, 18f)
+                        .vulnerability(1.1f),
+                    new UnitModule("移动", ModuleKind.move, 20f)
+                        .curve(ModuleCurve.plateau(0.6f)),
+                    new UnitModule("能力", ModuleKind.ability, 20f)
+                );
                 rotateSpeed = 5f;
                 omniMovement = true;
                 speed = 5f;
@@ -961,7 +997,13 @@ public class SSUnitType {
                 // 主动跃迁：按住 Alt 蓄力，把星辉送到鼠标位置。
                 // 蓄力时间随距离增长、要求先转到目标方向、结束后进入冷却，
                 // 三点共同防止它变成无脑贴脸闪避。数值在 WarpAbility 里改。
-                abilities.add(new WarpAbility());
+                // 能力模块报废后整段蓄力逻辑不再跑，按住 Alt 不响应。
+                abilities.add(new WarpAbility() {
+                        @Override
+                        public void update(Unit unit){
+                            if(ModuleSystem.enabled(unit, ModuleKind.ability)) super.update(unit);
+                        }
+                    });
             }
         };
 

@@ -52,11 +52,13 @@ public class UnitModule{
      * <p>默认值不是随便给的，是按「玩家能不能感知到」排的：
      * 武器掉一点就该慢下来（线性），移动要过一半才有感觉（平台），
      * 装甲则要在低血量时止跌——装甲再叠上血量本身变少，线性降会让重甲单位
-     * 在残血时瞬间崩掉，那是调不回来的雪崩。
+     * 在残血时瞬间崩掉，那是调不回来的雪崩。能力是开关，满血到报废之间
+     * 一直是满性能，只在归零那一下断掉，所以是一条贴到 1 的平线。
      */
     public static ModuleCurve defaultCurve(ModuleKind kind){
         if(kind == ModuleKind.move) return ModuleCurve.plateau(0.5f);
         if(kind == ModuleKind.armor) return ModuleCurve.floored(0.3f, 0.5f);
+        if(kind == ModuleKind.ability) return ModuleCurve.floored(0.001f, 1f);
         return ModuleCurve.linear();
     }
 }

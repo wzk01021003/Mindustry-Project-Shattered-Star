@@ -127,6 +127,22 @@ public class ModuleSystem{
         return st == null ? 1f : st.effect(kind);
     }
 
+    /**
+     * 能力模块是否还能开。
+     *
+     * <p>{@code Ability} 没有 {@code enabled} 这种开关，一旦挂到
+     * {@code unit.abilities} 上就会每帧被调 {@code update}，外面拦不住。
+     * 所以能力模块的判定放在使用侧——能力的 {@code update} 开头问一句
+     * {@code if(!ModuleSystem.enabled(unit, ModuleKind.ability)) return;}，
+     * 模块报废就不再进自己的逻辑。
+     *
+     * <p>阈值取 0.5 而不是 0：{@link ModuleCurve} 保证报废时是 0，
+     * 但中间插值出来的小数（比如 0.4）不代表「半开」——要么开要么不开。
+     */
+    public static boolean enabled(Unit unit, ModuleKind kind){
+        return effect(unit, kind) > 0.5f;
+    }
+
     /** 单位是否还完整无损 */
     public static boolean intact(Unit unit){
         ModuleState st = ModuleState.get(unit);
