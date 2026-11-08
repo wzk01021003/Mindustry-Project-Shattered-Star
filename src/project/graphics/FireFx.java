@@ -49,6 +49,12 @@ public class FireFx{
     public static final Color DEEP = Color.valueOf("d9542a");
     /** 烟色。暖灰而不是中性灰：纯灰放在橙金机体旁边会显脏，暖灰是同一色温 */
     public static final Color SMOKE = Color.valueOf("8a8078");
+    /**
+     * 尘土色。比 {@link #SMOKE} 更亮更黄一点：烟是烧出来的（炭化、偏灰），
+     * 尘是从地里崩起来的（矿物微粒、偏黄）。两者混用会让落地扬尘看起来
+     * 像「地上冒烟」，而不是「土被砸起来」
+     */
+    public static final Color EARTH = Color.valueOf("b5a276");
 
     private static final Rand rand = new Rand();
 
@@ -392,6 +398,116 @@ public class FireFx{
     }
 
     // ============================================================
+    //  落地扬尘
+    // ============================================================
+    /**
+     * 炮弹落地扬起的尘土环。
+     *
+     * <p>爆炸是「光」，几十帧就没了；扬尘是「土」，要在地上留一秒多。
+     * 两者叠在一起才有重量——只有爆炸时，炮弹看起来像在半空中炸开的烟花，
+     * 完全没有和地面发生过关系。
+     *
+     * <p><b>「贴地」是它和枪口烟最根本的区别</b>，也是这类效果最容易做错的地方：
+     *
+     * <ul>
+     *   <li>位移以水平为主，垂直只给 {@link #lift}（不到半格）。枪口烟活 110 帧
+     *       能上升 0.75 格，那是因为热气体真的会往上跑；被砸起来的土不会。</li>
+     *   <li>整圈按 {@link #squash} 压扁成椭圆。俯视角下地面上的正圆看起来本来就是扁的，
+     *       画正圆会像一块竖着插在地上的圆盘。</li>
+     *   <li>顺弹道方向的那一侧飞得更远（{@link #pushBias}）：土是被炮弹推出去的，
+     *       不是以落点为圆心均匀炸开的。</li>
+     * </ul>
+     *
+     * <p>必须用 {@link Blending#normal}。additive 会把这圈土加成发光的雾，
+     * 变成第二个爆炸，反而抢了主视觉。
+     *
+     * <p>放在 {@code despawnEffect} 上而不是 {@code hitEffect}：后者打中空中单位时
+     * 也会触发，那时地上并没有土可以扬。
+     */
+    public static class GroundDustEffect extends Effect{
+        /** 最外圈尘团离落点的距离，6 格。比 splash 半径（35）大一圈，才像被崩起来的土 */
+        public float radius = 48f;
+        /** 单个尘团半径，1.1 格。必须大到相邻两团能叠上，否则整圈会散成一粒粒灰点 */
+        public float size = 9f;
+        /** 尘团数量（含落点核心那一团）。外环 14 团在 6 格圆周上弧长约 21，正好叠住 */
+        public int puffs = 15;
+        /** 垂直压缩比，俯视角下地面圆环的透视系数 */
+        public float squash = 0.58f;
+        /** 整圈尘土的上浮量，0.38 格。给一点是为了别像贴纸，给多了就成蘑菇云了 */
+        public float lift = 3f;
+        /** 顺弹道方向的额外行程比。0.3 时最远那一团会甩出环外、和主体断开，0.22 刚好 */
+        public float pushBias = 0.22f;
+        /** 峰值不透明度。土要把地形盖住一截才叫土，0.5 只能算一层薄雾 */
+        public float opacity = 0.85f;
+        /** 寿命，80 帧约 1.2 秒。比爆炸（32 帧）长一倍多，负责收尾 */
+        public float life = 80f;
+
+        public GroundDustEffect(){
+            this(1f);
+        }
+
+        public GroundDustEffect(float scale){
+            radius *= scale;
+            size *= scale;
+            lift *= scale;
+            lifetime = life;
+            clip = (radius + size * 3f) * 2f + 40f;
+        }
+
+        @Override
+        public void render(EffectContainer e){
+            float p = e.fin();
+
+            Draw.blend(Blending.normal);
+            Draw.color(EARTH);
+
+            rand.setSeed(e.id);
+            for(int i = 0; i < puffs; i++){
+                // 第 0 团是落点核心：不动、最大、最浓，活到最后。
+                // 只让尘团往四周飞的话，中心会先空出来一块——可炮弹分明砸在这里，
+                // 最浓的土应该就在弹坑上，而不是一圈凭空外扩的环
+                boolean core = i == 0;
+
+                // 角度均分后再抖：纯随机时相邻两团会挤在一起、对面留出空洞，环就断了。
+                // 均分保证骨架均匀，抖动负责去掉机械感
+                float a = core ? 0f : i * 360f / (puffs - 1) + rand.random(-13f, 13f);
+                // 每团错开起跑时间，尘不是整圈同时被点着的
+                float dly = core ? 0f : rand.random(0f, 0.16f);
+                float pp = Mathf.clamp((p - dly) / (1f - dly));
+
+                // 顺弹道方向跑得更远：炮弹是往前撞进地面的，土也被带着往前推
+                float bias = 1f + pushBias * Math.max(0f, Mathf.cosDeg(a - e.rotation));
+                // 扩散先快后慢，用 pow3Out 让大半个行程在前 1/3 走完：
+                // 土是被崩出去的，落地那一下就该铺到外圈，剩下的寿命只负责慢慢落定。
+                // 换成 pow2Out 时到半条命才走完 3/4，画面会像「尘土在匀速膨胀」。
+                // 起点取 0.25 而不是贴着 0：全程贴着圆心取点时，落点会糊成一坨，
+                // 看不出是「从坑里崩出来的环」
+                float d = core ? 0f : radius * rand.random(0.35f, 1f) * bias * Interp.pow3Out.apply(pp);
+                float x = e.x + Mathf.cosDeg(a) * d;
+                // 垂直方向压扁成椭圆，再整体抬一点离地
+                float y = e.y + Mathf.sinDeg(a) * d * squash + lift * pp;
+
+                // 半径一路长大，越晚越大：尘团边飘边散，不是定住的一颗颗球
+                float r = size * (core ? 1.6f : rand.random(0.5f, 1f)) * (0.4f + 0.6f * Mathf.pow(pp, 0.5f));
+                // 起手几帧迅速变浓，之后长尾淡出。1.4 次幂比烟陡：
+                // 土沉得快，落到地上就没了，不会像烟那样在天上飘很久
+                float a0 = Mathf.clamp(pp / 0.12f) * Mathf.pow(1f - pp, 1.4f) * opacity
+                    * (core ? 1f : rand.random(0.7f, 1f));
+
+                // 柔边用 Fill.light 一次画出「中心实、边缘渐隐」的径向渐变。
+                // 之前是三层同心圆递减 alpha，结果每一层的边界都留下一个可见的环，
+                // 13 团叠在一起看起来是一串气泡浮在地上，完全不像土。
+                // 渐变没有边界，相邻尘团叠加时也只会在浓度上叠，不会叠出轮廓
+                Tmp.c1.set(EARTH).a(a0);
+                Tmp.c2.set(EARTH).a(0f);
+                Fill.light(x, y, 20, r * 1.55f, Tmp.c1, Tmp.c2);
+            }
+
+            Draw.blend();
+        }
+    }
+
+    // ============================================================
     //  静态单例
     // ============================================================
     /** 小口径（hitSize ≈ 8）的枪口焰，机甲 / T1 单位直接用 */
@@ -400,6 +516,8 @@ public class FireFx{
     public static final Effect MUZZLE_SMOKE = new MuzzleSmokeEffect(1f);
     /** 小口径命中火花 */
     public static final Effect HIT = new HitSparkEffect(1f);
+    /** 落地扬尘。半径按 splash 30~40 的火炮口径给的，更大的炮用 {@link #dust(float)} */
+    public static final Effect DUST = new GroundDustEffect(1f);
 
     /** 按尺寸取枪口焰。同一 scale 每次调用都会新建，别在 update 里反复调 */
     public static Effect muzzle(float scale){
@@ -414,6 +532,11 @@ public class FireFx{
     /** 按尺寸取命中火花 */
     public static Effect hit(float scale){
         return new HitSparkEffect(scale);
+    }
+
+    /** 按尺寸取落地扬尘。口径越大给得越大，一般取 splash 半径 / 35 */
+    public static Effect dust(float scale){
+        return new GroundDustEffect(scale);
     }
 
     /**

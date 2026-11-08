@@ -229,10 +229,15 @@ public class SSUnitType {
                                         Fx.blastExplosion,
                                         DistortionFx.fortressArtilleryImpact,
                                         DistortionFx.fortressArtilleryImplosion);
-                                    // 炮弹飞抵最大射程未命中时同样播放扭曲，保持观感一致
+                                    // 炮弹飞抵最大射程未命中时同样播放扭曲，保持观感一致。
+                                    // 落地额外加一圈扬尘：爆炸只有 32 帧，是「光」；
+                                    // 尘 80 帧，是「土」，负责让这一炮看起来真的砸在了地上，
+                                    // 而不是在半空炸开。只挂 despawnEffect 不挂 hitEffect——
+                                    // 后者打中空中单位时也会触发，那时地上没有土可扬
                                     despawnEffect = new MultiEffect(
                                         DistortionFx.fortressArtilleryImpact,
-                                        DistortionFx.fortressArtilleryImplosion);
+                                        DistortionFx.fortressArtilleryImplosion,
+                                        FireFx.DUST);
                                     knockback = 0.8f;
                                     lifetime = 53.25f;
                                     maxRange = 240f;
