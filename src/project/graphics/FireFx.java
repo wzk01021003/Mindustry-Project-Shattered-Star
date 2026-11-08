@@ -59,11 +59,79 @@ public class FireFx{
      * 像「地上冒烟」，而不是「土被砸起来」
      */
     public static final Color EARTH = Color.valueOf("b5a276");
+    /** 更暗的土色，重炮开火扬尘用：那层土压在机甲脚边，亮度和地面齐平时就看不见了 */
+    public static final Color DUST_DARK = Color.valueOf("9d8d68");
 
     private static final Rand rand = new Rand();
 
     private static Color main(EffectContainer e){
         return e.color == null ? MAIN : e.color;
+    }
+
+    /**
+     * 地板取色：把脚下的地板色压成「带环境倾向的土色」。
+     *
+     * <p>落地扬尘和开火扬尘是同一件事的两种触发方式——都是「土被掀起来」，
+     * 只不过一个由炮弹砸、一个由炮口冲击吹。取色逻辑完全一致，所以抽出来共用。
+     *
+     * <p>不是直接 {@code lerp(地板色, w)}：地板色只能借色相，明度和饱和度得自己重算。
+     * 雪原的地板接近纯白，原样拿来是一团比雪还亮的白斑，等于没画；玄武岩接近纯黑，
+     * 尘会整个糊进地面。所以明度在「提亮 / 压暗」之间按地板明度插值，再夹进
+     * {@link #minValue}~{@link #maxValue}；饱和度压到 {@link #maxSaturation} 以下，
+     * 免得彩色的地板把土染成烟。
+     *
+     * <p>最后只把结果按 {@link #mix} 搅回 {@link FireFx#EARTH}，留一部分土黄：
+     * 尘终究是从地里崩出来的矿物微粒，不该变成地板的同色贴纸。
+     */
+    public static class FloorTint{
+        /** 是否按地板自动调色。关掉就一律用 {@link #base} */
+        public boolean enabled = true;
+        /** 兜底色，也是调完色之后要搅回去的底子。默认 {@link FireFx#EARTH} */
+        public Color base = EARTH;
+        /** 地板色混入比例。0 = 纯土黄，1 = 完全跟随地板 */
+        public float mix = 0.65f;
+        /** 暗地板上提亮多少。玄武岩的明度只有 0.32，不往上抬就整个糊进地面 */
+        public float liftDark = 0.28f;
+        /** 亮地板上压暗多少。雪原的明度接近 0.95，不提反压才有对比 */
+        public float dropBright = 0.20f;
+        /** 最终明度夹取，防止提亮过头或压成黑块 */
+        public float minValue = 0.48f, maxValue = 0.86f;
+        /** 饱和度上限。土是低饱和的东西，原样吃地板的艳色会变成彩色烟雾 */
+        public float maxSaturation = 0.42f;
+
+        private final Color sample = new Color();
+        private final float[] hsv = new float[3];
+
+        public void tint(float x, float y, Color out){
+            out.set(base);
+            if(!enabled || Vars.world == null) return;
+
+            Tile tile = Vars.world.tileWorld(x, y);
+            if(tile == null) return;
+
+            Floor floor = tile.floor();
+            if(floor == null || floor == Blocks.air || floor.mapColor == null) return;
+
+            // getFloorColor 在有 minimap 混色时返回的是共享的 Tmp.c3，必须立刻拷走
+            sample.set(tile.getFloorColor());
+            if(sample.a <= 0.01f) return;
+
+            sample.toHsv(hsv);
+            // 纯黑说明这块地板没有可用颜色：mapColor 是 Block.createIcons 从图标中心
+            // 像素采的，虚空、纯黑面板、被贴图覆盖的地块都取不到值。这时留 EARTH，
+            // 否则压出来的尘是一团 0.46 明度的灰，连色相都没有
+            if(hsv[2] < 0.05f) return;
+
+            // 亮度不能跟着地板走：和地面同亮度就等于没画。而且两条地板要往相反方向调——
+            // 玄武岩得提亮、雪原得压暗，等比乘法对 0.24 和 0.94 都只是缩放，
+            // 兼顾不了，所以按地板明度在「提亮」和「压暗」之间插值
+            float t = Mathf.clamp((hsv[2] - 0.45f) / 0.45f);
+            float v = Mathf.clamp(hsv[2] + Mathf.lerp(liftDark, -dropBright, t), minValue, maxValue);
+            float s = Mathf.clamp(hsv[1] * 0.9f, 0f, maxSaturation);
+            sample.fromHsv(hsv[0], s, v);
+
+            out.lerp(sample, mix);
+        }
     }
 
     // ============================================================
@@ -455,22 +523,10 @@ public class FireFx{
         /** 寿命，80 帧约 1.2 秒。比爆炸（32 帧）长一倍多，负责收尾 */
         public float life = 80f;
 
-        /** 是否按落点地板自动调色。关掉就一律用 {@link FireFx#EARTH} */
-        public boolean adaptFloor = true;
-        /** 地板色混入比例。0 = 纯土黄，1 = 完全跟随地板 */
-        public float floorMix = 0.65f;
-        /** 暗地板上提亮多少。玄武岩的明度只有 0.32，不往上抬就整个糊进地面 */
-        public float liftDark = 0.28f;
-        /** 亮地板上压暗多少。雪原的明度接近 0.95，不提反压才有对比 */
-        public float dropBright = 0.20f;
-        /** 最终明度夹取，防止提亮过头或压成黑块 */
-        public float minValue = 0.48f, maxValue = 0.86f;
-        /** 饱和度上限。土是低饱和的东西，原样吃地板的艳色会变成彩色烟雾 */
-        public float maxSaturation = 0.42f;
+        /** 地板取色。和开火扬尘共用同一套算法与默认值，见 {@link FloorTint} */
+        public final FloorTint floor = new FloorTint();
 
         private final Color tint = new Color();
-        private final Color sample = new Color();
-        private final float[] hsv = new float[3];
 
         public GroundDustEffect(){
             this(1f);
@@ -490,7 +546,7 @@ public class FireFx{
 
             // 每帧重算，不做缓存：同一个 Effect 单例会被多个落点的容器同时 render，
             // 缓存下来的颜色会让火山的尘一直红到雪山上去
-            tintAt(e.x, e.y);
+            floor.tint(e.x, e.y, tint);
 
             Draw.blend(Blending.normal);
             Draw.color(tint);
@@ -539,48 +595,136 @@ public class FireFx{
 
             Draw.blend();
         }
+    }
 
+    // ============================================================
+    //  开火扬尘
+    // ============================================================
+    /**
+     * 重型火炮开火时从炮口掀起来的地面扬尘。
+     *
+     * <p>和 {@link GroundDustEffect} 是同一件事的两种触发：都是土被掀起来，共用
+     * {@link FloorTint} 的取色。但两者的成因完全不同，形状必须分开做——
+     *
+     * <ul>
+     *   <li><b>方向</b>：落地扬尘是炮弹砸进地面，土向<b>四周</b>崩；开火扬尘是炮口气压
+     *       把土<b>往前推</b>，只在弹道前方铺开。做成圆形的话，一炮打出去炮口周围
+     *       凭空鼓起一圈土，像踩了个隐形的地雷。</li>
+     *   <li><b>大小</b>：落地是 6 格的一圈，开火只有 2 格多。炮口冲击掀的是脚边那点浮土，
+     *       不是弹坑。</li>
+     *   <li><b>时间</b>：落地扬尘 80 帧，负责在爆炸之后收尾；开火扬尘 36 帧，必须在下一次
+     *       开火（堡垒 reload 60 帧）之前散干净，否则连射时会糊成一层常驻的雾。</li>
+     *   <li><b>厚度</b>：压得比落地更扁（0.5 对 0.58），上浮只有 0.15 格。炮口吹起来的土
+     *       是贴着地面滑出去的，飘起来就成烟了。</li>
+     * </ul>
+     *
+     * <p>走普通混合，和土一样。additive 会把这层加成发光的雾，看起来像炮口在喷蒸汽。
+     *
+     * <p>挂在 {@code shootEffect} 上（和枪口焰同一个位置）。不要挂 {@code smokeEffect}：
+     * 那个位置会被原版 {@code Turret} 在冷却时反复播，土的密度会跟着热量乱跳。
+     */
+    public static class MuzzleDustEffect extends Effect{
+        /** 扬尘最远推到炮口外多远，3 格。再远就跟炮口脱节，像地上起了阵风 */
+        public float radius = 24f;
+        /** 单团半径，0.55 格。比落地扬尘小：炮口掀的是浮土，块头没那么大 */
+        public float size = 4.4f;
+        /** 尘团数量（含炮口正下方那一团）。比落地扬尘密，碎一点才像被吹散的土粒 */
+        public int puffs = 14;
         /**
-         * 取落点地板色，压成「带环境倾向的土色」。
-         *
-         * <p>不是直接 {@code lerp(地板色, w)}：地板色只能借色相，明度和饱和度得自己重算。
-         * 雪原的地板接近纯白，原样拿来是一团比雪还亮的白斑，等于没画；玄武岩接近纯黑，
-         * 尘会整个糊进地面。所以明度在「提亮 / 压暗」之间按地板明度插值，再夹进
-         * {@link #minValue}~{@link #maxValue}；饱和度压到 {@link #maxSaturation} 以下，
-         * 免得彩色的地板把土染成烟。
-         *
-         * <p>最后只把结果按 {@link #floorMix} 搅回 {@link #EARTH}，留一部分土黄：
-         * 尘终究是从地里崩出来的矿物微粒，不该变成地板的同色贴纸。
+         * 扇形半角。60° 覆盖前向锥，再大就会往机体背后扬——俯视角下那层土会盖住
+         * 炮管和机身，看着像单位自己陷进地里
          */
-        protected void tintAt(float x, float y){
-            tint.set(EARTH);
-            if(!adaptFloor || Vars.world == null) return;
+        public float spread = 60f;
+        /** 垂直压缩，0.5。比落地扬尘更扁：土是被气压贴着地面推出去的 */
+        public float squash = 0.5f;
+        /** 上浮量，0.15 格。给一点是为了别像贴纸，给多了就成蘑菇云 */
+        public float lift = 1.2f;
+        /** 峰值不透明度 */
+        public float opacity = 0.8f;
+        /** 寿命，36 帧 */
+        public float life = 36f;
+        /** 炮口正下方那一团的尺寸倍数。它是整簇里最浓的，负责「土就在脚下」 */
+        public float coreSize = 1.4f;
 
-            Tile tile = Vars.world.tileWorld(x, y);
-            if(tile == null) return;
+        /** 地板取色，和 {@link GroundDustEffect} 同一套 */
+        public final FloorTint floor = new FloorTint();
 
-            Floor floor = tile.floor();
-            if(floor == null || floor == Blocks.air || floor.mapColor == null) return;
+        private final Color tint = new Color();
 
-            // getFloorColor 在有 minimap 混色时返回的是共享的 Tmp.c3，必须立刻拷走
-            sample.set(tile.getFloorColor());
-            if(sample.a <= 0.01f) return;
+        public MuzzleDustEffect(){
+            this(1f);
+        }
 
-            sample.toHsv(hsv);
-            // 纯黑说明这块地板没有可用颜色：mapColor 是 Block.createIcons 从图标中心
-            // 像素采的，虚空、纯黑面板、被贴图覆盖的地块都取不到值。这时留 EARTH，
-            // 否则压出来的尘是一团 0.46 明度的灰，连色相都没有
-            if(hsv[2] < 0.05f) return;
+        public MuzzleDustEffect(float scale){
+            radius *= scale;
+            size *= scale;
+            lift *= scale;
+            // 比落地扬尘少混一点地板色（0.5 对 0.65）：炮口这层压在机甲脚边，
+            // 草地把土染绿之后会和周围的草糊成一片，看起来像喷了口绿烟
+            floor.mix = 0.5f;
+            // 兜底土色压暗一档。EARTH 的明度 0.71 比草地（0.59）还亮，
+            // 原样用会在草地上读成一团发光的黄雾——尘是暗的，它挡光，不发光
+            floor.base = DUST_DARK;
+            // 提得少、压得多：草地在中间明度，按原来那组参数会被提亮到 0.72
+            floor.liftDark = 0.05f;
+            floor.dropBright = 0.22f;
+            lifetime = life;
+            clip = (radius + size * 3f) * 2f + 40f;
+        }
 
-            // 亮度不能跟着地板走：和地面同亮度就等于没画。而且两条地板要往相反方向调——
-            // 玄武岩得提亮、雪原得压暗，等比乘法对 0.24 和 0.94 都只是缩放，
-            // 兼顾不了，所以按地板明度在「提亮」和「压暗」之间插值
-            float t = Mathf.clamp((hsv[2] - 0.45f) / 0.45f);
-            float v = Mathf.clamp(hsv[2] + Mathf.lerp(liftDark, -dropBright, t), minValue, maxValue);
-            float s = Mathf.clamp(hsv[1] * 0.9f, 0f, maxSaturation);
-            sample.fromHsv(hsv[0], s, v);
+        @Override
+        public void render(EffectContainer e){
+            float p = e.fin();
 
-            tint.lerp(sample, floorMix);
+            // 每帧重算，理由同落地扬尘：单例会被多个开火点同时 render
+            floor.tint(e.x, e.y, tint);
+
+            Draw.blend(Blending.normal);
+            Draw.color(tint);
+
+            rand.setSeed(e.id);
+            for(int i = 0; i < puffs; i++){
+                // 第 0 团压在炮口正下方：气压最先掀的是脚边那层土
+                boolean core = i == 0;
+
+                // 角度在扇形内均分再抖。纯随机会让几团挤在轴线上、两侧空掉，
+                // 扇形读起来就只是「一条往前喷的灰柱」，没有「面」的宽度
+                float a = e.rotation + (core ? rand.random(-spread, spread)
+                    : Mathf.lerp(-spread, spread, (i - 1f) / Math.max(1f, puffs - 2f))
+                        + rand.random(-9f, 9f));
+                // 错开起跑：整排同时炸开像一堵推出去的墙
+                float dly = core ? 0f : rand.random(0f, 0.12f);
+                float pp = Mathf.clamp((p - dly) / (1f - dly));
+
+                // 偏离弹道轴线的程度，0 = 正前方，1 = 扇形边缘
+                float off = Mathf.clamp(Math.abs(a - e.rotation) / spread);
+                // 轴线上的团跑得最远、两侧的近：炮口气压是往前顶的，侧向只分到一点。
+                // 不给这个收窄时，九团等距铺在 ±70° 上，整簇读成一个半圆饼——
+                // 形状是扇的，但没有「往前冲」的方向感
+                float reach = 1f - 0.45f * off;
+
+                // 扩散用 pow3Out：炮口气压是「一下子」推出去的，前 1/3 的寿命就该铺满，
+                // 剩下的时间只负责淡出。换成 pow2Out 时到半条命才走完 3/4，
+                // 画面读作「尘土在匀速膨胀」，炮口那一下的爆发感全没了
+                float d = core ? radius * 0.12f
+                    : radius * reach * rand.random(0.45f, 1f) * Interp.pow3Out.apply(pp);
+                float x = e.x + Mathf.cosDeg(a) * d;
+                float y = e.y + Mathf.sinDeg(a) * d * squash + lift * pp;
+
+                float r = size * (core ? coreSize : rand.random(0.5f, 1f))
+                    * (0.45f + 0.55f * Mathf.pow(pp, 0.5f));
+                // 起手比落地扬尘更陡（0.08 对 0.12）：炮口这一下要先「炸」出来再散。
+                // 边缘再压 25%：两侧本来就没多少土，和轴线一样浓时会糊成一个圆
+                float a0 = Mathf.clamp(pp / 0.08f) * Mathf.pow(1f - pp, 1.2f) * opacity
+                    * (core ? 1f : rand.random(0.6f, 1f)) * (1f - 0.25f * off);
+
+                // 柔边同样用 Fill.light，理由见 GroundDustEffect：叠同心圆会留下可见的环
+                Tmp.c1.set(tint).a(a0);
+                Tmp.c2.set(tint).a(0f);
+                Fill.light(x, y, 18, r * 1.5f, Tmp.c1, Tmp.c2);
+            }
+
+            Draw.blend();
         }
     }
 
@@ -595,6 +739,8 @@ public class FireFx{
     public static final Effect HIT = new HitSparkEffect(1f);
     /** 落地扬尘。半径按 splash 30~40 的火炮口径给的，更大的炮用 {@link #dust(float)} */
     public static final Effect DUST = new GroundDustEffect(1f);
+    /** 开火扬尘。给重型火炮用：炮口那一圈往前推的土，尺寸对应 hitSize ≈ 8 */
+    public static final Effect MUZZLE_DUST = new MuzzleDustEffect(1f);
 
     /** 按尺寸取枪口焰。同一 scale 每次调用都会新建，别在 update 里反复调 */
     public static Effect muzzle(float scale){
@@ -614,6 +760,11 @@ public class FireFx{
     /** 按尺寸取落地扬尘。口径越大给得越大，一般取 splash 半径 / 35 */
     public static Effect dust(float scale){
         return new GroundDustEffect(scale);
+    }
+
+    /** 按尺寸取开火扬尘。hitSize 8 用 1，堡垒那一级（hitSize 24）用 2 ~ 2.5 */
+    public static Effect muzzleDust(float scale){
+        return new MuzzleDustEffect(scale);
     }
 
     /**

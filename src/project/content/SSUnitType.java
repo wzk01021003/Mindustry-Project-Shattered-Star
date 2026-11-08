@@ -228,6 +228,11 @@ public class SSUnitType {
                                     // 只挂 despawnEffect 不挂 hitEffect——后者打中空中单位时
                                     // 也会触发，那时地上没有土可扬
                                     despawnEffect = FireFx.DUST;
+                                    // 开火扬尘：炮口那一圈被气压贴着地面推出去的土。
+                                    // 重炮的后坐（recoil 4、shake 2）已经把「炮很重」演出来了，
+                                    // 但炮口本身是空的——加了这层，开火才和地面发生关系。
+                                    // scale 1.6 按 hitSize 13 / 8 取，范围约 3.6 格
+                                    shootEffect = FireFx.muzzleDust(1.6f);
                                     knockback = 0.8f;
                                     lifetime = 53.25f;
                                     maxRange = 240f;
