@@ -175,7 +175,7 @@ public class LaserFx{
      *       <b>各向均匀</b>地散开，否则看起来像子弹撞在墙上炸了。</li>
      *   <li>火花没有环，激光有一圈很薄的环：能量在命中点沿表面扩散，
      *       环是唯一能把「光的扩散」和「碎片的飞散」区分开的形状。</li>
-     *   <li>火花线条粗（0.5）而短，激光线条细（0.45）而长，末端几乎看不见，
+     *   <li>火花线条粗（0.5）而短，激光线条细（0.24）而长，末端几乎看不见，
      *       像被拉出去的光丝而不是金属屑。</li>
      * </ul>
      *
@@ -212,34 +212,45 @@ public class LaserFx{
             Color glowColor = pick(e, tint);
 
             // ① 白芯：普通混合的实心圆，和枪口脉冲同一个道理——叠加混合在中亮地形上
-            //    等于没画，命中点必须先有一个烧穿的白点，辉光才有地方可以洇
+            //    等于没画，命中点必须先有一个烧穿的白点，辉光才有地方可以洇。
+            //    半径从 1.15 收到 0.95：这是整颗特效里唯一该白的地方，再大就成白斑了
             Draw.blend(Blending.normal);
             Draw.color(CORE);
             Draw.alpha(fade);
-            Fill.circle(e.x, e.y, size * 1.15f * (1f - 0.45f * p));
+            Fill.circle(e.x, e.y, size * 0.95f * (1f - 0.45f * p));
 
             Draw.blend(Blending.additive);
 
             // ② 辉光：径向渐变，同时收半径和透明度。收半径是为了让亮点「聚」而不是「胀」；
-            //    外半径给到 3.4 倍时整颗光斑会糊成一个白盘，把后面的环和光丝全吃掉
-            Tmp.c1.set(CORE).lerp(glowColor, p).a(fade * 0.55f);
+            //    外半径给到 3.4 倍时整颗光斑会糊成一个白盘，把后面的环和光丝全吃掉。
+            //    内色以前是纯白，additive 一叠就是一块白斑——改成 BEAM，绿的体积才立得住
+            Tmp.c1.set(BEAM).lerp(glowColor, p).a(fade * 0.55f);
             Tmp.c2.set(glowColor).a(0f);
             Fill.light(e.x, e.y, 24, size * 2.4f * (1f - 0.4f * p), Tmp.c1, Tmp.c2);
 
-            // ③ 光圈：和枪口同一个道理，普通混合、白→主色、alpha 恒 1。
-            //    这层是原版 Fx.hitLaser 的全部内容，也是命中读起来「硬」的唯一来源
-            Draw.blend(Blending.normal);
-            Draw.color(CORE, glowColor, p);
-            Draw.alpha(1f);
-            Lines.stroke(0.5f + 1.1f * fade);
-            Lines.circle(e.x, e.y, ring * out);
-
-            Draw.blend(Blending.additive);
+            // ③ 光圈：回到上一版的绿色调。
+            //
+            //    上一轮为了「硬」，把它改成了普通混合的实色环、颜色白→主色、alpha 恒 1。
+            //    硬度是有了，但代价是整颗命中点变白：环是这颗特效里面积最大的一层，
+            //    实色白环一罩，白芯和白光丝全被它盖住，绿色只在最后一两帧才透出来。
+            //
+            //    原版 Fx.hitLaser 的环之所以不显白，是因为它半径只有 5px、寿命 12 帧、
+            //    线宽 1.5 收到 0.5——白只是掠一下。我们的环 7px、线宽收到 0.5 还要撑 9 帧，
+            //    同样白→绿，白的占比就大得多。
+            //
+            //    所以环回到 BEAM → DEEP 全程绿、alpha 跟随 fade。力度由白芯负责（那一层
+            //    只有 2px，是「烧穿的点」），颜色由环负责（这一层是「扩散的光」）——
+            //    两件事本来就该分开，压在同一层上必然顾此失彼。
+            Draw.color(BEAM, DEEP, p);
+            Draw.alpha(fade * 0.42f);
+            Lines.stroke(0.6f * fade);
+            Lines.circle(e.x, e.y, ring * (0.35f + 0.65f * out));
 
             // ④ 放射光丝：以弹道为轴均分，只抖角度不抖方向——
-            //    纯随机时五条可能挤在同一侧，整簇会歪，看着像命中点没对上
+            //    纯随机时五条可能挤在同一侧，整簇会歪，看着像命中点没对上。
+            //    颜色同样从 CORE 换成 BEAM：五条细线加起来面积不小，纯白会整片泛白
             rand.setSeed(e.id);
-            Draw.color(CORE, BEAM, Mathf.clamp(p * 1.6f));
+            Draw.color(BEAM, glowColor, Mathf.clamp(p * 1.6f));
             Draw.alpha(fade * 0.7f);
             for(int i = 0; i < sparks; i++){
                 float a = e.rotation + 360f * i / sparks + rand.random(-20f, 20f);
