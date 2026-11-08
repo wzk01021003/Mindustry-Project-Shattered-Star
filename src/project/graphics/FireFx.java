@@ -9,10 +9,14 @@ import arc.math.Interp;
 import arc.math.Mathf;
 import arc.math.Rand;
 import arc.util.Tmp;
+import mindustry.content.Blocks;
+import mindustry.Vars;
 import mindustry.entities.Effect;
 import mindustry.entities.bullet.BulletType;
 import mindustry.entities.Effect.EffectContainer;
 import mindustry.graphics.Drawf;
+import mindustry.world.Tile;
+import mindustry.world.blocks.environment.Floor;
 
 /**
  * 开火与打击特效：把原版那几只通用 {@code Fx} 换成本 mod 自己的。
@@ -442,6 +446,23 @@ public class FireFx{
         /** 寿命，80 帧约 1.2 秒。比爆炸（32 帧）长一倍多，负责收尾 */
         public float life = 80f;
 
+        /** 是否按落点地板自动调色。关掉就一律用 {@link FireFx#EARTH} */
+        public boolean adaptFloor = true;
+        /** 地板色混入比例。0 = 纯土黄，1 = 完全跟随地板 */
+        public float floorMix = 0.65f;
+        /** 暗地板上提亮多少。玄武岩的明度只有 0.32，不往上抬就整个糊进地面 */
+        public float liftDark = 0.28f;
+        /** 亮地板上压暗多少。雪原的明度接近 0.95，不提反压才有对比 */
+        public float dropBright = 0.20f;
+        /** 最终明度夹取，防止提亮过头或压成黑块 */
+        public float minValue = 0.48f, maxValue = 0.86f;
+        /** 饱和度上限。土是低饱和的东西，原样吃地板的艳色会变成彩色烟雾 */
+        public float maxSaturation = 0.42f;
+
+        private final Color tint = new Color();
+        private final Color sample = new Color();
+        private final float[] hsv = new float[3];
+
         public GroundDustEffect(){
             this(1f);
         }
@@ -458,8 +479,12 @@ public class FireFx{
         public void render(EffectContainer e){
             float p = e.fin();
 
+            // 每帧重算，不做缓存：同一个 Effect 单例会被多个落点的容器同时 render，
+            // 缓存下来的颜色会让火山的尘一直红到雪山上去
+            tintAt(e.x, e.y);
+
             Draw.blend(Blending.normal);
-            Draw.color(EARTH);
+            Draw.color(tint);
 
             rand.setSeed(e.id);
             for(int i = 0; i < puffs; i++){
@@ -498,12 +523,55 @@ public class FireFx{
                 // 之前是三层同心圆递减 alpha，结果每一层的边界都留下一个可见的环，
                 // 13 团叠在一起看起来是一串气泡浮在地上，完全不像土。
                 // 渐变没有边界，相邻尘团叠加时也只会在浓度上叠，不会叠出轮廓
-                Tmp.c1.set(EARTH).a(a0);
-                Tmp.c2.set(EARTH).a(0f);
+                Tmp.c1.set(tint).a(a0);
+                Tmp.c2.set(tint).a(0f);
                 Fill.light(x, y, 20, r * 1.55f, Tmp.c1, Tmp.c2);
             }
 
             Draw.blend();
+        }
+
+        /**
+         * 取落点地板色，压成「带环境倾向的土色」。
+         *
+         * <p>不是直接 {@code lerp(地板色, w)}：地板色只能借色相，明度和饱和度得自己重算。
+         * 雪原的地板接近纯白，原样拿来是一团比雪还亮的白斑，等于没画；玄武岩接近纯黑，
+         * 尘会整个糊进地面。所以明度在「提亮 / 压暗」之间按地板明度插值，再夹进
+         * {@link #minValue}~{@link #maxValue}；饱和度压到 {@link #maxSaturation} 以下，
+         * 免得彩色的地板把土染成烟。
+         *
+         * <p>最后只把结果按 {@link #floorMix} 搅回 {@link #EARTH}，留一部分土黄：
+         * 尘终究是从地里崩出来的矿物微粒，不该变成地板的同色贴纸。
+         */
+        protected void tintAt(float x, float y){
+            tint.set(EARTH);
+            if(!adaptFloor || Vars.world == null) return;
+
+            Tile tile = Vars.world.tileWorld(x, y);
+            if(tile == null) return;
+
+            Floor floor = tile.floor();
+            if(floor == null || floor == Blocks.air || floor.mapColor == null) return;
+
+            // getFloorColor 在有 minimap 混色时返回的是共享的 Tmp.c3，必须立刻拷走
+            sample.set(tile.getFloorColor());
+            if(sample.a <= 0.01f) return;
+
+            sample.toHsv(hsv);
+            // 纯黑说明这块地板没有可用颜色：mapColor 是 Block.createIcons 从图标中心
+            // 像素采的，虚空、纯黑面板、被贴图覆盖的地块都取不到值。这时留 EARTH，
+            // 否则压出来的尘是一团 0.46 明度的灰，连色相都没有
+            if(hsv[2] < 0.05f) return;
+
+            // 亮度不能跟着地板走：和地面同亮度就等于没画。而且两条地板要往相反方向调——
+            // 玄武岩得提亮、雪原得压暗，等比乘法对 0.24 和 0.94 都只是缩放，
+            // 兼顾不了，所以按地板明度在「提亮」和「压暗」之间插值
+            float t = Mathf.clamp((hsv[2] - 0.45f) / 0.45f);
+            float v = Mathf.clamp(hsv[2] + Mathf.lerp(liftDark, -dropBright, t), minValue, maxValue);
+            float s = Mathf.clamp(hsv[1] * 0.9f, 0f, maxSaturation);
+            sample.fromHsv(hsv[0], s, v);
+
+            tint.lerp(sample, floorMix);
         }
     }
 
