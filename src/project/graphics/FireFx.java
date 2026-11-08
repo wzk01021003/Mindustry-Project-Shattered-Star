@@ -149,7 +149,7 @@ public class FireFx{
      * 炮口余烟。
      *
      * <p>这团烟是<b>战场上的东西</b>，不是机体的挂件：出膛那一下被燃气推着沿炮管冲出去
-     * （约 1.5 格），随后迅速减速，交给浮力和风。位置从生成起就钉在世界坐标里，
+     * （约 1.75 格），随后逐渐减速，斜着往上飘。位置从生成起就钉在世界坐标里，
      * 不跟随单位、不跟随炮塔；机体开走以后，烟还在原处慢慢散。
      *
      * <p>「喷出去」和「不跟炮塔」不矛盾：喷射方向只取开火那一瞬的炮管角度，
@@ -173,14 +173,22 @@ public class FireFx{
         public float size = 2.4f;
         /** 团数：1 主团 + 1 炮口团 + 其余碎絮 */
         public int puffs = 4;
-        /** 出膛后沿炮管喷出的距离，1.5 格。只在 {@link #followBarrel} 打开时生效 */
-        public float drift = 12f;
+        /** 出膛后沿炮管喷出的距离，1.75 格。只在 {@link #followBarrel} 打开时生效 */
+        public float drift = 14f;
         /** 出膛初速是否沿炮管。默认 true：烟被燃气推着从枪口喷出去，之后才交给浮力 */
         public boolean followBarrel = true;
         /** 侧向散开量，0.45 格。走世界水平方向，不随炮塔转 */
         public float spread = 3.6f;
-        /** 出膛后向世界正上方浮起的距离，1.25 格。烟离开炮口就不再属于炮塔了 */
-        public float rise = 10f;
+        /**
+         * 全程向世界正上方浮起的距离，0.75 格。
+         *
+         * <p>这个数决定「烟柱有多斜」：它和 {@link #drift} 的比值就是烟柱末端翘起的角度。
+         * 之前给到 10（1.25 格），比喷出距离还长，后半段寿命里烟几乎只剩上升，
+         * 看着像「喷一下就开始固定往上飞」；压到 6 之后，烟先斜着滑出去，末端才慢慢翘。
+         *
+         * <p>想让它完全水平地散掉（像蒸汽而不是烟），把它设成 0。
+         */
+        public float rise = 6f;
         /** 世界水平方向的风，把所有团往同一侧慢慢推。这是「属于战场」而不是「属于武器」最直接的信号 */
         public float wind = 1.4f;
         /** 峰值不透明度。这是全特效最容易调过头的地方，0.4 已经能看清了 */
@@ -240,11 +248,13 @@ public class FireFx{
                 float dim = core ? 1f : root ? 0.85f : rand.random(0.7f, 0.9f);
 
                 float pp = Mathf.clamp((p - delay) / (1f - delay));
-                // 沿炮管喷出去：pow3Out 表示「出膛那一下最猛、之后迅速减速」。
-                // 换成匀速或 pow2Out，后半段还在往前爬，整条烟会一路跟着炮口跑，像挂在枪上的拖尾。
-                // 方向只取开火那一瞬的炮管角度（e.rotation 在生成时就固定了），
+                // 沿炮管喷出去，用 pow2Out 而不是 pow3Out：
+                // pow3Out 在 30 帧内就走完 87% 的行程，剩下的寿命里烟只能往上爬，
+                // 轨迹于是变成「一段斜线 + 一段垂直线」，看起来就是「喷一下就开始固定往上飞」。
+                // pow2Out 把余速留得更久，烟柱是一条连续上翘的弧线。
+                // 方向只取开火那一瞬的炮管角度（e.rotation 生成时就固定了），
                 // 炮塔之后怎么转都拖不动已经喷出去的烟
-                float travel = followBarrel ? drift * along * Interp.pow3Out.apply(pp) : 0f;
+                float travel = followBarrel ? drift * along * Interp.pow2Out.apply(pp) : 0f;
                 // 世界坐标下的三股位移，全部与 rot 无关：
                 //   ① 侧向散开 —— 出膛后被气流推开，越推越远
                 //   ② 上浮 —— 前慢后快，热烟自己往上爬，不是匀速平移
@@ -278,7 +288,7 @@ public class FireFx{
                 float eo = r * (0.45f + 0.25f * pp);
                 // 长轴方向：出膛那一瞬沿弹道（正被喷出去，烟柱是横的），
                 // 之后浮力接管，慢慢转回世界竖直。只有形状在转，位置始终钉在世界坐标上
-                float shapeMix = Mathf.pow(pp, 1.4f);
+                float shapeMix = Mathf.pow(pp, 1.9f);
                 float dx = Mathf.lerp(cx, 0f, shapeMix);
                 float dy = Mathf.lerp(cy, 1f, shapeMix);
                 float dl = (float)Math.sqrt(dx * dx + dy * dy);
