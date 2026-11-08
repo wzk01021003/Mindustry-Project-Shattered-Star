@@ -63,6 +63,9 @@ public class FireFx{
     public static final Color DUST_DARK = Color.valueOf("9d8d68");
 
     private static final Rand rand = new Rand();
+    /** 四周余尘专用。和 {@link #rand} 分开是为了不打乱主循环那串随机数，
+     *  否则加一层余尘会把扇形里每一团的位置全洗牌 */
+    private static final Rand ringRand = new Rand();
 
     private static Color main(EffectContainer e){
         return e.color == null ? MAIN : e.color;
@@ -646,6 +649,34 @@ public class FireFx{
         /** 炮口正下方那一团的尺寸倍数。它是整簇里最浓的，负责「土就在脚下」 */
         public float coreSize = 1.4f;
 
+        /**
+         * 要不要在扇形底下垫一圈四周余尘。现实里重炮开火时冲击波打到地面会反射出
+         * 地表波，沿地面<b>径向</b>扩散——这才是真实照片里车体被整团尘罩住的主因，
+         * 纯前向锥是俯视角游戏才有的简化。这里补一层很淡的环来暗示「不止往前」，
+         * 又不能把方向感糊掉，所以半径和透明度都压得很低。
+         */
+        public boolean ring = true;
+        /**
+         * 余尘半径占主层的比例。0.45 → scale 1.6 下 2.2 格，比机体宽一圈。
+         * 给到 0.3 时整圈都压在机身上，p 值小的时候根本露不到地面，
+         * 读作「机体脏了一块」而不是「脚边有土」
+         */
+        public float ringReach = 0.45f;
+        /** 余尘团数。径向均分，不需要太多，够把「圈」读出来就行 */
+        public int ringPuffs = 11;
+        /**
+         * 余尘峰值不透明度。土色和草地只差二十几个色阶，乘 0.2 之后只有五阶变化，
+         * 等于没画；0.42 才读得出机体周围多了一层土，同时仍不到主体 0.8 的一半，
+         * 不会盖住前向的方向感
+         */
+        public float ringOpacity = 0.42f;
+        /**
+         * 余尘走完全程所占的寿命比例。0.55 → 20 帧，比主体的 36 帧早散。
+         * 余尘是冲击波的一次反射，主体还在往前推的时候它就该没了——
+         * 同时淡出的话，尾巴会拖着两条一样长的尘，读起来像两个特效叠在一起
+         */
+        public float ringLife = 0.55f;
+
         /** 地板取色，和 {@link GroundDustEffect} 同一套 */
         public final FloorTint floor = new FloorTint();
 
@@ -681,6 +712,38 @@ public class FireFx{
 
             Draw.blend(Blending.normal);
             Draw.color(tint);
+
+            // 先画四周余尘，垫在扇形底下。放前面不只是为了遮挡关系（它该被前向的
+            // 主体盖住），也是为了不改主循环的随机序列——见 ringRand 的注释
+            if(ring){
+                float rp = Mathf.clamp(p / ringLife);
+                ringRand.setSeed(e.id);
+
+                // 圆心沿弹道反面退回机体：Effect 只拿得到炮口坐标（堡垒的 weapon.x = 9），
+                // 而这一圈土是被后坐震起来的、贴在整个机体脚下，绕炮口画的话
+                // 机体后半截就一点土都没有了。1.3 个 size ≈ 9.2（scale 1.6），
+                // 刚好抵消那 9 个单位的炮口偏移
+                float bx = e.x - Mathf.cosDeg(e.rotation) * size * 1.3f;
+                float by = e.y - Mathf.sinDeg(e.rotation) * size * 1.3f;
+
+                for(int i = 0; i < ringPuffs; i++){
+                    // 径向均分再抖 14°。抖太多会几团挤一起、留下空档，圈就断了
+                    float a = i * 360f / ringPuffs + ringRand.random(-14f, 14f);
+                    // pow2Out：地表波比气压波慢半拍，但也是往外的，不是匀速
+                    float d = radius * ringReach * ringRand.random(0.7f, 1f) * Interp.pow2Out.apply(rp);
+                    float x = bx + Mathf.cosDeg(a) * d;
+                    // 贴地：这圈是被地面反射带上来的浮土，几乎不离开地表
+                    float y = by + Mathf.sinDeg(a) * d * squash;
+
+                    float r = size * ringRand.random(0.55f, 1f) * (0.5f + 0.5f * Mathf.pow(rp, 0.5f));
+                    // 起手 0.06 比主体的 0.08 还陡：反射波是瞬时起爆，没有加速段
+                    float a0 = Mathf.clamp(rp / 0.06f) * Mathf.pow(1f - rp, 1.6f) * ringOpacity;
+
+                    Tmp.c1.set(tint).a(a0);
+                    Tmp.c2.set(tint).a(0f);
+                    Fill.light(x, y, 18, r * 1.3f, Tmp.c1, Tmp.c2);
+                }
+            }
 
             rand.setSeed(e.id);
             for(int i = 0; i < puffs; i++){
