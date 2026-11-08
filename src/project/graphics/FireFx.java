@@ -148,9 +148,13 @@ public class FireFx{
     /**
      * 炮口余烟。
      *
-     * <p>这团烟是<b>战场上的东西</b>，不是机体的挂件：它生成在世界坐标里，
-     * 不跟随单位、不跟随炮塔，生成之后就只做三件事——被气流推开、往上浮、被风吹。
-     * 机体开走以后烟还在原处慢慢散。
+     * <p>这团烟是<b>战场上的东西</b>，不是机体的挂件：出膛那一下被燃气推着沿炮管冲出去
+     * （约 1.5 格），随后迅速减速，交给浮力和风。位置从生成起就钉在世界坐标里，
+     * 不跟随单位、不跟随炮塔；机体开走以后，烟还在原处慢慢散。
+     *
+     * <p>「喷出去」和「不跟炮塔」不矛盾：喷射方向只取开火那一瞬的炮管角度，
+     * {@code EffectState.rotation} 在 {@code at()} 时就写死了，之后炮塔怎么转都不会
+     * 拖着已经喷出去的烟走；形状的长轴也只是在头几帧沿弹道，之后自动转回竖直。
      *
      * <p>枪口焰只有 6 帧，是「砰」的那一下；烟活 110 帧（约 1.7 秒），是「砰」之后
      * 留在原地的那点痕迹。两者寿命差近二十倍，正好把连发的节奏串起来：
@@ -169,10 +173,10 @@ public class FireFx{
         public float size = 2.4f;
         /** 团数：1 主团 + 1 炮口团 + 其余碎絮 */
         public int puffs = 4;
-        /** 沿炮管方向漂出的距离，0.69 格。只在 {@link #followBarrel} 打开时生效 */
-        public float drift = 5.5f;
-        /** 出膛初速是否沿炮管。默认 false：烟只在炮口膨胀上浮，完全不理会炮塔朝向 */
-        public boolean followBarrel = false;
+        /** 出膛后沿炮管喷出的距离，1.5 格。只在 {@link #followBarrel} 打开时生效 */
+        public float drift = 12f;
+        /** 出膛初速是否沿炮管。默认 true：烟被燃气推着从枪口喷出去，之后才交给浮力 */
+        public boolean followBarrel = true;
         /** 侧向散开量，0.45 格。走世界水平方向，不随炮塔转 */
         public float spread = 3.6f;
         /** 出膛后向世界正上方浮起的距离，1.25 格。烟离开炮口就不再属于炮塔了 */
@@ -200,7 +204,7 @@ public class FireFx{
             // 这里两个开关都显式关掉并留在这里，避免以后随手打开又变成「机体在冒烟」
             followParent = false;
             rotWithParent = false;
-            clip = (rise + spread + wind + size * 3f) * 2f + 40f;
+            clip = (drift + rise + spread + wind + size * 3f) * 2f + 40f;
         }
 
         @Override
@@ -226,7 +230,7 @@ public class FireFx{
                 // 只有主团时它的中心离炮口 2~3px，靠自身柔边接不上，中间会空一段，
                 // 看着像烟飘在枪口前面，而不是从枪口冒出来
                 boolean root = i == 1;
-                float along = core ? 0.62f : root ? 0.1f : rand.random(0.2f, 0.5f);
+                float along = core ? 1f : root ? 0.12f : rand.random(0.45f, 0.9f);
                 // 碎絮上下交替，而不是纯随机：随机时两团可能同时偏同一侧，
                 // 整条烟就斜着往外飘，看着像没对准炮管中轴线
                 float side = (core || root) ? 0f : (i % 2 == 0 ? 1f : -1f) * rand.random(0.55f, 0.95f);
@@ -236,9 +240,10 @@ public class FireFx{
                 float dim = core ? 1f : root ? 0.85f : rand.random(0.7f, 0.9f);
 
                 float pp = Mathf.clamp((p - delay) / (1f - delay));
-                // followBarrel 默认关：烟从炮口原地涨开，不带着炮管方向的初速。
-                // 打开时用 pow3Out，出膛瞬间走完大部分行程就停住——用 pow2Out 的话
-                // 后半段还在往前爬，烟会一路跟着炮口跑，看着像拖尾
+                // 沿炮管喷出去：pow3Out 表示「出膛那一下最猛、之后迅速减速」。
+                // 换成匀速或 pow2Out，后半段还在往前爬，整条烟会一路跟着炮口跑，像挂在枪上的拖尾。
+                // 方向只取开火那一瞬的炮管角度（e.rotation 在生成时就固定了），
+                // 炮塔之后怎么转都拖不动已经喷出去的烟
                 float travel = followBarrel ? drift * along * Interp.pow3Out.apply(pp) : 0f;
                 // 世界坐标下的三股位移，全部与 rot 无关：
                 //   ① 侧向散开 —— 出膛后被气流推开，越推越远
@@ -268,12 +273,24 @@ public class FireFx{
                 // 每层画两个错开的圆，叠成长宽比约 1.5 的椭圆：
                 // 烟是被气流推着走的，形状本来就被拉长。单个正圆不管怎么调 alpha 都是一颗球，
                 // 这正是它上一版看起来像「贴上去的灰点」的原因。
-                // 长轴固定竖直（世界 +y），不跟炮管转——否则炮塔一转，烟条就横过来
                 float er = r * 0.82f;
                 // 越老的烟拉得越长：上升时上缘跑得快、下缘被拖住，形状会自己变细长
                 float eo = r * (0.45f + 0.25f * pp);
-                float ax = x, ay = y + eo;
-                float bx = x, by = y - eo;
+                // 长轴方向：出膛那一瞬沿弹道（正被喷出去，烟柱是横的），
+                // 之后浮力接管，慢慢转回世界竖直。只有形状在转，位置始终钉在世界坐标上
+                float shapeMix = Mathf.pow(pp, 1.4f);
+                float dx = Mathf.lerp(cx, 0f, shapeMix);
+                float dy = Mathf.lerp(cy, 1f, shapeMix);
+                float dl = (float)Math.sqrt(dx * dx + dy * dy);
+                if(dl > 0.001f){
+                    dx /= dl;
+                    dy /= dl;
+                }else{
+                    dx = 0f;
+                    dy = 1f;
+                }
+                float ax = x + dx * eo, ay = y + dy * eo;
+                float bx = x - dx * eo, by = y - dy * eo;
 
                 Draw.alpha(a * 0.1f);
                 Fill.circle(ax, ay, er * 1.35f);
