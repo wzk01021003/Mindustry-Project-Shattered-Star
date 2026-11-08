@@ -65,16 +65,16 @@ public class LaserFx{
      * 没有它，每秒八发的武器看起来只是在枪口反复擦亮一颗小灯。
      */
     public static class LaserMuzzleEffect extends Effect{
-        /** 光束长度，2 格。速射武器别超过 20：每秒八发时相邻两发会连成一条常亮的线 */
-        public float len = 16f;
-        /** 光束半宽。1.1 时宽高比约 1:7，再宽就成火焰了 */
-        public float width = 1.1f;
+        /** 光束长度，2.25 格。和原版 {@code Fx.shootSmall} 的 15 对齐——再短就只是枪口一点绿光 */
+        public float len = 18f;
+        /** 光束半径基准，1.6。白芯按 1.2 倍画，实际 2px 宽：原版枪口焰起手就是 6px 宽 */
+        public float width = 1.6f;
         /** 场景光半径 */
-        public float glow = 14f;
+        public float glow = 16f;
         /** 场景光不透明度 */
-        public float glowOpacity = 0.5f;
+        public float glowOpacity = 0.55f;
         /** 横向能量闪的半长，相对宽度 */
-        public float crossScale = 1.6f;
+        public float crossScale = 3.2f;
         /** 主色。null 用 {@link LaserFx#GLOW}，换武器时在工厂里设 */
         public Color tint;
 
@@ -86,7 +86,9 @@ public class LaserFx{
             len *= scale;
             width *= scale;
             glow *= scale;
-            lifetime = 6f;
+            // 5 帧。nova 的 reload 是 7 帧，8 帧的特效会首尾相接、一帧不落地糊成常亮；
+            // 留 2 帧空档，每次开火才有「一下一下」的节奏
+            lifetime = 5f;
             clip = (len + glow) * 2f + 40f;
         }
 
@@ -97,46 +99,71 @@ public class LaserFx{
             float rot = e.rotation;
             Color glowColor = pick(e, tint);
 
-            Drawf.light(e.x, e.y, glow * (0.7f + 0.3f * fout), glowColor, glowOpacity * fout);
+            // 前 45% 是「过曝」窗口。原版枪口焰之所以硬，是因为它第一帧就已经长满
+            // 6px 宽、15px 长，而且是实色——没有任何一帧是半透明的。这里用 hot
+            // 复刻那段满亮度：窗口内白芯全亮、光球最大、横闪最长，过了才交给衰减
+            float hot = Mathf.clamp(1f - p / 0.45f);
+            // 长度：前 40% 一动不动，之后 3 帧内收完。原来乘 fout 是线性缩水，
+            // 从头到尾都挂着一根越来越短的半透明棍子——「软」有一半是这根棍造成的。
+            // 光束该是「整条亮着，然后整条没了」，不是慢慢缩水
+            float shrink = Interp.pow3In.apply(Mathf.clamp((p - 0.4f) / 0.6f));
+            float lenD = len * (1f - shrink);
+
+            Drawf.light(e.x, e.y, glow * (0.85f + 0.15f * fout), glowColor,
+                glowOpacity * (0.45f + 0.55f * fout));
+
+            float tipx = e.x + Mathf.cosDeg(rot) * lenD;
+            float tipy = e.y + Mathf.sinDeg(rot) * lenD;
 
             Draw.blend(Blending.additive);
 
-            // 三层同轴的「线段」而不是三角。三角的底边是一条垂直弹道的直线，
-            // 放大后读起来像「旗子挂在杆子上」——激光没有那根杆。
-            // 线段是等宽的，才是准直光束该有的样子
-            float tipx = e.x + Mathf.cosDeg(rot) * len * fout;
-            float tipy = e.y + Mathf.sinDeg(rot) * len * fout;
-
-            // ① 外辉光：比主体宽一倍、极淡，负责边缘过曝
+            // ① 外辉光：3.6 倍宽、极淡，负责边缘过曝
             Draw.color(glowColor, DEEP, p);
-            Draw.alpha(0.20f * fout);
-            Lines.stroke(width * 3.2f);
+            Draw.alpha((0.26f + 0.34f * hot) * fout);
+            Lines.stroke(width * 3.6f);
             Lines.line(e.x, e.y, tipx, tipy);
 
             // ② 光束主体
             Draw.color(BEAM, DEEP, p);
-            Draw.alpha(0.7f * fout);
-            Lines.stroke(width * 1.7f);
+            Draw.alpha(0.85f * fout);
+            Lines.stroke(width * 2f);
             Lines.line(e.x, e.y, tipx, tipy);
 
-            // ③ 白热芯
+            // ③ 白热芯：普通混合、alpha 接近 1。这一层是「硬」的全部来源——
+            //    之前整条光束都走叠加混合，在草地这种中亮地形上等于往亮处再加亮，
+            //    加多少都看不出来。原版枪口焰是实色三角，从来不叠加
+            Draw.blend(Blending.normal);
             Draw.color(CORE);
-            Draw.alpha(fout);
-            Lines.stroke(width * 0.75f);
+            Draw.alpha(Mathf.clamp(1.15f - p * 0.9f));
+            Lines.stroke(width * 1.2f);
             Lines.line(e.x, e.y, tipx, tipy);
+            // 圆头收口：Lines.line 两端是平的，宽到 2px 以上就会露出方角
+            Fill.circle(e.x, e.y, width * 0.6f);
+            Fill.circle(tipx, tipy, width * 0.6f);
 
-            // ④ 枪口光球：径向渐变，把三条锥的根部糊成一个亮点
-            Tmp.c1.set(CORE).a(0.5f * fout);
+            Draw.blend(Blending.additive);
+
+            // ④ 枪口光球：过曝窗口内几乎全白，把三条线的根部糊成一个亮点
+            Tmp.c1.set(CORE).a(0.55f + 0.45f * hot);
             Tmp.c2.set(glowColor).a(0f);
-            Fill.light(e.x, e.y, 20, width * 2.1f * (0.55f + 0.45f * fout), Tmp.c1, Tmp.c2);
+            Fill.light(e.x, e.y, 20, width * 3.2f * (0.6f + 0.4f * hot), Tmp.c1, Tmp.c2);
 
             // ⑤ 横向能量闪：垂直弹道的一道短线，负责「放电」那一下
             float nx = Mathf.cosDeg(rot + 90f), ny = Mathf.sinDeg(rot + 90f);
-            float cl = width * crossScale * (0.4f + 0.6f * fout);
+            float cl = width * crossScale * (0.35f + 0.65f * hot);
             Draw.color(BEAM, glowColor, p);
-            Draw.alpha(0.55f * fout);
-            Lines.stroke(width * 0.38f * fout);
+            Draw.alpha((0.35f + 0.65f * hot) * fout);
+            Lines.stroke(width * 1.1f * (0.6f + 0.4f * hot));
             Lines.line(e.x - nx * cl, e.y - ny * cl, e.x + nx * cl, e.y + ny * cl);
+
+            // ⑥ 枪口后喷：反向一小截。原版那 3px 的后三角就是干这个的——
+            //    只有前方一条线时，闪光读起来是「亮起来」；有前后不对称才读成「打出去」
+            Draw.color(glowColor, DEEP, p);
+            Draw.alpha(0.55f * hot);
+            Lines.stroke(width * 2.6f * (0.4f + 0.6f * hot));
+            Lines.line(e.x, e.y,
+                e.x - Mathf.cosDeg(rot) * width * 2.2f,
+                e.y - Mathf.sinDeg(rot) * width * 2.2f);
 
             Draw.blend();
         }
@@ -189,15 +216,22 @@ public class LaserFx{
             float out = Interp.pow2Out.apply(p);
             Color glowColor = pick(e, tint);
 
+            // ① 白芯：普通混合的实心圆，和枪口脉冲同一个道理——叠加混合在中亮地形上
+            //    等于没画，命中点必须先有一个烧穿的白点，辉光才有地方可以洇
+            Draw.blend(Blending.normal);
+            Draw.color(CORE);
+            Draw.alpha(fade);
+            Fill.circle(e.x, e.y, size * 1.15f * (1f - 0.45f * p));
+
             Draw.blend(Blending.additive);
 
-            // ① 光斑：径向渐变，同时收半径和透明度。收半径是为了让亮点「聚」而不是「胀」；
+            // ② 辉光：径向渐变，同时收半径和透明度。收半径是为了让亮点「聚」而不是「胀」；
             //    外半径给到 3.4 倍时整颗光斑会糊成一个白盘，把后面的环和光丝全吃掉
-            Tmp.c1.set(CORE).a(fade * 0.7f);
+            Tmp.c1.set(CORE).lerp(glowColor, p).a(fade * 0.55f);
             Tmp.c2.set(glowColor).a(0f);
-            Fill.light(e.x, e.y, 24, size * 2.2f * (1f - 0.4f * p), Tmp.c1, Tmp.c2);
+            Fill.light(e.x, e.y, 24, size * 2.4f * (1f - 0.4f * p), Tmp.c1, Tmp.c2);
 
-            // ② 能量环：外扩 + 线宽同步变细，读作「沿表面扩散的一圈光」。
+            // ③ 能量环：外扩 + 线宽同步变细，读作「沿表面扩散的一圈光」。
             //    起始半径就给 35%：从 0 长出来的环在前两帧只有几个像素，
             //    套在白斑上像一枚小铜环，不像扩散
             Draw.color(BEAM, DEEP, p);
@@ -205,7 +239,7 @@ public class LaserFx{
             Lines.stroke(0.6f * fade);
             Lines.circle(e.x, e.y, ring * (0.35f + 0.65f * out));
 
-            // ③ 放射光丝：以弹道为轴均分，只抖角度不抖方向——
+            // ④ 放射光丝：以弹道为轴均分，只抖角度不抖方向——
             //    纯随机时五条可能挤在同一侧，整簇会歪，看着像命中点没对上
             rand.setSeed(e.id);
             Draw.color(CORE, BEAM, Mathf.clamp(p * 1.6f));
