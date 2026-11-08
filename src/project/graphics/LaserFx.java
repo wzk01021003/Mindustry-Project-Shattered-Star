@@ -88,10 +88,21 @@ public class LaserFx{
         public float spread = 3f;
         /** 单根电弧的长度系数。原版 5（最长 5.5px），这里 6：短于 5px 在 1x 下会被采样吃掉 */
         public float sparkLen = 6f;
-        /** 光圈起始 / 最大半径 */
-        public float ringFrom = 2f, ringTo = 13f;
-        /** 光圈线宽，从 strokeFrom 收到 strokeTo */
-        public float strokeFrom = 2.4f, strokeTo = 0.15f;
+        /**
+         * 光圈起始 / 最大半径。
+         *
+         * <p>照抄原版数值会出事：{@code obviate} 那圈 {@code WaveEffect} 写的是
+         * {@code sizeTo = 26}，但它自身 {@code hitSize = 25}——摊到屏幕上直径一百来像素，
+         * 环只占半个机身宽。同一个 26 挂到 {@code hitSize 8} 的小机体上，环就比机身还大，
+         * 读起来像顶着个游泳圈，而不是枪口在放电。
+         *
+         * <p>所以按机身比例收：终半径约为机身宽度的一半，和 {@code obviate} 的观感对齐。
+         * 起始值压到 1.2 是为了保住张开的幅度——2 → 8 的扩张比 1:6.7，能看出「炸开」；
+         * 2 → 6 就只有 1:3，环会在原地抖一下。
+         */
+        public float ringFrom = 1.2f, ringTo = 8f;
+        /** 光圈线宽，从 strokeFrom 收到 strokeTo。环收小后线宽也要跟着收，否则末帧是实心小圆 */
+        public float strokeFrom = 1.8f, strokeTo = 0.15f;
         /** 场景光半径与不透明度 */
         public float glow = 14f, glowOpacity = 0.5f;
         /** 中心光球基准半径 */
