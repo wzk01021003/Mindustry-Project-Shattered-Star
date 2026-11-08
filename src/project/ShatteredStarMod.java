@@ -15,6 +15,7 @@ import project.content.ProtectModeRegistry;
 import project.content.SSUnitType;
 import project.graphics.DistortionRenderer;
 import project.graphics.DustRenderer;
+import project.modules.ModuleSystem;
 
 import static mindustry.Vars.content;
 
@@ -73,6 +74,8 @@ public class ShatteredStarMod extends Mod {
         DistortionRenderer.init();
         // 0.05. 扬尘渲染器：尘团的层号 / 出生坐标由它统一管
         DustRenderer.init();
+        // 0.06. 模块受损系统：受击结算 / 降级应用 / 维修 API
+        ModuleSystem.init();
         // 0.1. 星辉跃迁设置
         SSWarpSettings.load();
         // 0.2. 跃迁音效（stAstroWarp1 / 2）

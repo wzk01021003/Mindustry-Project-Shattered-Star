@@ -99,6 +99,10 @@ import project.graphics.WarpShapes;
 import project.abilities.WarpAbility;
 import project.ShatteredStarMod;
 import project.content.units.CarrierUnitType;
+import project.modules.ModuleCurve;
+import project.modules.ModuleKind;
+import project.modules.ModularUnitType;
+import project.modules.UnitModule;
 
 import static arc.graphics.g2d.Draw.color;
 import static arc.graphics.g2d.Lines.stroke;
@@ -191,7 +195,7 @@ public class SSUnitType {
         // ============================================================
         //  fortress-r
         // ============================================================
-        fortressR = new UnitType("fortress-r") {
+        fortressR = new ModularUnitType("fortress-r") {
             {
                 constructor = MechUnit::create;
                 speed = 0.5f;
@@ -202,6 +206,22 @@ public class SSUnitType {
                 armor = 9f;
                 mechFrontSway = 0.55f;
                 stepSound = Sounds.mechStepSmall;
+
+                // 模块表：只有配了这张表的单位才参与受损系统，没配的完全走原生。
+                // 数值按「40 伤子弹 × ratio 0.15 = 每发 6 点模块伤害」估算：
+                // 900 血 9 护甲大约挨 29 发。武器 6×1.2=7.2/发 → 18 发报废，
+                // 装甲 5.4/发 → 20 发报废（之后没护甲，剩下几发掉得更快），
+                // 移动 6/发 → 23 发报废。三个模块都在死之前，读得出「越打越弱」。
+                // 这三个数只是起点，实战一定还要调。
+                modules(
+                    new UnitModule("装甲", ModuleKind.armor, 110f)
+                        .vulnerability(0.9f)
+                        .curve(ModuleCurve.floored(0.3f, 0.5f)),
+                    new UnitModule("武器", ModuleKind.weapon, 130f)
+                        .vulnerability(1.2f),
+                    new UnitModule("移动", ModuleKind.move, 140f)
+                        .curve(ModuleCurve.plateau(0.5f))
+                );
                 stepSoundPitch = 0.8f;
                 stepSoundVolume = 0.65f;
 
