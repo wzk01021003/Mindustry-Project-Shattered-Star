@@ -1,0 +1,35 @@
+Mindustry: Project Shattered Star — Windows Release
+===================================================
+
+本仓库是 A4PAPER 的「碎星计划」(Project Shattered Star) Java Mod 源码仓库。
+`windows/` 与 `.github/workflows/release-windows.yml` 是本仓库新增的 Windows
+发行打包层，用 GitHub Actions 在 Linux runner 上交叉编译出 Windows 可执行文件。
+
+本仓库的 Releases 附带以下第三方组件，其版权归各自权利人所有：
+
+1. Mindustry 桌面版 v160.7（v8 Build 160.7）
+   来源：https://github.com/Anuken/Mindustry/releases/tag/v160.7
+   原作者：Anuken 及 Mindustry contributors
+   许可证：GNU General Public License v3.0（全文随二进制包附带为 LICENSE，
+           由构建脚本在打包时自动获取；仓库根目录也可能存有一份）
+   二进制未经修改，以官方 Release 原样随包分发；游戏本体未做任何改动。
+
+2. Eclipse Temurin JRE 17（Windows x64）
+   来源：https://adoptium.net/
+   许可证：GPL-2.0 with Classpath Exception（许可文本保留在 jre/legal/ 内）
+
+3. Arc（Mindustry 本体依赖，已包含在 Mindustry.jar 内）
+   来源：https://github.com/Anuken/Arc
+
+「碎星计划」Mod 本体（src/、assets/、mod.hjson）版权归 A4PAPER 所有，
+授权以其仓库声明为准。
+
+依据 GPL-3.0，向外分发含 Mindustry 本体的二进制包时必须：
+  1. 继续以 GPL-3.0 授权，不得改为闭源或专有许可；
+  2. 随附完整对应源码或明确的源码获取方式（见 SOURCES.md）；
+  3. 保留原作者版权声明、LICENSE 全文与本 NOTICE；
+  4. 不得附加限制接收方继续修改或再分发的条款。
+仅在本机运行与修改、不对外分发时，不产生公开源码的义务。
+
+"Mindustry" 名称及商标归原权利人所有。本作品为非官方、非商业的同人衍生作品，
+与 Anuken / Mindustry 原作者无隶属关系。
