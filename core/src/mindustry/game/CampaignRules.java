@@ -1,0 +1,47 @@
+package mindustry.game;
+
+import mindustry.*;
+import mindustry.gen.*;
+import mindustry.type.*;
+
+public class CampaignRules{
+    public Difficulty difficulty = Difficulty.normal;
+    public boolean fog;
+    public boolean hideSpawns;
+    public boolean sectorInvasion;
+    public boolean randomWaveAI;
+    public boolean legacyLaunchPads;
+    public boolean rtsAI;
+    public boolean clearSectorOnLose;
+    public boolean pauseDisabled;
+    /** 敌方 AI 智能度：0 原版 / 1 智能 / 2 精锐。 */
+    public int aiLevel = 0;
+
+    public void apply(Planet planet, Rules rules){
+        rules.staticFog = rules.fog = fog;
+        rules.hideSpawns = hideSpawns;
+        rules.randomWaveAI = randomWaveAI;
+        rules.pauseDisabled = pauseDisabled;
+        rules.aiLevel = aiLevel;
+        rules.objectiveTimerMultiplier = difficulty.waveTimeMultiplier;
+        if(planet.showRtsAIRule){
+            boolean enabled = rtsAI && rules.attackMode; //if attackMode becomes false (waves enabled), turn off RTS AI
+            boolean swapped = rules.teams.get(rules.waveTeam).rtsAi != enabled;
+
+            rules.teams.get(rules.waveTeam).rtsAi = enabled;
+            rules.teams.get(rules.waveTeam).rtsMaxSquad = 15;
+
+            if(swapped && Vars.state.isGame()){
+                Groups.unit.each(u -> {
+                    if(u.team == rules.waveTeam && !u.isPlayer()){
+                        u.resetController();
+                    }
+                });
+            }
+        }
+        rules.teams.get(rules.waveTeam).blockHealthMultiplier = difficulty.enemyHealthMultiplier;
+        rules.teams.get(rules.waveTeam).unitHealthMultiplier = difficulty.enemyHealthMultiplier;
+        rules.teams.get(rules.waveTeam).unitCostMultiplier = 1f / difficulty.enemySpawnMultiplier;
+        rules.teams.get(rules.waveTeam).unitBuildSpeedMultiplier = difficulty.enemySpawnMultiplier;
+    }
+}

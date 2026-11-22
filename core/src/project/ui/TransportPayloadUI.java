@@ -1,0 +1,80 @@
+package project.ui;
+
+import arc.Core;
+import arc.Events;
+import arc.scene.ui.layout.Table;
+import arc.struct.ObjectMap;
+import arc.util.Align;
+import mindustry.Vars;
+import mindustry.game.EventType.Trigger;
+import mindustry.gen.Unit;
+import mindustry.ui.Styles;
+import project.content.units.CarrierManager;
+
+public class TransportPayloadUI {
+
+    private static Table table;
+    private static boolean installed = false;
+
+    public static float iconSize = 32f;
+    public static float padRight = 16f;
+    public static float padBottom = 180f;
+    public static String onlyUnitPrefix = "transport-";
+
+    public static void init() {
+        if (installed) return;
+        installed = true;
+        Events.run(Trigger.uiDrawBegin, TransportPayloadUI::rebuild);
+    }
+
+    private static void rebuild() {
+        if (Vars.headless) return;
+        if (Core.scene == null) return;
+        if (Vars.player == null) return;
+
+        Unit unit = Vars.player.unit();
+        boolean shouldShow = false;
+
+        if (unit != null && unit.isValid() && unit.type != null) {
+            if ((onlyUnitPrefix == null || unit.type.name.startsWith(onlyUnitPrefix))
+                && CarrierManager.getCarried(unit).size > 0) {
+                shouldShow = true;
+            }
+        }
+
+        if (!shouldShow) {
+            if (table != null) {
+                table.remove();
+                table = null;
+            }
+            return;
+        }
+
+        if (table == null) {
+            table = new Table();
+            table.background(Styles.black6);
+            table.margin(6f);
+            Core.scene.add(table);
+        }
+
+        table.clearChildren();
+
+        int perRow = 4;
+        int i = 0;
+        for (ObjectMap.Entry<Integer, Unit> e : CarrierManager.getCarried(unit)) {
+            try {
+                table.image(e.value.type.uiIcon).size(iconSize).padRight(4f);
+                i++;
+                if (i % perRow == 0) table.row();
+            } catch (Throwable ignored) {}
+        }
+
+        table.pack();
+        table.setPosition(
+            Core.graphics.getWidth() - padRight,
+            padBottom,
+            Align.bottomRight
+        );
+        table.toFront();
+    }
+}
