@@ -1,0 +1,71 @@
+name: Build & Release (Shatter Star)
+
+# 由原版 Mindustry 的官方 Deployment 工作流改造而来。
+# 原流程会克隆 Anuken/Arc 并往官方 Arc / MindustryGame/docs / MindustryBuilds 推送，
+# 依赖官方密钥 API_TOKEN_GITHUB / API_TOKEN_ORG_GITHUB，在本仓库 fork 上必然认证失败。
+# 本版本去掉全部官方推送：Arc 仅作只读构建依赖，产物用 GITHUB_TOKEN 上传到本仓库 Release。
+# Android APK 需本地签名密钥（ss-release.jks），CI 无法签名，仍按交接文档在本地构建。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Fetch Arc engine (read-only build dependency)
+        run: git clone --depth=1 --branch=master https://github.com/Anuken/Arc ../Arc
+
+      - name: Read version from tag
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+
+      - name: Build desktop and server
+        run: ./gradlew desktop:dist server:dist -Pbuildversion="${RELEASE_VERSION#v}" --stacktrace
+
+      - name: Verify artifacts
+        run: |
+          set -e
+          ls -lh desktop/build/libs/*.jar server/build/libs/*.jar
+          test -s desktop/build/libs/Mindustry.jar
+          test -s server/build/libs/server-release.jar
+
+      - name: Upload desktop jar to this Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: desktop/build/libs/Mindustry.jar
+          asset_name: ShatteredStar-Desktop-${{ env.RELEASE_VERSION }}.jar
+          tag: ${{ github.ref }}
+          overwrite: true
+
+      - name: Upload server jar to this Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: server/build/libs/server-release.jar
+          asset_name: ShatteredStar-Server-${{ env.RELEASE_VERSION }}.jar
+          tag: ${{ github.ref }}
+          overwrite: true
