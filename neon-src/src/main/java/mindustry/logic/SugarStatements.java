@@ -1,0 +1,1589 @@
+package mindustry.logic;
+
+import arc.Core;
+import arc.func.Cons;
+import arc.graphics.Color;
+import arc.scene.Element;
+import arc.scene.ui.TextField;
+import arc.scene.ui.layout.Cell;
+import arc.scene.ui.layout.Table;
+import arc.struct.Seq;
+import mindustry.gen.Icon;
+import mindustry.graphics.Pal;
+import mindustry.logic.LCanvas.JumpButton;
+import mindustry.logic.LCanvas.JumpCurve;
+import mindustry.logic.LCanvas.StatementElem;
+import mindustry.logic.LExecutor.LInstruction;
+import mindustry.logic.LExecutor.NoopI;
+import mindustry.logic.LStatements.JumpStatement;
+import mindustry.ui.Styles;
+import logicsugar.assist.SugarTooltip;
+import logicsugar.assist.expr.ExpressionEditor;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public final class SugarStatements{
+    private SugarStatements(){}
+
+    /** For / while / switch / if / functions: not mixed with vanilla jump/end. */
+    public static final LCategory advancedControl = new LCategory("advcontrol", Color.valueOf("ff8a65"), Icon.rightOpen);
+    /** Declaration cards: stack, queue, deque, map, set, list, heap, bitset, chain, record. */
+    public static final LCategory dataStructures = new LCategory("datastruct", Color.valueOf("81c784"), Icon.fileText);
+    /** Array / matrix declarations and persistent bulk-operation cards. */
+    public static final LCategory arrayAlgo = new LCategory("arrayalgo", Color.valueOf("64b5f6"), Icon.pencil);
+    /** Per-family intrinsic cards; declaration cards remain in dataStructures. */
+    public static final LCategory stackOps = new LCategory("stackops", Color.valueOf("8bc34a"), Icon.rightOpen);
+    public static final LCategory queueOps = new LCategory("queueops", Color.valueOf("8bc34a"), Icon.rightOpen);
+    public static final LCategory dequeOps = new LCategory("dequeops", Color.valueOf("8bc34a"), Icon.rightOpen);
+    public static final LCategory bitsetOps = new LCategory("bitsetops", Color.valueOf("9575cd"), Icon.pencil);
+    public static final LCategory mapOps = new LCategory("mapops", Color.valueOf("ffb74d"), Icon.fileText);
+    public static final LCategory setOps = new LCategory("setops", Color.valueOf("ffb74d"), Icon.fileText);
+    public static final LCategory listOps = new LCategory("listops", Color.valueOf("4db6ac"), Icon.fileText);
+    public static final LCategory heapOps = new LCategory("heapops", Color.valueOf("4db6ac"), Icon.fileText);
+    public static final LCategory chainOps = new LCategory("chainops", Color.valueOf("90a4ae"), Icon.fileText);
+
+    private static boolean parsersInstalled;
+
+    /** Registers every Sugar token parser into {@code LAssembler.customParsers}. This is the
+     *  single registration point shared by mod init, the decompiler's parse preflight and the
+     *  self-tests, so all entry points agree on parsing behavior (including the legacy
+     *  dev-version markers). Idempotent per class loader. */
+    public static void installParsers(){
+        if(parsersInstalled) return;
+        parsersInstalled = true;
+
+        LAssembler.customParsers.put("forbegin", SugarStatements::parseForBegin);
+        LAssembler.customParsers.put("forbeginc", tokens -> SugarStatements.parseForBegin(tokens, true));
+        LAssembler.customParsers.put("unitbind", SugarStatements::parseUnitBind);
+        LAssembler.customParsers.put("unitnext", SugarStatements::parseUnitNext);
+        LAssembler.customParsers.put("unitfree", SugarStatements::parseUnitFree);
+        LAssembler.customParsers.put("unitfor", SugarStatements::parseUnitFor);
+        LAssembler.customParsers.put("unitforc", tokens -> SugarStatements.parseUnitFor(tokens, true));
+        LAssembler.customParsers.put("whilebegin", SugarStatements::parseWhileBegin);
+        LAssembler.customParsers.put("whilebeginc", tokens -> SugarStatements.parseWhileBegin(tokens, true));
+        LAssembler.customParsers.put("switchbegin", SugarStatements::parseSwitchBegin);
+        LAssembler.customParsers.put("switchbeginc", tokens -> SugarStatements.parseSwitchBegin(tokens, true));
+        LAssembler.customParsers.put("ifbegin", SugarStatements::parseIfBegin);
+        LAssembler.customParsers.put("ifbeginc", tokens -> SugarStatements.parseIfBegin(tokens, true));
+        LAssembler.customParsers.put("case", SugarStatements::parseCase);
+        LAssembler.customParsers.put("default", tokens -> new SugarStatements.DefaultStatement());
+        LAssembler.customParsers.put("elif", SugarStatements::parseElseIf);
+        LAssembler.customParsers.put("else", SugarStatements::parseElse);
+        LAssembler.customParsers.put("break", tokens -> new SugarStatements.BreakStatement());
+        LAssembler.customParsers.put("continue", tokens -> new SugarStatements.ContinueStatement());
+        LAssembler.customParsers.put("blockend", tokens -> new SugarStatements.BlockEndStatement());
+        LAssembler.customParsers.put("funcdef", SugarStatements::parseFuncDef);
+        LAssembler.customParsers.put("funcdefc", tokens -> SugarStatements.parseFuncDef(tokens, true));
+        LAssembler.customParsers.put("funccall", SugarStatements::parseFuncCall);
+        LAssembler.customParsers.put("return", SugarStatements::parseReturn);
+        LAssembler.customParsers.put("array", SugarStatements::parseArray);
+        LAssembler.customParsers.put("matrix", SugarStatements::parseMatrix);
+        LAssembler.customParsers.put("arrayinit", SugarStatements::parseArrayInit);
+        LAssembler.customParsers.put("span", SugarStatements::parseSpan);
+
+        // Read-only compatibility for markers produced by the first development version.
+        LAssembler.customParsers.put("forend", tokens -> new SugarStatements.BlockEndStatement());
+        LAssembler.customParsers.put("whileend", tokens -> new SugarStatements.BlockEndStatement());
+        LAssembler.customParsers.put("switchend", tokens -> new SugarStatements.BlockEndStatement());
+
+        // Debug passthrough parsers (assert/log/snapshot/…) are NOT installed here: this runs
+        // during mod init(), before other mods register theirs, and LAssembler.customParsers is
+        // first-wins. Mlog Dev Tools must be able to claim its own opcodes, so
+        // SugarDebugLines.installParsers() runs from the post-ClientLoadEvent pass instead.
+    }
+
+    private static String optional(String value){
+        return value.isEmpty() ? "~" : value;
+    }
+
+    private static String optionalValue(String value){
+        return value == null || value.equals("~") ? "" : value;
+    }
+
+    private static String text(String key, String fallback){
+        return Core.bundle.get("logicsugar." + key, fallback);
+    }
+
+    /** Sugar follows v160's one canonical logic-localization setting. */
+    public static boolean cardsLocalized(){
+        return Core.settings.getBool("logiclocalization", true);
+    }
+
+    /** {@link #text} for card titles only ({@code name()} overrides): returns the
+     *  untranslated English fallback while card-title localization is switched off. Public
+     *  so card families outside this file can share the same policy. */
+    public static String cardText(String key, String fallback){
+        try{
+            return cardsLocalized() ? text(key, fallback) : fallback;
+        }catch(Throwable ignored){
+            // 无头环境（Core.settings/Core.bundle 未初始化）：退回英文 fallback
+            return fallback;
+        }
+    }
+
+    public abstract static class SugarStatement extends LStatement{
+        /** Structured cards own explicit rows and fold controls, so they opt out of the
+         *  v160 default WrapTable layout. Kept without @Override for BE27771 source support. */
+        public boolean useWrapping(){
+            return false;
+        }
+
+        /** Extra palette-search keywords for cards that cover more than one feature
+         *  (e.g. a data-operation card lists every operation it can run).
+         *  {@code null} means name()/typeName() are the only searchable terms. */
+        public String searchTerms(){
+            return null;
+        }
+
+        /**
+         * 编辑期标红所依赖的字段摘要。
+         *
+         * <p>{@code SugarCanvas.StructureController.refresh()} 每帧比较一个签名来判断是否需要重跑
+         * {@code SugarCompiler.invalidStatements}：签名没变就提前返回、不重跑。所以**卡内字段一变，
+         * 本方法的返回值就必须变**，否则把声明卡的某个字段改成非法值后标红会停留在旧状态
+         * （表现就是「不合法时不会立即标红」，2026-09-19 用户报的数组声明卡问题）。</p>
+         *
+         * <p>默认取 {@link #write(StringBuilder)} 的哈希：{@code write} 是本卡全部字段的序列化
+         * （存档也依赖它），因此任何字段变化都会改变它，新增卡种无需再回来改 SugarCanvas——
+         * 这正是之前按「if/while/for 显式列 conditionExpr」的写法漏掉声明卡的原因。字段半填导致
+         * {@code write} 抛错时退回 0（等价于旧行为），保证纯 UI 路径不因校验而崩。</p>
+         *
+         * @param buffer 复用缓冲。refresh() 每帧对每条语句都要算一次，逐次 new StringBuilder
+         *               会在每帧产生与语句数同量级的垃圾；调用方复用一个实例即可零分配。
+         */
+        public int invalidSignature(StringBuilder buffer){
+            try{
+                buffer.setLength(0);
+                write(buffer);
+                int hash = 0;
+                for(int i = 0, n = buffer.length(); i < n; i++){
+                    hash = 31 * hash + buffer.charAt(i);
+                }
+                return hash;
+            }catch(Throwable ignored){
+                return 0;
+            }
+        }
+
+        /** 单次调用版本（测试与外部查询用）；热路径请用 {@link #invalidSignature(StringBuilder)}。 */
+        public int invalidSignature(){
+            return invalidSignature(new StringBuilder());
+        }
+
+        @Override
+        public LInstruction build(LAssembler builder){
+            return new NoopI();
+        }
+
+        @Override
+        public LCategory category(){
+            return advancedControl;
+        }
+
+        /** {@link JumpStatement#addOp} with the value/compare fields narrowed to 75px, so
+         *  condition rows remain usable after structure indentation is applied.
+         *
+         *  Must be an instance method on this subclass: {@code field} and {@code showSelect}
+         *  are protected LStatement members, and at runtime the mod class loader is a
+         *  different runtime package from the game's, so a same-package call from a static
+         *  helper throws IllegalAccessError (see AGENTS.md). Subclass access stays legal. */
+        public void addCompactOp(Table t, ConditionOp op, Cons<ConditionOp> setOp,
+                                 String value, Cons<String> setValue, String compare, Cons<String> setCompare){
+            if(op != ConditionOp.always) field(t, value, setValue).width(75f).pad(2f);
+
+            t.button(b -> {
+                b.add(op.symbol);
+                b.clicked(() -> showSelect(b, ConditionOp.all, op, setOp));
+            }, Styles.logict, () -> {
+            }).size(op == ConditionOp.always ? 80f : 48f, 40f).pad(4f).color(t.color);
+
+            if(op != ConditionOp.always) field(t, compare, setCompare).width(75f).pad(2f);
+        }
+
+        /** Attaches a vanilla-style hover hint to a parameter label (bundle key: logicsugar.hint.<key>).
+         *  These hints are prose and run to ~200 characters, so they go through the wrapping
+         *  tooltip rather than vanilla's single unbounded line. */
+        protected void hint(Cell<?> cell, String key){
+            SugarTooltip.hint(cell, "logicsugar.hint." + key);
+        }
+
+        /** Label + input grouped into one nested cell, preventing sibling fields from expanding
+         *  each other's columns in the compact For layout. */
+        protected Cell<TextField> fieldsHint(Table table, String desc, String hintKey, String value, Cons<String> setter){
+            Cell<TextField>[] result = new Cell[]{null};
+            table.table(inner -> {
+                inner.left();
+                Color target = elem == null ? Pal.logicControl : elem.color;
+                inner.setColor(target);
+                inner.add(desc).padLeft(10).left().self(c -> hint(c, hintKey));
+                // 输入框略收窄(85→65)，使窄屏下三个"标签+输入框"组连同右侧条件不超出卡片；
+                // 同时收紧组间 padRight(10→6)。仅作用于 For 前置区，不影响其他语句。
+                result[0] = field(inner, value, setter).width(65f).padRight(6).left();
+                TextField input = result[0].get();
+                input.setColor(target);
+                // 跟随语句卡片状态（正常蓝色/无效红色），不能依赖父 Table 的初始化颜色：
+                // table.table(Cons) 回调执行时外层 Cell.color 还没应用，table.color 仍可能是白色。
+                inner.update(() -> {
+                    Color current = elem == null ? Pal.logicControl : elem.color;
+                    inner.setColor(current);
+                    input.setColor(current);
+                });
+            }).left();
+            return result[0];
+        }
+    }
+
+    /**
+     * Shared condition editor for if/elif/for/while: the native three-part selector and the
+     * EXPR/OP mode toggle stay on the same row. The row colour follows the statement card
+     * every frame, so invalid-state red marking can never leave a stale snapshot behind.
+     *
+     * @param compactCondition uses narrower condition fields (75px instead of the
+     *                         144px ones vanilla {@code addOp} reserves).
+     */
+    private static void rebuildConditionEditor(LStatement owner, Table table, boolean expressionMode, String expr,
+                                               Cons<String> setExpr, Runnable enterExpr, Runnable leaveExpr,
+                                               ConditionOp op, Cons<ConditionOp> setOp,
+                                               String value, Cons<String> setValue,
+                                               String compare, Cons<String> setCompare,
+                                               boolean compactCondition,
+                                               Runnable rebuild){
+        table.clearChildren();
+        table.left();
+        table.update(() -> {
+            Color target = owner.elem == null ? Pal.logicControl : owner.elem.color;
+            table.setColor(target);
+            for(Element child : table.getChildren()){
+                child.setColor(target);
+            }
+        });
+        if(expressionMode){
+            table.add(new ExpressionEditor(expr, text("condition.expr.hint", "a > b && enabled"), setExpr))
+                .growX().fillX().pad(4f);
+            // 显示当前状态：Expr 模式下按钮显示 "Expr"，点击切回三段式
+            table.button(b -> {
+                b.add(text("condition.expr", "Expr"));
+                b.clicked(() -> {
+                    leaveExpr.run();
+                    rebuild.run();
+                });
+            }, Styles.logict, () -> {}).size(72f, 40f).pad(4f).color(table.color);
+        }else{
+            if(compactCondition){
+                ((SugarStatement)owner).addCompactOp(table, op, result -> {
+                    setOp.get(result);
+                    rebuild.run();
+                }, value, setValue, compare, setCompare);
+            }else{
+                JumpStatement.addOp(owner, table, op, result -> {
+                    setOp.get(result);
+                    rebuild.run();
+                }, value, setValue, compare, setCompare);
+            }
+            // 条件三段式与 op 切换按钮始终保持在同一行；语句块层只负责 For 的固定分组换行。
+            table.button(b -> {
+                b.add(text("condition.expr.back", "op"));
+                b.clicked(() -> {
+                    enterExpr.run();
+                    rebuild.run();
+                });
+            }, Styles.logict, () -> {}).size(48f, 40f).pad(4f).color(table.color);
+        }
+    }
+
+    public abstract static class BeginStatement extends SugarStatement{
+        public transient StatementElem dest;
+        public int destIndex = -1;
+        public boolean collapsed;
+
+        protected void linkControl(Table table){
+            table.add(new TypedJumpButton(this, () -> dest, target -> {
+                dest = SugarCanvas.canLink(this, target) ? target : null;
+                SugarCanvas.refreshCurrent();
+            }, elem)).size(30f).padRight(4f);
+        }
+
+        protected void foldControl(Table table){
+            // logici draws a plain black glyph with no background, which vanishes on the
+            // tinted statement card; use a visible background with a light icon instead.
+            arc.scene.ui.ImageButton.ImageButtonStyle foldStyle = new arc.scene.ui.ImageButton.ImageButtonStyle(mindustry.ui.Styles.logici);
+            foldStyle.up = mindustry.ui.Styles.logict.up;
+            foldStyle.imageUpColor = arc.graphics.Color.white;
+            var fold = table.button(collapsed ? mindustry.gen.Icon.rightOpen : mindustry.gen.Icon.downOpen, foldStyle, () -> {
+                collapsed = !collapsed;
+                SugarCanvas.refreshCurrent();
+            }).size(34f, 40f).pad(4f).self(c -> SugarTooltip.attach(c, text("fold", "Fold block"))).get();
+            fold.update(() -> fold.getStyle().imageUp = collapsed ? mindustry.gen.Icon.rightOpen : mindustry.gen.Icon.downOpen);
+        }
+
+        /** Adds the fold control at the end of the current row; row breaks are decided by
+         *  the statement layout (e.g. For's fixed two-row grouping). */
+        protected void foldControlRow(Table table){
+            foldControl(table);
+        }
+
+        @Override
+        public void setupUI(){
+            if(elem != null && destIndex >= 0 && destIndex < elem.parent.getChildren().size){
+                StatementElem candidate = (StatementElem)elem.parent.getChildren().get(destIndex);
+                dest = candidate.st instanceof BlockEndStatement ? candidate : null;
+            }
+        }
+
+        @Override
+        public void saveUI(){
+            if(elem != null){
+                destIndex = dest == null ? -1 : dest.parent.getChildren().indexOf(dest);
+            }
+        }
+
+        @Override
+        public LStatement copy(){
+            LStatement result = super.copy();
+            if(result instanceof BeginStatement begin) begin.destIndex = -1;
+            return result;
+        }
+    }
+
+    private static class TypedJumpButton extends JumpButton{
+        private final BeginStatement begin;
+
+        TypedJumpButton(BeginStatement begin, arc.func.Prov<StatementElem> getter, arc.func.Cons<StatementElem> setter, StatementElem elem){
+            super(getter, setter, elem);
+            this.begin = begin;
+            curve = new StructureJumpCurve(this, getter);
+            update(() -> {
+                Color color = SugarCanvas.isValidLink(begin, getter.get()) ? Color.white : Pal.remove;
+                setColor(color);
+                getStyle().imageUpColor = color;
+            });
+        }
+    }
+
+    private static class StructureJumpCurve extends JumpCurve{
+        private final arc.func.Prov<StatementElem> target;
+
+        StructureJumpCurve(JumpButton button, arc.func.Prov<StatementElem> target){
+            super(button);
+            this.target = target;
+        }
+
+        @Override
+        public void draw(){
+            if(target.get() == null) super.draw();
+        }
+
+        @Override
+        public void prepareHeight(){
+            if(target.get() == null){
+                super.prepareHeight();
+            }else{
+                markedDone = true;
+                predHeight = 0;
+                flipped = false;
+                jumpUIBegin = jumpUIEnd = Integer.MAX_VALUE;
+            }
+        }
+    }
+
+    public static class ForBeginStatement extends BeginStatement{
+        public String variable = "i", initial = "0", step = "1", compare = "10";
+        public ConditionOp op = ConditionOp.lessThanEq;
+        /** When true, conditionExpr replaces the variable/operator/compare triplet. */
+        public boolean expressionMode;
+        /** When true, the expression is lowered as short-circuit control flow instead of op land/or. */
+        public boolean shortCircuitMode;
+        public String conditionExpr = "true";
+
+        @Override
+        public void build(Table table){
+            // 先把前半行和后半行分成独立的子表格，避免条件控件的 growX 参与前面
+            // 字段列宽分配。宽屏合并为一行，窄屏只在步长后换一次行。
+            table.table(content -> {
+                content.left();
+                if(SugarCanvas.compactStatementLayout()){
+                    content.table(this::buildForPrefix).left();
+                    content.row();
+                    content.table(this::buildForCondition).growX().fillX().left();
+                }else{
+                    buildForPrefix(content);
+                    buildForCondition(content);
+                }
+            }).growX().fillX().left();
+        }
+
+        private void buildForPrefix(Table table){
+            fieldsHint(table, text("for.variable", "variable"), "for.variable", variable, value -> variable = value);
+            fieldsHint(table, text("for.initial", "initial"), "for.initial", initial, value -> initial = value);
+            fieldsHint(table, text("for.step", "step"), "for.step", step, value -> step = value);
+        }
+
+        private void buildForCondition(Table table){
+            table.add(text("for.condition", "until")).padLeft(10).left().self(c -> hint(c, "for.condition"));
+            table.table(this::rebuildCondition).growX().fillX().left();
+            foldControl(table);
+        }
+
+        private void rebuildCondition(Table table){
+            rebuildConditionEditor(this, table, expressionMode, conditionExpr,
+                result -> conditionExpr = result,
+                () -> expressionMode = true,
+                () -> expressionMode = false,
+                op, result -> op = result,
+                variable, result -> variable = result,
+                compare, result -> compare = result,
+                true,
+                () -> rebuildCondition(table));
+        }
+
+        @Override public String name(){ return cardText("for.begin", "For Begin"); }
+        @Override public String typeName(){ return "ForBegin"; }
+
+        @Override
+        public void write(StringBuilder out){
+            if(expressionMode){
+                out.append(collapsed ? "forbeginc " : "forbegin ").append(variable).append(' ')
+                    .append(optional(initial)).append(' ').append(optional(step)).append(' ')
+                    .append(shortCircuitMode ? "exprsc \"" : "expr \"")
+                    .append(conditionExpr).append("\" ").append(destIndex);
+            }else{
+                out.append(collapsed ? "forbeginc " : "forbegin ").append(variable).append(' ').append(optional(initial)).append(' ').append(optional(step)).append(' ')
+                    .append(op.name()).append(' ').append(compare).append(' ').append(destIndex);
+            }
+        }
+    }
+
+    public static class WhileBeginStatement extends BeginStatement{
+        public String value = "true", compare = "false";
+        public ConditionOp op = ConditionOp.notEqual;
+        public boolean expressionMode;
+        /** When true, the expression is lowered as short-circuit control flow instead of op land/or. */
+        public boolean shortCircuitMode;
+        public String conditionExpr = "true";
+
+        @Override
+        public void build(Table table){
+            // 独立键（与 for.condition / if.condition 一致）。不要改回通用的 condition 键：
+            // 该键曾被本地化译成「结束条件」，与 lowering 的「为真时重复」语义相反，会让用户
+            // 写出取反的条件（例如把「栈非空」写成 !s.size()），循环体一次都不执行。
+            table.add(text("while.condition", "while")).self(c -> hint(c, "while.condition"));
+            table.table(this::rebuildCondition).growX().fillX();
+            foldControlRow(table);
+        }
+
+        private void rebuildCondition(Table table){
+            rebuildConditionEditor(this, table, expressionMode, conditionExpr,
+                result -> conditionExpr = result,
+                () -> expressionMode = true,
+                () -> expressionMode = false,
+                op, result -> op = result,
+                value, result -> value = result,
+                compare, result -> compare = result,
+                true,
+                () -> rebuildCondition(table));
+        }
+
+        @Override public String name(){ return cardText("while.begin", "While Begin"); }
+        @Override public String typeName(){ return "WhileBegin"; }
+        @Override public void write(StringBuilder out){
+            if(expressionMode){
+                out.append(collapsed ? "whilebeginc " : "whilebegin ")
+                    .append(shortCircuitMode ? "exprsc \"" : "expr \"")
+                    .append(conditionExpr).append("\" ").append(destIndex);
+            }else{
+                out.append(collapsed ? "whilebeginc " : "whilebegin ").append(value).append(' ').append(op.name()).append(' ').append(compare).append(' ').append(destIndex);
+            }
+        }
+    }
+
+    public static class SwitchBeginStatement extends BeginStatement{
+        public String value = "i";
+        /**
+         * Lowers the switch as a bare {@code @counter} jump table: {@code op add @counter
+         * @counter <value>} plus one unconditional row per slot, with **no bounds guards**.
+         *
+         * <p>This is what a hand-written (or third-party-tool) table looks like, and it is the
+         * only form that reproduces one exactly: the guards this compiler normally emits are two
+         * extra instructions and clamp out-of-range values, so adding them would silently change
+         * the stored program. Recovery therefore carries the mode in the source; the palette's
+         * switch card starts guarded and the mode button on the card switches it.</p>
+         */
+        public boolean rawTable;
+        /**
+         * Packed stride table: the case bodies themselves are the slots, each exactly
+         * {@code stride} instructions long (the last may be shorter when the program ends
+         * there). {@code strideTemp} is the scratch variable the dispatch multiplies into.
+         * {@code strideRelative} selects the position-independent form
+         * ({@code mul} / {@code add tmp @counter tmp} / {@code add|sub @counter}) over the
+         * absolute form ({@code mul} / {@code add @counter tmp K}).
+         */
+        public int stride;
+        public String strideTemp = "counter";
+        public boolean strideRelative;
+
+        @Override
+        public void build(Table table){
+            table.add(text("switch.value", "switch")).self(c -> hint(c, "switch.value"));
+            field(table, value, result -> value = result).width(85f);
+            table.table(this::rebuildMode).pad(4f).left();
+            foldControlRow(table);
+        }
+
+        /**
+         * The table-shape button. Its label <em>is</em> the current shape ({@code 带边界} /
+         * {@code 裸表}), so switching it has to rebuild this row — the first version only
+         * refreshed the canvas layout, which left the old word on screen and made the leftover
+         * colour change read as the whole signal ("点击裸表按钮后切换颜色意义不明", 2026-09-25).
+         * Colour stays the card's own, like every other mode toggle in this file
+         * ({@code condition.expr}, the fold buttons): a tint here would collide with meanings
+         * that are already taken — red is the invalid-statement marking, amber is the
+         * {@code @counter} overlay's "several candidate targets".
+         */
+        private void rebuildMode(Table table){
+            table.clearChildren();
+            table.left();
+            table.update(() -> table.setColor(elem == null ? Pal.logicControl : elem.color));
+            if(stride > 0){
+                table.add(text("switch.stride", "stride " + stride)).self(c -> hint(c, "switch.stride"));
+                return;
+            }
+            table.button(b -> {
+                b.add(text(rawTable ? "switch.raw.on" : "switch.raw.off", rawTable ? "raw" : "bounds"));
+                b.clicked(() -> {
+                    rawTable = !rawTable;
+                    rebuildMode(table);
+                    SugarCanvas.refreshCurrent();
+                });
+            }, Styles.logict, () -> {}).size(84f, 40f).self(c -> hint(c, "switch.raw"));
+        }
+
+        @Override public String name(){ return cardText("switch.begin", "Switch Start"); }
+        @Override public String typeName(){ return "SwitchBegin"; }
+        @Override public void write(StringBuilder out){
+            out.append(collapsed ? "switchbeginc " : "switchbegin ").append(value).append(' ').append(destIndex);
+            if(stride > 0){
+                out.append(" stride ").append(stride).append(' ').append(strideTemp)
+                    .append(strideRelative ? " rel" : " abs");
+            }else if(rawTable) out.append(" raw");
+        }
+    }
+
+    public static class CaseStatement extends SugarStatement{
+        public String value = "0";
+        @Override public void build(Table table){
+            table.add(text("case.value", "case")).self(c -> hint(c, "case"));
+            field(table, value, result -> value = result);
+        }
+        @Override public String name(){ return cardText("case", "Case"); }
+        @Override public String typeName(){ return "Case"; }
+        @Override public void write(StringBuilder out){ out.append("case ").append(value); }
+    }
+
+    /**
+     * {@code default:} of a switch: the body every slot without a case jumps to.
+     *
+     * <p>In the comparison-chain lowering it is the target of the trailing always-jump; in a
+     * jump table it is the target of every hole row, and in the guarded form the bounds guards
+     * share it, so an out-of-range value lands on the same body. A bare (raw) table keeps no
+     * guards, so only the slots inside the case span reach it — documented on the switch card.</p>
+     */
+    public static class DefaultStatement extends SugarStatement{
+        @Override public void build(Table table){
+            table.add(text("default.label", "default")).padLeft(4).left().self(c -> hint(c, "default"));
+        }
+        @Override public String name(){ return cardText("default", "Default"); }
+        @Override public String typeName(){ return "Default"; }
+        @Override public void write(StringBuilder out){ out.append("default"); }
+    }
+
+    public static class IfBeginStatement extends BeginStatement{
+        public String value = "true", compare = "false";
+        public ConditionOp op = ConditionOp.notEqual;
+        /** When true, conditionExpr replaces the variable/operator/compare triplet. */
+        public boolean expressionMode;
+        /** When true, the expression is lowered as short-circuit control flow instead of op land/or. */
+        public boolean shortCircuitMode;
+        public String conditionExpr = "true";
+
+        @Override
+        public void build(Table table){
+            table.add(text("if.condition", "if")).self(c -> hint(c, "if.condition"));
+            table.table(this::rebuildCondition).growX().fillX();
+            foldControlRow(table);
+        }
+
+        private void rebuildCondition(Table table){
+            rebuildConditionEditor(this, table, expressionMode, conditionExpr,
+                result -> conditionExpr = result,
+                () -> expressionMode = true,
+                () -> expressionMode = false,
+                op, result -> op = result,
+                value, result -> value = result,
+                compare, result -> compare = result,
+                true,
+                () -> rebuildCondition(table));
+        }
+
+        @Override public String name(){ return cardText("if.begin", "If Begin"); }
+        @Override public String typeName(){ return "IfBegin"; }
+        @Override public void write(StringBuilder out){
+            if(expressionMode){
+                out.append(collapsed ? "ifbeginc " : "ifbegin ")
+                    .append(shortCircuitMode ? "exprsc \"" : "expr \"")
+                    .append(conditionExpr).append("\" ").append(destIndex);
+            }else{
+                out.append(collapsed ? "ifbeginc " : "ifbegin ").append(value).append(' ')
+                    .append(op.name()).append(' ').append(compare).append(' ').append(destIndex);
+            }
+        }
+    }
+
+    public static class ElseIfStatement extends SugarStatement{
+        public String value = "true", compare = "false";
+        public ConditionOp op = ConditionOp.notEqual;
+        public boolean expressionMode;
+        /** When true, the expression is lowered as short-circuit control flow instead of op land/or. */
+        public boolean shortCircuitMode;
+        public String conditionExpr = "true";
+
+        @Override
+        public void build(Table table){
+            table.add(text("elif", "elif")).self(c -> hint(c, "elif"));
+            table.table(this::rebuildCondition).growX().fillX();
+        }
+
+        private void rebuildCondition(Table table){
+            rebuildConditionEditor(this, table, expressionMode, conditionExpr,
+                result -> conditionExpr = result,
+                () -> expressionMode = true,
+                () -> expressionMode = false,
+                op, result -> op = result,
+                value, result -> value = result,
+                compare, result -> compare = result,
+                true,
+                () -> rebuildCondition(table));
+        }
+
+        @Override public String name(){ return cardText("elif", "Elif"); }
+        @Override public String typeName(){ return "ElseIf"; }
+        @Override public void write(StringBuilder out){
+            if(expressionMode){
+                out.append("elif ").append(shortCircuitMode ? "exprsc \"" : "expr \"")
+                    .append(conditionExpr).append("\"");
+            }else{
+                out.append("elif ").append(value).append(' ').append(op.name()).append(' ').append(compare);
+            }
+        }
+    }
+
+    public static class ElseStatement extends SugarStatement{
+        @Override public void build(Table table){}
+        @Override public String name(){ return cardText("else", "Else"); }
+        @Override public String typeName(){ return "Else"; }
+        @Override public void write(StringBuilder out){ out.append("else"); }
+    }
+
+    public static class FuncDefStatement extends BeginStatement{
+        public String name = "func";
+        public String params = "";
+        /**
+         * Return declaration: "" = infer from the body (the legacy three-token wire shape),
+         * "~" = void (no value return allowed), "value" = must return a value at least once.
+         * v5 saves append it before the destIndex: {@code funcdef f a ~ 3}.
+         */
+        public String returns = "";
+
+        /** True when the return declaration was written explicitly (v5 wire shape). */
+        public boolean declaredReturns(){
+            return returns != null && !returns.trim().isEmpty();
+        }
+
+        @Override
+        public void build(Table table){
+            table.add(text("func.def", "func")).self(c -> hint(c, "func.def"));
+            field(table, name, value -> name = value).width(90f);
+            table.add("(");
+            TextField paramsField = field(table, params, value -> params = value).width(130f).get();
+            paramsField.setMessageText(text("func.params.hint", "a,b"));
+            table.add(")");
+            table.add(text("func.returns", "returns")).padLeft(6f).self(c -> hint(c, "func.returns"));
+            TextField returnsField = field(table, returns, value -> returns = value).width(60f).get();
+            returnsField.setMessageText(text("func.returns.hint", "~"));
+            foldControlRow(table);
+        }
+
+        @Override public String name(){ return cardText("func.def", "Func Def"); }
+        @Override public String typeName(){ return "FuncDef"; }
+
+        @Override
+        public void write(StringBuilder out){
+            // The name slot is always filled: LParser reuses a static token array, so an empty
+            // middle token shifts every following slot onto the previous line's leftovers.
+            out.append(collapsed ? "funcdefc " : "funcdef ").append(optional(name == null ? "" : name))
+                .append(' ').append(optional(params)).append(' ');
+            // v5 shape appends the return declaration before the destIndex; an empty declaration
+            // keeps the legacy three-token line byte-identical, so old saves round-trip untouched.
+            //
+            // An unrecognized declaration is card state, not a parse error: it is written back
+            // (quoted, so an integer-looking value cannot be read as the legacy destIndex slot)
+            // and the editor marks the card red instead. Refusing it here is what made a single
+            // typo in this field unreadable, and an unreadable draft locks the editor for good
+            // (reported 2026-10: `返回 c` -> "Cannot open the logic editor").
+            String declaration = returns == null ? "" : returns.trim();
+            if(!declaration.isEmpty()){
+                String canonical = canonicalReturns(declaration);
+                if(canonical != null){
+                    out.append(canonical).append(' ');
+                }else{
+                    out.append('"').append(escapeQuoted(declaration)).append("\" ");
+                }
+            }
+            out.append(destIndex);
+        }
+    }
+
+    public static class FuncCallStatement extends SugarStatement{
+        public String name = "func";
+        /** Comma-separated argument expressions. */
+        public String args = "";
+        /** Optional result variable. */
+        public String result = "";
+
+        @Override
+        public void build(Table table){
+            table.add(text("func.call", "call")).self(c -> hint(c, "func.call"));
+            field(table, name, value -> name = value).width(90f);
+            table.add("(");
+            // 实参：完整表达式，高亮显示，点击进入编辑；
+            // 空值时提示被调函数的参数列表（动态跟随函数名/参数变化），找不到或函数无参数时退回通用提示
+            table.add(new ExpressionEditor(args, this::argsHint, value -> args = value))
+                .growX().padLeft(4f).padRight(2f);
+            table.add(")");
+            table.add("=");
+            field(table, result, value -> result = value).width(70f).padLeft(4f);
+        }
+
+        /** 动态占位提示：被调函数（本地优先，库函数兜底）的参数列表，找不到或函数无参数时退回通用提示。 */
+        private String argsHint(){
+            SugarCanvas canvas = SugarCanvas.current();
+            String fallback = text("func.args.hint", "a, b+1");
+            if(canvas == null || canvas.statements == null) return fallback;
+            Seq<LStatement> statements = new Seq<>();
+            for(Element child : canvas.statements.getChildren()){
+                if(child instanceof StatementElem elem) statements.add(elem.st);
+            }
+            List<String> params = SugarFunctions.paramsOf(name, statements);
+            return params == null ? fallback : String.join(", ", params);
+        }
+
+        @Override public String name(){ return cardText("func.call", "Func Call"); }
+        @Override public String typeName(){ return "FuncCall"; }
+
+        @Override
+        public void write(StringBuilder out){
+            // The result slot is always written ("~" when absent): LParser reuses a static
+            // token array, so an omitted trailing token cannot be told apart from a stale one.
+            // Quotes inside the args are escaped so they cannot cut the string token short.
+            out.append("funccall ").append(name).append(" \"").append(escapeQuoted(args)).append("\" ").append(optional(result));
+        }
+    }
+
+    public static class ReturnStatement extends SugarStatement{
+        /** Return expression; empty means a void (no value) return. */
+        public String expr = "";
+
+        @Override
+        public void build(Table table){
+            table.add(text("func.return", "return")).self(c -> hint(c, "func.return"));
+            // 返回值：完整表达式，高亮显示，点击进入编辑
+            table.add(new ExpressionEditor(expr, text("func.return.hint", "value"), value -> expr = value))
+                .growX().padLeft(4f);
+        }
+
+        @Override public String name(){ return cardText("func.return", "Return"); }
+        @Override public String typeName(){ return "Return"; }
+
+        @Override
+        public void write(StringBuilder out){
+            // Always quoted so the void form is unambiguous: LParser reuses a static token
+            // array, so a bare "return" line cannot be told apart from a stale token.
+            // Quotes inside the expression are escaped so they cannot cut the string token short.
+            out.append("return \"").append(escapeQuoted(expr)).append('"');
+        }
+    }
+
+    /**
+     * 多格内存：编辑器里写成表达式 {@code mem = cell1 + cell3 + cell2}。
+     * {@code +} 只表示按书写顺序拼接，第一项是地址 0。个数不限。
+     * 卡片不产指令；读写由 {@link logicsugar.assist.expr.SpanAccess} 展开。
+     *
+     * <p>存档仍是定长 3 token {@code span <name> "<expr>"}。整段表达式放进引号，
+     * 因为 LParser 复用静态 token 数组，可变个数的 cell 名会把上一行的残值读进来。</p>
+     */
+    public static class SpanStatement extends SugarStatement{
+        /** 合并后的内存名。read/write 和数组的 memory 都填它。 */
+        public String name = "mem";
+        /** 成员求和式，例如 {@code cell1 + cell3 + cell2}。 */
+        public String expr = "cell1 + cell2";
+
+        @Override
+        public void build(Table table){
+            table.add(text("span.card", "Mem")).self(c -> hint(c, "span.name"));
+            field(table, name, value -> name = value).width(70f);
+            table.add(" = ").padLeft(4f);
+            table.add(new ExpressionEditor(expr, text("span.expr.hint", "cell1 + cell2"), value -> expr = value))
+                .growX().padLeft(4f);
+        }
+
+        @Override public String name(){ return cardText("span.card", "Mem"); }
+        @Override public String typeName(){ return "Span"; }
+        @Override public LCategory category(){ return arrayAlgo; }
+
+        @Override
+        public void write(StringBuilder out){
+            out.append("span ").append(optional(name == null ? "" : name)).append(" \"")
+                .append(escapeQuoted(expr == null ? "" : expr)).append('"');
+        }
+
+        /**
+         * 把 {@code cell1 + cell3 + cell2} 拆成地址顺序。空项、非名字、其它运算符都拒绝。
+         * 不足两格由登记处拒绝，这里只负责拆式子。
+         */
+        public static List<String> membersOf(String expr){
+            String text = expr == null ? "" : expr.trim();
+            if(text.isEmpty()){
+                throw new IllegalArgumentException("needs a sum of cell names, like cell1 + cell2");
+            }
+            String[] parts = text.split("\\+", -1);
+            List<String> members = new ArrayList<>(parts.length);
+            for(String part : parts){
+                String raw = part.trim();
+                if(raw.isEmpty() || !spanIdentifier(raw)){
+                    throw new IllegalArgumentException("'" + text + "' must be cell names joined by +, like cell1 + cell3 + cell2");
+                }
+                members.add(raw);
+            }
+            return members;
+        }
+
+        private static boolean spanIdentifier(String raw){
+            if(raw.isEmpty()) return false;
+            char first = raw.charAt(0);
+            if(!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_')) return false;
+            for(int i = 1; i < raw.length(); i++){
+                char c = raw.charAt(i);
+                if(!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+            }
+            return true;
+        }
+    }
+
+    /** 数组声明卡：把内存块的一段地址登记为命名数组（纯编译期元数据）。卡片本身
+     *  不产出任何 mlog 行（lower 时剥离，编译产物保持纯原版指令）；表达式下标
+     *  {@code buf[i]} / {@code buf[i] = x} 经 {@link logicsugar.assist.expr.ArrayRegistry}
+     *  解析为原版 {@code read}/{@code write}。v0 仅支持整数字面量的 base/size。 */
+    public static class ArrayStatement extends SugarStatement{
+        /** 表达式中使用的数组名。 */
+        public String array = "buf";
+        /** 承载数据的内存块变量名（如 cell1）。 */
+        public String memory = "cell1";
+        /** 数组起始物理地址（非负整数字面量）。 */
+        public String base = "0";
+        /** 数组容量（≥1 整数字面量）。 */
+        public String size = "8";
+
+        @Override
+        public void build(Table table){
+            table.add(text("array.card", "Array")).self(c -> hint(c, "array.name"));
+            field(table, array, value -> array = value).width(70f);
+            table.add(text("array.memory", "mem")).self(c -> hint(c, "array.memory"));
+            field(table, memory, value -> memory = value).width(70f);
+            table.add(text("array.base", "base")).self(c -> hint(c, "array.base"));
+            field(table, base, value -> base = value).width(45f);
+            table.add(text("array.size", "size")).self(c -> hint(c, "array.size"));
+            field(table, size, value -> size = value).width(45f);
+        }
+
+        @Override public String name(){ return cardText("array.card", "Array"); }
+        @Override public String typeName(){ return "Array"; }
+        @Override public LCategory category(){ return arrayAlgo; }
+
+        @Override
+        public void write(StringBuilder out){
+            // 固定 token 数（空槽位 "~" 占位）：LParser 复用静态 token 数组，缺尾 token 无法与残值区分
+            out.append("array ").append(optional(array)).append(' ').append(optional(memory)).append(' ')
+                .append(optional(base)).append(' ').append(optional(size));
+        }
+    }
+
+    /** 二维数组（矩阵）声明卡：把内存块的一段行主序区间 [base, base+rows*cols) 登记为
+     *  命名矩阵（纯编译期元数据，卡片本身不产出 mlog 行）。表达式 {@code m[i][j]} 读、
+     *  {@code m[i][j] = x} 写经 {@link logicsugar.assist.expr.ArrayRegistry} 换算为
+     *  原版 {@code read}/{@code write}：物理地址 = base + i*cols + j。 */
+    public static class MatrixStatement extends SugarStatement{
+        /** 表达式中使用的矩阵名。 */
+        public String matrix = "mat";
+        /** 承载数据的内存块变量名（如 cell1）。 */
+        public String memory = "cell1";
+        /** 矩阵起始物理地址（非负整数字面量）。 */
+        public String base = "0";
+        /** 行数（≥1 整数字面量）。 */
+        public String rows = "2";
+        /** 列数（≥1 整数字面量）。 */
+        public String cols = "2";
+
+        @Override
+        public void build(Table table){
+            table.add(text("matrix.card", "Matrix")).self(c -> hint(c, "matrix.name"));
+            field(table, matrix, value -> matrix = value).width(70f);
+            table.add(text("array.memory", "mem")).self(c -> hint(c, "array.memory"));
+            field(table, memory, value -> memory = value).width(70f);
+            table.add(text("array.base", "base")).self(c -> hint(c, "array.base"));
+            field(table, base, value -> base = value).width(45f);
+            table.add(text("matrix.rows", "rows")).self(c -> hint(c, "matrix.rows"));
+            field(table, rows, value -> rows = value).width(45f);
+            table.add(text("matrix.cols", "cols")).self(c -> hint(c, "matrix.cols"));
+            field(table, cols, value -> cols = value).width(45f);
+        }
+
+        @Override public String name(){ return cardText("matrix.card", "Matrix"); }
+        @Override public String typeName(){ return "Matrix"; }
+        @Override public LCategory category(){ return arrayAlgo; }
+
+        @Override
+        public void write(StringBuilder out){
+            // 固定 token 数（空槽位 "~" 占位）：LParser 复用静态 token 数组，缺尾 token 无法与残值区分
+            out.append("matrix ").append(optional(matrix)).append(' ').append(optional(memory)).append(' ')
+                .append(optional(base)).append(' ').append(optional(rows)).append(' ').append(optional(cols));
+        }
+    }
+
+    /** 数组初始化卡：{@code arrayinit <name> <v0>…<v7>}，卡片位置即初始化位置。
+     *  只接受数字字面量（整数/小数，可带负号），{@code ~} 表示跳过该槽；lower 时在该位置
+     *  发射 {@code write <v> <memory> <base+k>}（卡片本身不产出非原版行）。 */
+    public static class ArrayInitStatement extends SugarStatement{
+        /** 被初始化的数组名（必须已声明）。 */
+        public String array = "buf";
+        /** 8 个槽位值；空串表示跳过（写 "~"）。 */
+        public String[] values = new String[8];
+
+        public ArrayInitStatement(){
+            java.util.Arrays.fill(values, "");
+        }
+
+        @Override
+        public void build(Table table){
+            table.add(text("arrayinit.card", "Array Init")).self(c -> hint(c, "arrayinit.name"));
+            field(table, array, value -> array = value).width(70f);
+            for(int i = 0; i < values.length; i++){
+                final int index = i;
+                if(i % 4 == 0) table.row();
+                table.add(String.valueOf(i)).padLeft(i % 4 == 0 ? 4 : 2).color(table.color);
+                field(table, values[index], value -> values[index] = value).width(45f).pad(2f);
+            }
+        }
+
+        @Override public String name(){ return cardText("arrayinit.card", "Array Init"); }
+        @Override public String typeName(){ return "ArrayInit"; }
+        @Override public LCategory category(){ return arrayAlgo; }
+
+        @Override
+        public void write(StringBuilder out){
+            // 固定 token 数（空槽位 "~" 占位）：LParser 复用静态 token 数组，缺尾 token 无法与残值区分
+            out.append("arrayinit ").append(optional(array));
+            for(String value : values){
+                out.append(' ').append(optional(value));
+            }
+        }
+    }
+
+    /**
+     * Claims one unit of {@code type} and stores it in {@code variable}.
+     * The processor's flag is {@code @thisx * 100000 + @thisy + 1}. A unit already
+     * wearing that flag is rebound; otherwise the next free unit (flag 0, not
+     * player/command/logic controlled, alive) is claimed. The claim writes the flag
+     * and then yields before trusting it, so copies of this processor built in the
+     * same tick cannot keep the same unit.
+     */
+    public static class UnitBindStatement extends SugarStatement{
+        public String type = "@poly";
+        public String variable = "unit";
+
+        @Override
+        public void build(Table table){
+            table.add(text("unit.bind", "control one")).self(c -> hint(c, "unit.bind"));
+            field(table, type, value -> type = value).width(90f);
+            table.add(text("unit.as", "as")).padLeft(6f).self(c -> hint(c, "unit.as"));
+            field(table, variable, value -> variable = value).width(80f);
+        }
+
+        @Override public String name(){ return cardText("unit.bind", "Control One Unit"); }
+        @Override public String typeName(){ return "UnitBind"; }
+        @Override public String searchTerms(){ return "ubind flag unit poly"; }
+        @Override public void write(StringBuilder out){
+            out.append("unitbind ").append(type).append(' ').append(variable);
+        }
+    }
+
+    /**
+     * Claims the next free unit of {@code type} (flag 0, uncontrolled) and stores it
+     * in {@code variable}. Does not stick to a unit this processor already flagged.
+     * Each visit continues the processor's {@code ubind} cursor, so repeated visits
+     * take different units. No free unit leaves {@code variable} as {@code null}.
+     */
+    public static class UnitNextStatement extends SugarStatement{
+        public String type = "@poly";
+        public String variable = "unit";
+
+        @Override
+        public void build(Table table){
+            table.add(text("unit.next", "control next idle")).self(c -> hint(c, "unit.next"));
+            field(table, type, value -> type = value).width(90f);
+            table.add(text("unit.as", "as")).padLeft(6f).self(c -> hint(c, "unit.as"));
+            field(table, variable, value -> variable = value).width(80f);
+        }
+
+        @Override public String name(){ return cardText("unit.next", "Control Next Idle Unit"); }
+        @Override public String typeName(){ return "UnitNext"; }
+        @Override public String searchTerms(){ return "ubind flag idle unit"; }
+        @Override public void write(StringBuilder out){
+            out.append("unitnext ").append(type).append(' ').append(variable);
+        }
+    }
+
+    /**
+     * For-like block: each iteration binds one unit of {@code type} that this processor
+     * owns, up to {@code count}, and assigns it to {@code variable}. Missing slots are
+     * filled by the same claim protocol as {@link UnitBindStatement}. {@code break} and
+     * {@code continue} apply to this block.
+     */
+    public static class UnitForBeginStatement extends BeginStatement{
+        public String count = "1";
+        public String type = "@poly";
+        public String variable = "unit";
+
+        @Override
+        public void build(Table table){
+            table.table(content -> {
+                content.left();
+                content.add(text("unit.for", "control")).self(c -> hint(c, "unit.for"));
+                field(content, count, value -> count = value).width(50f);
+                content.add(text("unit.for.of", "of")).padLeft(6f);
+                field(content, type, value -> type = value).width(90f);
+                content.add(text("unit.as", "as")).padLeft(6f).self(c -> hint(c, "unit.as"));
+                field(content, variable, value -> variable = value).width(80f);
+                foldControl(content);
+            }).growX().fillX().left();
+        }
+
+        @Override public String name(){ return cardText("unit.for", "Control Units"); }
+        @Override public String typeName(){ return "UnitFor"; }
+        @Override public String searchTerms(){ return "ubind flag for unit"; }
+        @Override public void write(StringBuilder out){
+            out.append(collapsed ? "unitforc " : "unitfor ").append(count).append(' ')
+                .append(type).append(' ').append(variable).append(' ').append(destIndex);
+        }
+    }
+
+    /** Clears this processor's flag on {@code variable} and drops logic control. */
+    public static class UnitFreeStatement extends SugarStatement{
+        public String variable = "unit";
+
+        @Override
+        public void build(Table table){
+            table.add(text("unit.free", "release")).self(c -> hint(c, "unit.free"));
+            field(table, variable, value -> variable = value).width(80f);
+        }
+
+        @Override public String name(){ return cardText("unit.free", "Release Unit"); }
+        @Override public String typeName(){ return "UnitFree"; }
+        @Override public String searchTerms(){ return "flag unbind unit"; }
+        @Override public void write(StringBuilder out){
+            out.append("unitfree ").append(variable);
+        }
+    }
+
+    public static class BreakStatement extends SugarStatement{
+        @Override public void build(Table table){}
+        @Override public String name(){ return cardText("break", "Break"); }
+        @Override public String typeName(){ return "Break"; }
+        @Override public void write(StringBuilder out){ out.append("break"); }
+    }
+
+    public static class ContinueStatement extends SugarStatement{
+        @Override public void build(Table table){}
+        @Override public String name(){ return cardText("continue", "Continue"); }
+        @Override public String typeName(){ return "Continue"; }
+        @Override public void write(StringBuilder out){ out.append("continue"); }
+    }
+
+    public static class BlockEndStatement extends SugarStatement{
+        @Override public void build(Table table){}
+        @Override public String name(){ return cardText("block.end", "}"); }
+        @Override public String typeName(){ return "BlockEnd"; }
+        @Override public void write(StringBuilder out){ out.append("blockend"); }
+    }
+
+    public static LStatement parseForBegin(String[] tokens){
+        return parseForBegin(tokens, false);
+    }
+
+    public static LStatement parseForBegin(String[] tokens, boolean collapsed){
+        ForBeginStatement result = new ForBeginStatement();
+        result.variable = tokens[1];
+        if(result.variable == null || result.variable.isEmpty()){
+            throw new IllegalArgumentException("Invalid forbegin statement: missing variable");
+        }
+        result.initial = optionalValue(tokens[2]);
+        result.step = optionalValue(tokens[3]);
+if(("expr".equals(tokens[4]) || "exprsc".equals(tokens[4])) && tokens[5].length() >= 2 && tokens[5].charAt(0) == '"'){
+            result.expressionMode = true;
+            result.shortCircuitMode = "exprsc".equals(tokens[4]);
+            result.conditionExpr = stripQuotes(tokens[5]);
+            result.destIndex = parseDestIndex(tokens[6]);
+        }else{
+            // Same guard as parseIfBegin: a null/garbage op must fail with a clean error instead
+            // of a raw valueOf NPE. LParser passes no token count, so a stale op name that is
+            // itself a valid ConditionOp is indistinguishable and parses as-is.
+            ConditionOp op = parseConditionOp(tokens[4]);
+            if(op == null) throw new IllegalArgumentException("Invalid forbegin condition operator: '" + tokens[4] + "'");
+            result.op = op;
+            result.compare = tokens[5];
+            result.destIndex = parseDestIndex(tokens[6]);
+        }
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    public static LStatement parseUnitBind(String[] tokens){
+        UnitBindStatement result = new UnitBindStatement();
+        result.type = requireToken("unitbind", tokens, 1);
+        result.variable = requireToken("unitbind", tokens, 2);
+        return result;
+    }
+
+    public static LStatement parseUnitNext(String[] tokens){
+        UnitNextStatement result = new UnitNextStatement();
+        result.type = requireToken("unitnext", tokens, 1);
+        result.variable = requireToken("unitnext", tokens, 2);
+        return result;
+    }
+
+    public static LStatement parseUnitFree(String[] tokens){
+        UnitFreeStatement result = new UnitFreeStatement();
+        result.variable = requireToken("unitfree", tokens, 1);
+        return result;
+    }
+
+    public static LStatement parseUnitFor(String[] tokens){
+        return parseUnitFor(tokens, false);
+    }
+
+    public static LStatement parseUnitFor(String[] tokens, boolean collapsed){
+        UnitForBeginStatement result = new UnitForBeginStatement();
+        result.count = requireToken("unitfor", tokens, 1);
+        result.type = requireToken("unitfor", tokens, 2);
+        result.variable = requireToken("unitfor", tokens, 3);
+        result.destIndex = parseDestIndex(requireToken("unitfor", tokens, 4));
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    private static String requireToken(String name, String[] tokens, int index){
+        if(tokens.length <= index || tokens[index] == null || tokens[index].isEmpty() || "~".equals(tokens[index])){
+            throw new IllegalArgumentException("Invalid " + name + " statement: missing token " + index);
+        }
+        return tokens[index];
+    }
+
+    public static LStatement parseWhileBegin(String[] tokens){
+        return parseWhileBegin(tokens, false);
+    }
+
+    public static LStatement parseWhileBegin(String[] tokens, boolean collapsed){
+        WhileBeginStatement result = new WhileBeginStatement();
+        // "whilebegin expr "<cond>" <destIndex>" — the quoted expression distinguishes it
+        // from a legacy variable literally named "expr".
+        if(("expr".equals(tokens[1]) || "exprsc".equals(tokens[1])) && tokens[2].length() >= 2 && tokens[2].charAt(0) == '"'){
+            result.expressionMode = true;
+            result.shortCircuitMode = "exprsc".equals(tokens[1]);
+            result.conditionExpr = stripQuotes(tokens[2]);
+            result.destIndex = parseDestIndex(tokens[3]);
+        }else{
+            ConditionOp parsedOp = parseConditionOp(tokens[2]);
+            if(parsedOp != null){
+                result.value = tokens[1];
+                result.op = parsedOp;
+                result.compare = tokens[3];
+                result.destIndex = parseDestIndex(tokens[4]);
+            }else{
+                // legacy single-value condition: "whilebegin <cond> <destIndex>"
+                result.value = tokens[1];
+                result.op = ConditionOp.notEqual;
+                result.compare = "false";
+                result.destIndex = parseDestIndex(tokens[2]);
+            }
+        }
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    public static LStatement parseSwitchBegin(String[] tokens){
+        return parseSwitchBegin(tokens, false);
+    }
+
+    public static LStatement parseSwitchBegin(String[] tokens, boolean collapsed){
+        SwitchBeginStatement result = new SwitchBeginStatement();
+        result.value = tokens[1];
+        result.destIndex = parseDestIndex(tokens[2]);
+        // Optional trailing mode token; absent (every save before this mode existed) stays guarded.
+        if(tokens.length > 3 && "raw".equals(tokens[3])) result.rawTable = true;
+        else if(tokens.length > 6 && "stride".equals(tokens[3])){
+            try{ result.stride = Integer.parseInt(tokens[4]); }
+            catch(NumberFormatException ignored){ result.stride = 0; }
+            result.strideTemp = tokens[5];
+            result.strideRelative = "rel".equals(tokens[6]);
+        }
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    public static LStatement parseCase(String[] tokens){
+        CaseStatement result = new CaseStatement();
+        result.value = tokens[1];
+        return result;
+    }
+
+    public static LStatement parseIfBegin(String[] tokens){
+        return parseIfBegin(tokens, false);
+    }
+
+    public static LStatement parseIfBegin(String[] tokens, boolean collapsed){
+        IfBeginStatement result = new IfBeginStatement();
+        // "ifbegin expr \"<cond>\" <destIndex>" — require the quoted expression so an old
+        // save whose variable is literally named "expr" is not silently re-parsed as an
+        // expression condition (e.g. "ifbegin expr lessThan 5 4").
+        if(("expr".equals(tokens[1]) || "exprsc".equals(tokens[1])) && tokens.length > 2 && tokens[2].length() >= 2 && tokens[2].charAt(0) == '"'){
+            result.expressionMode = true;
+            result.shortCircuitMode = "exprsc".equals(tokens[1]);
+            result.conditionExpr = stripQuotes(tokens[2]);
+            result.destIndex = parseDestIndex(tokens[3]);
+        }else{
+            result.value = tokens[1];
+            ConditionOp op = parseConditionOp(tokens[2]);
+            if(op == null) throw new IllegalArgumentException("Invalid ifbegin condition operator: '" + tokens[2] + "'");
+            result.op = op;
+            result.compare = tokens[3];
+            result.destIndex = parseDestIndex(tokens[4]);
+        }
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    public static LStatement parseElseIf(String[] tokens){
+        ElseIfStatement result = new ElseIfStatement();
+        // Same quoted-expression guard as parseIfBegin: a variable named "expr" must not
+        // be silently re-parsed as an expression condition.
+        if(("expr".equals(tokens[1]) || "exprsc".equals(tokens[1])) && tokens.length > 2 && tokens[2].length() >= 2 && tokens[2].charAt(0) == '"'){
+            result.expressionMode = true;
+            result.shortCircuitMode = "exprsc".equals(tokens[1]);
+            result.conditionExpr = stripQuotes(tokens[2]);
+        }else{
+            ConditionOp op = parseConditionOp(tokens[2]);
+            if(op == null) throw new IllegalArgumentException("Invalid elif condition operator: '" + tokens[2] + "'");
+            result.value = tokens[1];
+            result.op = op;
+            result.compare = tokens[3];
+        }
+        return result;
+    }
+
+    public static LStatement parseElse(String[] tokens){
+        return new ElseStatement();
+    }
+
+    public static LStatement parseFuncDef(String[] tokens){
+        return parseFuncDef(tokens, false);
+    }
+
+    public static LStatement parseFuncDef(String[] tokens, boolean collapsed){
+        FuncDefStatement result = new FuncDefStatement();
+        // Empty name: the slot is written as the "~" placeholder (see FuncDefStatement.write),
+        // and an empty name is a card state the editor marks red, not a parse error.
+        result.name = optionalValue(tokens[1]);
+        result.params = optionalValue(tokens[2]);
+        // v5 shape: `funcdef <name> <params> <ret> <destIndex>`. Legacy saves only carry
+        // `funcdef <name> <params> <destIndex>`, and a destIndex is always an integer, so an
+        // integer third slot unambiguously means "no declaration, infer from the body".
+        String third = tokens[3] == null ? "" : tokens[3].trim();   // ~ is meaningful here
+        if(isIntegerToken(third)){
+            result.returns = "";
+            result.destIndex = parseDestIndex(tokens[3]);
+        }else{
+            result.returns = parseReturns(third);
+            result.destIndex = parseDestIndex(tokens[4]);
+        }
+        result.collapsed = collapsed;
+        return result;
+    }
+
+    /** True when the token is an optional sign followed by digits (a legacy funcdef destIndex). */
+    private static boolean isIntegerToken(String token){
+        if(token == null || token.isEmpty()) return false;
+        for(int i = 0; i < token.length(); i++){
+            char c = token.charAt(i);
+            if(i == 0 && c == '-') continue;
+            if(c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
+    /** The canonical form of a known return declaration ({@code ~}/void/none, value/val),
+     *  or null when the token is not one. {@link #normalizeReturns} throws on null,
+     *  {@link #parseReturns} keeps the input so an invalid declaration stays visible. */
+    public static String canonicalReturns(String token){
+        String value = token == null ? "" : token.trim();
+        if(value.equals("~") || value.equalsIgnoreCase("void") || value.equalsIgnoreCase("none")) return "~";
+        if(value.equalsIgnoreCase("value") || value.equalsIgnoreCase("val")) return "value";
+        return null;
+    }
+
+    /** Normalizes a funcdef return declaration, rejecting anything unknown. This is the strict
+     *  form for callers that must validate; the parse path uses {@link #parseReturns}, because a
+     *  stored declaration the editor accepted has to come back as a card (red) rather than as a
+     *  parse failure that locks the editor. */
+    public static String normalizeReturns(String token){
+        String value = token == null ? "" : token.trim();
+        String canonical = canonicalReturns(value);
+        if(canonical != null) return canonical;
+        if(value.isEmpty()) return "";
+        throw new IllegalArgumentException("Invalid funcdef return declaration '" + token
+            + "' (expected ~ for void or value for a value return)");
+    }
+
+    /** The declaration as parsed from the wire: known aliases collapse to their canonical form,
+     *  anything else is kept verbatim (quoted values are unescaped). Invalid declarations are
+     *  refused by the compile path ({@code SugarFunctions.funcDefDeclarationProblem}) and marked
+     *  red by the editor, never by the parser. */
+    public static String parseReturns(String token){
+        String value = token == null ? "" : token.trim();
+        if(value.length() >= 2 && value.charAt(0) == '"' && value.charAt(value.length() - 1) == '"'){
+            value = unescapeQuoted(value.substring(1, value.length() - 1));
+        }
+        String canonical = canonicalReturns(value);
+        return canonical != null ? canonical : value;
+    }
+
+    public static LStatement parseFuncCall(String[] tokens){
+        FuncCallStatement result = new FuncCallStatement();
+        result.name = tokens[1];
+        if(result.name == null || result.name.isEmpty()){
+            throw new IllegalArgumentException("Invalid funccall statement: missing function name");
+        }
+        result.args = unescapeQuoted(stripQuotes(tokens[2]));
+        result.result = optionalValue(tokens[3]);
+        return result;
+    }
+
+    public static LStatement parseReturn(String[] tokens){
+        ReturnStatement result = new ReturnStatement();
+        result.expr = unescapeQuoted(stripQuotes(tokens[1]));
+        return result;
+    }
+
+    /**
+     * Span/array/matrix/arrayinit declaration cards. An emptied name or memory field is written
+     * as the {@code ~} placeholder (see each card's {@code write}), so the line always has its
+     * full token count and parsing it back is exact. Reporting the problem is the registry's job
+     * ({@code ArrayRegistry.compileRegistry} for the compile path, {@code markInvalidStatements}
+     * for the editor's red marking) — a parse error here is what made a single cleared field
+     * unreadable and left the editor unable to reopen its own draft (2026-10 report).
+     */
+    public static LStatement parseSpan(String[] tokens){
+        SpanStatement result = new SpanStatement();
+        result.name = optionalValue(tokens[1]);
+        result.expr = unescapeQuoted(stripQuotes(tokens[2]));
+        return result;
+    }
+
+    public static LStatement parseArray(String[] tokens){
+        ArrayStatement result = new ArrayStatement();
+        result.array = optionalValue(tokens[1]);
+        result.memory = optionalValue(tokens[2]);
+        result.base = optionalValue(tokens[3]);
+        result.size = optionalValue(tokens[4]);
+        return result;
+    }
+
+    public static LStatement parseMatrix(String[] tokens){
+        MatrixStatement result = new MatrixStatement();
+        result.matrix = optionalValue(tokens[1]);
+        result.memory = optionalValue(tokens[2]);
+        result.base = optionalValue(tokens[3]);
+        result.rows = optionalValue(tokens[4]);
+        result.cols = optionalValue(tokens[5]);
+        return result;
+    }
+
+    public static LStatement parseArrayInit(String[] tokens){
+        ArrayInitStatement result = new ArrayInitStatement();
+        result.array = optionalValue(tokens[1]);
+        for(int i = 0; i < result.values.length; i++){
+            // 自定义解析器拿不到本行的 token 数量（LParser 复用静态 token 数组），
+            // 超出本行的槽位读到的可能是残留值；卡片写盘时总是补满 8 个槽位，
+            // 因此正常存档的往返始终精确。
+            result.values[i] = 2 + i < tokens.length ? optionalValue(tokens[2 + i]) : "";
+        }
+        return result;
+    }
+
+    /** Removes the surrounding quotes that LParser keeps on string tokens. */
+    private static String stripQuotes(String value){
+        if(value == null || value.isEmpty()) return "";
+        if(value.length() >= 2 && value.charAt(0) == '"' && value.charAt(value.length() - 1) == '"'){
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    /** Escapes {@code ~} and {@code "} inside quoted statement tokens (see
+     *  {@link #unescapeQuoted}). {@code "} would cut the LParser string token short, and
+     *  {@code ~} must be escaped so the sequence is unambiguous. Public because the
+     *  decompiler must escape with exactly these rules: any drift between the two sides
+     *  would make recompilation verification silently reject valid recoveries. */
+    public static String escapeQuoted(String value){
+        if(value.indexOf('~') < 0 && value.indexOf('"') < 0) return value;
+        StringBuilder out = new StringBuilder(value.length() + 8);
+        for(int i = 0; i < value.length(); i++){
+            char c = value.charAt(i);
+            if(c == '~'){
+                out.append("~~");
+            }else if(c == '"'){
+                out.append("~q");
+            }else{
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /** Inverts {@link #escapeQuoted}: {@code ~~} becomes {@code ~}, {@code ~q} becomes
+     *  {@code "}; any other {@code ~} sequence is kept literal. */
+    public static String unescapeQuoted(String value){
+        if(value.indexOf('~') < 0) return value;
+        StringBuilder out = new StringBuilder(value.length());
+        for(int i = 0; i < value.length(); i++){
+            char c = value.charAt(i);
+            if(c == '~' && i + 1 < value.length()){
+                char next = value.charAt(i + 1);
+                if(next == '~'){
+                    out.append('~');
+                    i++;
+                }else if(next == 'q'){
+                    out.append('"');
+                    i++;
+                }else{
+                    out.append(c);
+                }
+            }else{
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /** Parses a token as a ConditionOp, or null when it is not one (e.g. a legacy destIndex).
+     *  LParser reuses a static token array, so token count cannot distinguish the legacy
+     *  single-value form from the three-part form; the op name is the reliable marker. */
+    private static ConditionOp parseConditionOp(String name){
+        if(name == null) return null;
+        try{
+            return ConditionOp.valueOf(name);
+        }catch(IllegalArgumentException e){
+            return null;
+        }
+    }
+
+    /** Parses a destination index token, throwing a clean error instead of a bare
+     *  NumberFormatException when the token is missing or malformed (LParser reuses a static
+     *  token array, so a short line leaves stale or empty trailing tokens). */
+    private static int parseDestIndex(String token){
+        try{
+            return Integer.parseInt(token);
+        }catch(NumberFormatException e){
+            throw new IllegalArgumentException("Invalid statement destination index: '" + token + "'");
+        }
+    }
+
+    /**
+     * Encodes a single statement's serialized text (its {@code write()} output) into one
+     * mlog token so it can ride inside a {@code print} statement and survive the round trip
+     * losslessly. An unquoted mlog token cannot contain a space (the separator), so:
+     * <ul>
+     *   <li>{@code ~} (the escape char) becomes {@code ~~}</li>
+     *   <li>{@code ' '} becomes {@code ~_}</li>
+     * </ul>
+     * Every other character — including {@code _} (identifiers like {@code my_var}, {@code __ls_*}),
+     * {@code "} and {@code @} — is kept literal. This is a proper prefix-free code: in the output
+     * every {@code ~} is always followed by {@code ~} or {@code _}, so {@link #decodeStatementText}
+     * is unambiguous.
+     */
+    public static String encodeStatementText(String text){
+        StringBuilder out = new StringBuilder(text.length() + 8);
+        for(int i = 0; i < text.length(); i++){
+            char c = text.charAt(i);
+            if(c == '~'){
+                out.append("~~");
+            }else if(c == ' '){
+                out.append("~_");
+            }else{
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /** Inverts {@link #encodeStatementText}. A {@code ~} not followed by {@code ~} or {@code _}
+     *  (possible only in hand-edited print text) is kept as a literal {@code ~}. */
+    public static String decodeStatementText(String text){
+        StringBuilder out = new StringBuilder(text.length());
+        for(int i = 0; i < text.length(); i++){
+            char c = text.charAt(i);
+            if(c == '~' && i + 1 < text.length()){
+                char next = text.charAt(i + 1);
+                if(next == '~'){
+                    out.append('~');
+                    i++;
+                }else if(next == '_'){
+                    out.append(' ');
+                    i++;
+                }else{
+                    out.append(c);
+                }
+            }else{
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Re-pairs the begin/end blocks of a detached fragment and writes fragment-local indices
+     * back onto the begin cards.
+     *
+     * <p>Needed when a fragment arrives from somewhere other than the canvas it is going into —
+     * a clipboard payload, say — because the index a begin carries is absolute in the program it
+     * was copied from. Pairing from nesting is the unique non-crossing answer, so the stored
+     * number is discarded rather than adjusted. {@code SugarCompiler.recomputeBlockDests} is the
+     * canonical implementation and sits in this package, so this is only a door onto it for
+     * callers such as the paste path in {@code logicsugar.assist}.</p>
+     *
+     * @return false when the fragment cannot be paired — a begin without its end, or an end
+     *         without its begin. The caller is expected to check this <em>before</em> inserting,
+     *         since a half-inserted structure cannot be undone.
+     */
+    public static boolean pairBlockEnds(Seq<LStatement> fragment){
+        return SugarCompiler.recomputeBlockDests(fragment);
+    }
+}

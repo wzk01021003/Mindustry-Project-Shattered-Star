@@ -1,0 +1,382 @@
+package bektools;
+
+import arc.Core;
+import arc.Events;
+import arc.util.Log;
+import arc.util.Strings;
+import arc.util.Time;
+import mindustry.Vars;
+import mindustry.core.Version;
+import mindustry.game.EventType;
+import mindustry.mod.Mod;
+import mindustry.mod.Mods;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
+import java.util.Collections;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.function.Supplier;
+
+/**
+ * Reports a pseudonymous end-of-session usage event (bundled-module availability snapshot) to
+ * PostHog. Player UUIDs are hashed locally; the raw identifier is never uploaded or persisted.
+ */
+final class PostHogUsageReporter{
+    private static final String logTag = "[Neon/PostHog]";
+    private static final String apiKey = "phc_ry3vePCjmUFcy9oQ765tTDA2FagUXVrMcw3DWPsVCkn9";
+    private static final String endpoint = "https://us.i.posthog.com/i/v0/e/";
+    private static final String eventName = "mod_session_end";
+
+    private static final String keyPendingMinutes = "bek-posthog-pending-minutes";
+    private static final String keyStablePlayerId = "bek-posthog-stable-player-id";
+    /** Prefix marking a distinct id that is already a local SHA-256 digest. */
+    private static final String hashedIdPrefix = "sha256:";
+    private static final int minFlushMinutes = 2;
+
+    private final Class<? extends Mod> modType;
+    private final Supplier<Map<String, Boolean>> submodStateSupplier;
+
+    private boolean installed;
+    private boolean flushed;
+    private double inGameSeconds;
+    private Thread shutdownHook;
+    private PlayerIdResolution cachedIdResolution;
+
+    PostHogUsageReporter(Class<? extends Mod> modType){
+        this(modType, Collections::emptyMap);
+    }
+
+    PostHogUsageReporter(Class<? extends Mod> modType, Supplier<Map<String, Boolean>> submodStateSupplier){
+        this.modType = modType;
+        this.submodStateSupplier = submodStateSupplier == null ? Collections::emptyMap : submodStateSupplier;
+    }
+
+    void onClientLoad(){
+        if(installed || Vars.headless) return;
+        installed = true;
+
+        Core.settings.defaults(keyPendingMinutes, 0);
+        Core.settings.defaults(keyStablePlayerId, "");
+        Log.info(logTag + " initialized. thresholdMinutes=" + minFlushMinutes + ", pendingMinutes=" + Math.max(0, Core.settings.getInt(keyPendingMinutes, 0)));
+        Events.run(EventType.Trigger.update, this::onUpdate);
+        Events.on(EventType.DisposeEvent.class, e -> flush("dispose-event"));
+        installShutdownHook();
+
+        cachedIdResolution = resolvePlayerId();
+        Log.info(logTag + " player id pre-cached. source=" + cachedIdResolution.source + ", distinct_id=" + cachedIdResolution.playerId);
+    }
+
+    private void onUpdate(){
+        if(flushed) return;
+        if(Vars.state != null && Vars.state.isGame()){
+            inGameSeconds += Time.delta / 60.0;
+        }
+    }
+
+    private void flush(String source){
+        if(flushed || Vars.headless) return;
+        flushed = true;
+
+        int sessionMinutes = Math.max(0, (int)(inGameSeconds / 60.0));
+        int pendingMinutes = Math.max(0, Core.settings.getInt(keyPendingMinutes, 0));
+        int nextPending = pendingMinutes + sessionMinutes;
+        Log.info(logTag + " flush start. source=" + source + ", sessionMinutes=" + sessionMinutes + ", pendingBefore=" + pendingMinutes + ", pendingAfter=" + nextPending);
+
+        // Persist first so short sessions and failed requests roll into next launch.
+        persistPendingMinutes(nextPending);
+        if(nextPending < minFlushMinutes){
+            Log.info(logTag + " skip upload: pendingAfter=" + nextPending + " < threshold=" + minFlushMinutes);
+            return;
+        }
+
+        ModMeta meta = resolveModMeta();
+        String gameVersion = normalize(Version.buildString(), "unknown");
+        PlayerIdResolution idResolution = cachedIdResolution;
+        String distinctId = normalize(idResolution.playerId, "unknown");
+        String playerName = normalize(resolvePlayerName(), "unknown");
+        String timestamp = utcTimestamp();
+        Map<String, Boolean> submods = resolveSubmodStates();
+        Log.info(logTag + " send prepared. distinct_id=" + distinctId + ", player_id=" + distinctId + ", player_id_source=" + idResolution.source + ", player_name=" + playerName + ", game_version=" + gameVersion + ", mod_version=" + meta.modVersion + ", usage_minutes=" + nextPending);
+
+        if(sendUsage(distinctId, playerName, gameVersion, meta.modVersion, nextPending, timestamp, submods)){
+            persistPendingMinutes(0);
+            Log.info(logTag + " upload success. pending reset to 0.");
+        }else{
+            Log.warn(logTag + " upload failed. keep pendingMinutes=" + nextPending + " for next run.");
+        }
+    }
+
+    private boolean sendUsage(String distinctId, String playerName, String gameVersion, String modVersion, int usageMinutes, String timestamp, Map<String, Boolean> submods){
+        HttpURLConnection conn = null;
+        try{
+            String json = "{"
+            + "\"api_key\":\"" + escapeJson(apiKey) + "\","
+            + "\"event\":\"" + eventName + "\","
+            + "\"distinct_id\":\"" + escapeJson(distinctId) + "\","
+            + "\"timestamp\":\"" + escapeJson(timestamp) + "\","
+            + "\"properties\":{"
+            + "\"player_id\":\"" + escapeJson(distinctId) + "\","
+            + "\"player_name\":\"" + escapeJson(playerName) + "\","
+            + "\"game_version\":\"" + escapeJson(gameVersion) + "\","
+            + "\"mod_version\":\"" + escapeJson(modVersion) + "\","
+            + "\"usage_minutes\":" + usageMinutes + ","
+            + "\"submods\":" + encodeSubmods(submods)
+            + "}}";
+
+            conn = (HttpURLConnection)new URL(endpoint).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setDoOutput(true);
+
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(bytes.length);
+            try(OutputStream out = conn.getOutputStream()){
+                out.write(bytes);
+            }
+
+            int code = conn.getResponseCode();
+            String body = readBody(code >= 200 && code < 400 ? conn.getInputStream() : conn.getErrorStream());
+            boolean ok = code >= 200 && code < 300;
+            if(ok){
+                Log.info(logTag + " HTTP " + code + " response=" + snippet(body));
+            }else{
+                Log.warn(logTag + " HTTP " + code + " response=" + snippet(body));
+            }
+            return ok;
+        }catch(Throwable t){
+            Log.warn(logTag + " request exception: " + t);
+            return false;
+        }finally{
+            if(conn != null) conn.disconnect();
+        }
+    }
+
+    private Map<String, Boolean> resolveSubmodStates(){
+        try{
+            Map<String, Boolean> states = submodStateSupplier.get();
+            if(states == null || states.isEmpty()) return Collections.emptyMap();
+            return new LinkedHashMap<>(states);
+        }catch(Throwable t){
+            Log.warn(logTag + " failed to resolve submod states", t);
+            return Collections.emptyMap();
+        }
+    }
+
+    private static String utcTimestamp(){
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date());
+    }
+
+    private void installShutdownHook(){
+        if(shutdownHook != null) return;
+        shutdownHook = new Thread(() -> {
+            try{
+                flush("shutdown-hook");
+            }catch(Throwable t){
+                Log.warn(logTag + " shutdown hook flush exception", t);
+            }
+        }, "neon-posthog-shutdown");
+        shutdownHook.setDaemon(true);
+        try{
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+        }catch(Throwable t){
+            Log.warn(logTag + " failed to install shutdown hook", t);
+        }
+    }
+
+    private ModMeta resolveModMeta(){
+        String modName = "Neon";
+        String modVersion = "unknown";
+        if(Vars.mods != null){
+            Mods.LoadedMod mod = Vars.mods.getMod(modType);
+            if(mod != null && mod.meta != null){
+                modName = normalize(mod.meta.name, modName);
+                modVersion = normalize(mod.meta.version, modVersion);
+            }
+        }
+        return new ModMeta(modName, modVersion);
+    }
+
+    private PlayerIdResolution resolvePlayerId(){
+        String cachedPlayerId = normalizeRaw(Core.settings.getString(keyStablePlayerId, ""));
+        if(isOnlineUuid(cachedPlayerId)){
+            // Older builds cached the raw UUID; rewrite it as the local hash on first use.
+            String hashed = hashId(cachedPlayerId);
+            persistStablePlayerId(hashed);
+            return new PlayerIdResolution(hashed, "stable-cache");
+        }
+
+        if(Vars.player != null){
+            String rawPlayerUuid = normalizeRaw(Vars.player.uuid());
+            if(isOnlineUuid(rawPlayerUuid)){
+                persistStablePlayerId(rawPlayerUuid);
+                return new PlayerIdResolution(hashId(rawPlayerUuid), "player.uuid->stable-cache");
+            }
+        }
+        String platformUuid = Vars.platform == null ? "" : normalizeRaw(Vars.platform.getUUID());
+        if(isOnlineUuid(platformUuid)){
+            persistStablePlayerId(platformUuid);
+            return new PlayerIdResolution(hashId(platformUuid), "platform.uuid->stable-cache");
+        }
+        return new PlayerIdResolution("", "none");
+    }
+
+    /**
+     * Hashes a raw player identifier locally so PostHog only ever receives a pseudonymous id.
+     * Idempotent: a value already carrying {@link #hashedIdPrefix} passes through unchanged.
+     */
+    static String hashId(String value){
+        String normalized = normalizeRaw(value);
+        if(normalized.isEmpty() || normalized.startsWith(hashedIdPrefix)) return normalized;
+        byte[] digest;
+        try{
+            digest = MessageDigest.getInstance("SHA-256").digest(normalized.getBytes(StandardCharsets.UTF_8));
+        }catch(NoSuchAlgorithmException e){
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+        StringBuilder out = new StringBuilder(hashedIdPrefix.length() + digest.length * 2);
+        out.append(hashedIdPrefix);
+        for(byte b : digest){
+            int v = b & 0xFF;
+            out.append(Character.forDigit(v >>> 4, 16)).append(Character.forDigit(v & 0x0F, 16));
+        }
+        return out.toString();
+    }
+
+    private static String resolvePlayerName(){
+        if(Vars.player == null || Vars.player.name == null) return "";
+        return Vars.player.name;
+    }
+
+    private static boolean isOnlineUuid(String value){
+        if(value == null) return false;
+        String normalized = value.trim();
+        if(normalized.isEmpty()) return false;
+        return !"[LOCAL]".equalsIgnoreCase(normalized) && !"LOCAL".equalsIgnoreCase(normalized);
+    }
+
+    private static String normalizeRaw(String value){
+        return value == null ? "" : value.trim();
+    }
+
+    private static String normalize(String value, String fallback){
+        if(value == null) return fallback;
+        String stripped = Strings.stripColors(value).trim();
+        return stripped.isEmpty() ? fallback : stripped;
+    }
+
+    private static String escapeJson(String value){
+        if(value == null) return "";
+        StringBuilder out = new StringBuilder(value.length() + 16);
+        for(int i = 0; i < value.length(); i++){
+            char c = value.charAt(i);
+            switch(c){
+                case '\"': out.append("\\\""); break;
+                case '\\': out.append("\\\\"); break;
+                case '\b': out.append("\\b"); break;
+                case '\f': out.append("\\f"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                default:
+                    if(c < 0x20){
+                        out.append(String.format("\\u%04x", (int)c));
+                    }else{
+                        out.append(c);
+                    }
+            }
+        }
+        return out.toString();
+    }
+
+    private static String encodeSubmods(Map<String, Boolean> submods){
+        StringBuilder out = new StringBuilder("{");
+        boolean first = true;
+        if(submods != null){
+            for(Map.Entry<String, Boolean> entry : submods.entrySet()){
+                if(entry.getKey() == null) continue;
+                if(!first) out.append(',');
+                out.append('"').append(escapeJson(entry.getKey())).append("\":");
+                out.append(Boolean.TRUE.equals(entry.getValue()));
+                first = false;
+            }
+        }
+        return out.append('}').toString();
+    }
+
+    private static String readBody(InputStream stream){
+        if(stream == null) return "";
+        try(InputStream in = stream; ByteArrayOutputStream out = new ByteArrayOutputStream(256)){
+            byte[] buffer = new byte[1024];
+            int len;
+            while((len = in.read(buffer)) >= 0){
+                out.write(buffer, 0, len);
+            }
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        }catch(Throwable ignored){
+            return "";
+        }
+    }
+
+    private static String snippet(String text){
+        if(text == null) return "";
+        String oneLine = text.replace('\n', ' ').replace('\r', ' ').trim();
+        if(oneLine.length() <= 220) return oneLine;
+        return oneLine.substring(0, 220) + "...";
+    }
+
+    private void persistPendingMinutes(int value){
+        Core.settings.put(keyPendingMinutes, Math.max(0, value));
+        try{
+            Core.settings.forceSave();
+        }catch(Throwable t){
+            Log.warn(logTag + " forceSave failed", t);
+        }
+    }
+
+    private void persistStablePlayerId(String value){
+        if(!isOnlineUuid(value)) return;
+        String normalized = hashId(value);
+        if(normalized.equals(normalizeRaw(Core.settings.getString(keyStablePlayerId, "")))) return;
+        Core.settings.put(keyStablePlayerId, normalized);
+        try{
+            Core.settings.forceSave();
+        }catch(Throwable t){
+            Log.warn(logTag + " stable player id forceSave failed", t);
+        }
+    }
+
+    private static final class ModMeta{
+        final String modName;
+        final String modVersion;
+
+        ModMeta(String modName, String modVersion){
+            this.modName = modName;
+            this.modVersion = modVersion;
+        }
+    }
+
+    private static final class PlayerIdResolution{
+        final String playerId;
+        final String source;
+
+        PlayerIdResolution(String playerId, String source){
+            this.playerId = playerId;
+            this.source = source;
+        }
+    }
+}

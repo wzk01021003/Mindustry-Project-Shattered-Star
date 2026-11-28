@@ -1,0 +1,46 @@
+AutoBuild — 第三方组件声明
+================================
+
+本目录内的 AutoBuild.jar 是第三方模组，不是「碎星计划」的一部分。
+
+  名称      AutoBuild（算法自动建造）
+  版本      v1.3.8（2026-11-26 发布，适用于 Mindustry v8 build 160.7+，Serpulo）
+  作者      Maiolao
+  版权      Copyright © 2026 Maiolao
+  源码      https://github.com/Parallelopiped/Mindustry-Autobuild
+  许可证    Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+            International（CC BY-NC-SA 4.0）
+            全文见同目录 AutoBuild-LICENSE.txt
+            协议文本 https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+原作者未参与「碎星计划」，也不对「碎星计划」背书；本作品与作者无隶属关系。
+
+作者额外授权
+------------
+作者已确认「尽管使用，欢迎各种形式的二次开发」（2026-11-28）。
+本包在此基础上使用，署名与非商业义务照常履行，详见仓库根
+AutoBuild-AUTHORIZATION.md。
+
+对本组件的修改说明
+------------------
+仅做打包格式转换，不改动任何游戏逻辑、算法或界面：
+
+  1. 以官方 Release 的 mindustry-autobuildDesktop.jar（SHA-256
+     206e34ec543fe4cef097ddd0df6d7a2eed652eb63bd5238f291235662125ecbf）为基准，
+     其中全部 .class 文件逐字节保持一致，未做任何反编译修改。
+  2. 额外加入由这些 .class 经 d8（--release --min-api 21）生成的 classes.dex，
+     使模组可在 Android 运行时加载（Mindustry 在 Android 上只读 jar 根的
+     classes.dex，桌面端只读 .class，两者可共存于同一 jar）。
+  3. 该转换属于 CC BY-NC-SA 4.0 第 2(a)(4) 条允许的「为行使授权权利所必需的
+     技术性修改」，不产生改编作品；本声明仍按第 3(a)(1)(b) 条如实标注。
+
+分发约束
+--------
+CC BY-NC-SA 4.0 禁止商业使用。任何再分发必须：
+
+  1. 保留作者署名、版权声明、许可证名称与链接（即本文件与 AutoBuild-LICENSE.txt）；
+  2. 仅用于非商业目的；
+  3. 若修改了本组件，修改版必须以相同的 CC BY-NC-SA 4.0 授权发布。
+
+本组件以独立文件形式随「碎星计划」二进制包分发，不与「碎星计划」源码合并编译，
+属于许可意义上的聚合（aggregation），各自许可证独立生效。

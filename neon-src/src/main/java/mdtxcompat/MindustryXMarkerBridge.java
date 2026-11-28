@@ -1,0 +1,50 @@
+package mdtxcompat;
+
+import arc.math.geom.Vec2;
+import arc.util.Log;
+
+import java.lang.reflect.Method;
+
+/** Reflective {@link MarkerBridge} over MindustryX's MarkerType; permanently disables itself when symbols or calls fail. */
+public class MindustryXMarkerBridge implements MarkerBridge {
+    private boolean available = true;
+    private boolean resolved;
+    private Method markMethod;
+
+    @Override
+    public boolean isSupported() {
+        return resolveSymbols();
+    }
+
+    @Override
+    public void mark(String text, int tileX, int tileY) {
+        if (!resolveSymbols()) return;
+        try {
+            markMethod.invoke(null, text, new Vec2(tileX, tileY));
+        } catch (Throwable t) {
+            available = false;
+            resolved = false;
+            markMethod = null;
+            Log.err("MindustryX marker call failed; disabling integration.", t);
+        }
+    }
+
+    private boolean resolveSymbols() {
+        if (!available) return false;
+        if (resolved) return true;
+        try {
+            Class<?> markerType = LegacyMindustryXGuard.loadMindustryXClass("mindustryX.features.MarkerType");
+            markMethod = markerType.getMethod("newMarkFromChat", String.class, Vec2.class);
+            resolved = true;
+            return true;
+        } catch (ClassNotFoundException notFound) {
+            available = false;
+            return false;
+        } catch (Throwable t) {
+            available = false;
+            markMethod = null;
+            Log.err("MindustryX marker symbols resolve failed; disabling integration.", t);
+            return false;
+        }
+    }
+}

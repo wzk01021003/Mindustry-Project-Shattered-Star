@@ -1,0 +1,63 @@
+Mindustry: Project Shattered Star — 第三方组件与许可证声明
+==========================================================
+
+「碎星计划」(Project Shattered Star) 是 Anuken/Mindustry v160.7（v8 Build 160.7）
+源码的 fork，直接修改 `core/src` 下的原版源码，并随二进制包内置一个第三方模组。
+本文件列出随包分发的全部第三方组件及其授权条件。
+
+对 Mindustry 本体
+-----------------
+  版本      v160.7（v8 Build 160.7）
+  来源      https://github.com/Anuken/Mindustry/tree/v160.7
+  版权      Anuken 及 Mindustry contributors
+  许可证    GNU General Public License v3.0（全文见仓库根 LICENSE）
+  状态      本 fork 修改了其源码（编队系统、寻路、性能等），修改版同样以 GPL-3.0 授权。
+
+  依据 GPL-3.0，向外分发时必须：
+    1. 继续以 GPL-3.0 授权，不得改为闭源或专有许可；
+    2. 随附完整对应源码或明确的源码获取方式（见 SOURCES.md）；
+    3. 保留原作者版权声明、LICENSE 全文与本 NOTICE；
+    4. 不得附加限制接收方继续修改或再分发的条款。
+
+第三方组件
+----------
+1. Arc（Mindustry 本体依赖，已包含在 Mindustry.jar 内）
+   来源：https://github.com/Anuken/Arc
+   许可证：见 Arc 仓库 LICENSE
+
+2. Eclipse Temurin JRE 17（仅 Windows 便携版随包，Windows x64）
+   来源：https://adoptium.net/
+   许可证：GPL-2.0 with Classpath Exception（许可文本保留在 jre/legal/ 内）
+
+3. AutoBuild v1.3.8（内置模组，随包释放到 mods 目录）
+   来源：https://github.com/Parallelopiped/Mindustry-Autobuild
+   作者：Maiolao
+   版权：Copyright © 2026 Maiolao
+   许可证：CC BY-NC-SA 4.0（Attribution-NonCommercial-ShareAlike 4.0 International）
+           全文随包附带于 core/assets/builtin-mods/AutoBuild-LICENSE.txt，
+           亦见 https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+   修改：仅做打包格式转换，为 Android 运行时追加由官方 .class 生成的 classes.dex，
+         全部 .class 与官方 Release 逐字节一致，未改动任何逻辑。
+         详细说明见 AutoBuild-NOTICE.txt。
+
+   注意：该组件禁止商业使用，且与 GPL-3.0 不兼容。它以独立文件形式随包分发，
+   不与「碎星计划」源码合并编译，属于许可意义上的聚合（aggregation），
+   各自许可证独立生效；再分发时必须保留其署名与本声明。
+
+   作者已确认「尽管使用，欢迎各种形式的二次开发」（2026-11-28），
+   本项目据此内置分发；该确认不改变 CC BY-NC-SA 4.0 的署名与非商业义务。
+   记录见 AutoBuild-AUTHORIZATION.md。
+
+4. Neon N19（内置模组，随包释放到 mods 目录）
+   来源：https://github.com/DeterMination-Wind/Neon
+   作者：DeterMination (BEK)
+   许可证：GNU General Public License v3.0
+           全文随包附带于 core/assets/builtin-mods/Neon-LICENSE.txt
+   修改：内置的是修改版。新增 30 条模块简介、11 个会改动原版行为的模块在首次展开时
+         弹确认框、移除 PostHog 使用统计上报；玩法算法未改动。
+         修改后的完整源码在本仓库 neon-src/，构建说明见其 BUILD.md。
+   说明：GPL-3.0 与本体一致，可按 GPL-3.0 再分发；再分发时须保留署名、
+         许可证全文，并提供 neon-src/ 对应的源码。
+
+「Mindustry」名称及商标归原权利人所有。本作品为非官方、非商业的同人衍生作品，
+与 Anuken / Mindustry 原作者、AutoBuild 作者均无隶属关系，也未获其背书。

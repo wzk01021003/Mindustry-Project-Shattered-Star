@@ -1,0 +1,3959 @@
+package patchviewer;
+
+import arc.Core;
+import arc.Events;
+import arc.graphics.Color;
+import arc.graphics.Colors;
+import arc.graphics.g2d.TextureRegion;
+import arc.scene.Element;
+import arc.scene.Group;
+import arc.scene.actions.Actions;
+import arc.scene.style.TextureRegionDrawable;
+import arc.scene.ui.CheckBox;
+import arc.scene.ui.Image;
+import arc.scene.ui.Label;
+import arc.scene.ui.ScrollPane;
+import arc.scene.ui.TextField;
+import arc.scene.ui.layout.Cell;
+import arc.scene.ui.layout.Stack;
+import arc.scene.ui.layout.Table;
+import arc.files.Fi;
+import arc.input.KeyBind;
+import arc.input.KeyCode;
+import arc.math.Mathf;
+import arc.math.geom.Rect;
+import arc.math.geom.Vec2;
+import arc.struct.ObjectMap;
+import arc.struct.OrderedMap;
+import arc.struct.OrderedSet;
+import arc.struct.Seq;
+import arc.util.Log;
+import arc.util.Scaling;
+import arc.util.Strings;
+import arc.util.Time;
+import mindustry.Vars;
+import mindustry.ctype.Content;
+import mindustry.ctype.ContentType;
+import mindustry.ctype.UnlockableContent;
+import mindustry.entities.bullet.BulletType;
+import mindustry.game.Team;
+import mindustry.game.EventType;
+import mindustry.gen.Building;
+import mindustry.gen.Groups;
+import mindustry.gen.Icon;
+import mindustry.gen.Tex;
+import mindustry.gen.Unit;
+import mindustry.graphics.Pal;
+import mindustry.mod.Mod;
+import mindustry.type.ItemStack;
+import mindustry.type.UnitType;
+import mindustry.ui.Displayable;
+import mindustry.ui.Styles;
+import mindustry.ui.dialogs.ContentInfoDialog;
+import mindustry.ui.dialogs.SettingsMenuDialog;
+import mindustry.world.Block;
+import mindustry.world.Tile;
+import mindustry.world.consumers.ConsumePower;
+import mindustry.world.draw.DrawBlock;
+import mindustry.world.meta.Stat;
+import mindustry.world.meta.StatCat;
+import mindustry.world.meta.StatValue;
+import mindustry.world.meta.StatValues;
+import mindustry.world.meta.Stats;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class PatchViewerMod extends Mod{
+    /** When true, this mod is running as a bundled component inside Neon. */
+    public static boolean bekBundled = false;
+
+
+    private static final float minContentWidth = 500f;
+    private static final float maxMeasuredContentWidth = 1400f;
+    private static final String buildCostRowKey = "general::buildCost";
+    private static final String arrowColor = "[lightgray]";
+    private static final String keyEnabled = "patchviewer-enabled";
+    private static final String keyHiddenEntries = "patchviewer-hidden-entries";
+    private static final String keyRemovedColor = "patchviewer-color-removed";
+    private static final String keyModifiedOldColor = "patchviewer-color-modified-old";
+    private static final String keyModifiedNewColor = "patchviewer-color-modified-new";
+    private static final String keyAddedColor = "patchviewer-color-added";
+    private static final String keyQuickDisplayMode = "patchviewer-quick-display-mode";
+    private static final String keyQuickHudOpacity = "patchviewer-quick-hud-opacity";
+    private static final String keyQuickHudWidth = "patchviewer-quick-hud-width";
+    private static final String keyQuickHudBackgroundColor = "patchviewer-quick-hud-background";
+    private static final String defaultRemovedColor = "red";
+    private static final String defaultModifiedOldColor = "gold";
+    private static final String defaultModifiedNewColor = "green";
+    private static final String defaultAddedColor = "green";
+    private static final String defaultQuickHudBackgroundColor = "black";
+    private static final String quickModeHud = "cursor";
+    private static final String quickModeBuildInfo = "buildinfo";
+    private static final String quickHudName = "patchviewer-quick-hud";
+    private static final String quickBuildInfoName = "patchviewer-quick-build-info";
+    private static final String hiddenSectionName = "patchviewer-hidden-section";
+    private static final int hiddenEntryLimit = 24;
+    private static final int hiddenBuildInfoLimit = 8;
+    private static final int hiddenDialogLimit = 200;
+    private static final int hiddenRefreshFrames = 60;
+    private static final int hiddenTextLimit = 160;
+    private static final String iconTokenPrefix = "<patchviewer-icon:";
+    private static final float defaultUnitStatIconSize = 40f;
+    private static final float compactComponentGap = 5f;
+    private static final Pattern numberPattern = Pattern.compile("-?\\d+(?:\\.\\d+)?");
+    private static boolean settingsAdded;
+    private static boolean keybindsRegistered;
+
+    private final ObjectMap<UnlockableContent, ContentSnapshot> baselineSnapshots = new ObjectMap<>();
+    private final ObjectMap<UnlockableContent, ContentSnapshot> afterSnapshots = new ObjectMap<>();
+    private final ObjectMap<UnlockableContent, ContentDiff> diffsByContent = new ObjectMap<>();
+    private final ObjectMap<UnlockableContent, CompactDiff> compactDiffsByContent = new ObjectMap<>();
+    private final ObjectMap<UnlockableContent, Seq<HiddenEntry>> hiddenEntriesByContent = new ObjectMap<>();
+    private ObjectMap<Object, Seq<HiddenOwner>> hiddenOwnerIndex;
+    private boolean hiddenOwnerIndexFailed;
+    private long hiddenCacheSignature;
+    private boolean hiddenCacheReady;
+    private final ObjectMap<String, Stat> hiddenStatExtCache = new ObjectMap<>();
+    private boolean hiddenPatcherWarned;
+    private int hiddenRefreshTicker;
+    private KeyBind quickViewKey;
+    private Table quickHud;
+    private ScrollPane quickHudPane;
+    private UnlockableContent lastQuickHudContent;
+    private Seq<HiddenEntry> lastQuickHudHidden;
+    private float lastQuickHudWidth = -1f;
+    private Table lastBuildInfoRoot;
+    private UnlockableContent lastBuildInfoContent;
+    private CompactDiff lastBuildInfoCompact;
+    private Seq<HiddenEntry> lastBuildInfoHidden;
+    private Table lastBuildInfoRebuildRoot;
+    private boolean baselineCaptured;
+    private boolean placementReflectReady;
+    private boolean mi2uAvailable;
+    private boolean mi2uClassMissing;
+    private Object mi2uMi2uiInstance;
+    private Field fieldTopTable;
+    private Field fieldHover;
+    private Field fieldHover2;
+    private Field fieldMenuHoverBlock;
+    private Field mi2uMi2uiSettingsField;
+    private Field mi2uHoverInfoField;
+    private Field mi2uHoverBuildField;
+    private Field mi2uHoverBuildtField;
+    private java.lang.reflect.Method mi2uSettingsGetBool;
+
+    public PatchViewerMod(){
+        setupDefaults();
+        Events.on(EventType.ClientLoadEvent.class, event -> {
+            installDialogHook();
+            refreshSettingsBackupStorage();
+            registerKeybinds();
+            tryInitPlacementReflection();
+            probeMi2u();
+            //headless 下没有 Core.scene，捕获基线会在 snapshot() 里建 Label 而空指针
+            if(!Vars.headless) Core.app.post(this::captureBaselineAtStartup);
+        });
+        Events.on(EventType.WorldLoadEvent.class, event -> {
+            //服务端共用客户端的 mods 目录，本模组仍会被加载；WorldLoadEvent 时 Core.scene 为空，
+            //重建快照与设置备份都会触碰 UI，故 headless 直接跳过
+            if(Vars.headless) return;
+            rebuildAfterSnapshots();
+            refreshSettingsBackupStorage();
+        });
+        Events.on(EventType.ResetEvent.class, event -> {
+            afterSnapshots.clear();
+            diffsByContent.clear();
+            compactDiffsByContent.clear();
+            clearHiddenEntries();
+            hiddenOwnerIndex = null;
+            hiddenOwnerIndexFailed = false;
+            hiddenRefreshTicker = 0;
+            lastQuickHudContent = null;
+            lastQuickHudHidden = null;
+            lastBuildInfoContent = null;
+            lastBuildInfoCompact = null;
+            lastBuildInfoHidden = null;
+            hideQuickHud();
+            hideInjectedRows(lastBuildInfoRoot);
+        });
+        Events.run(EventType.Trigger.uiDrawEnd, this::updateQuickDisplay);
+    }
+
+    @Override
+    public void init(){
+        Events.on(EventType.ClientLoadEvent.class, event -> {
+            if(settingsAdded) return;
+            settingsAdded = true;
+            if(Vars.ui == null || Vars.ui.settings == null) return;
+        if(bekBundled) return;
+
+            if(!bekBundled) Vars.ui.settings.addCategory("@settings.patchviewer", Icon.settingsSmall, this::bekBuildSettings);
+        });
+    }
+
+    private void registerKeybinds(){
+        if(keybindsRegistered) return;
+        keybindsRegistered = true;
+        quickViewKey = KeyBind.add("patchviewer-quick-view", KeyCode.altLeft, "patchviewer");
+    }
+
+    private void installDialogHook(){
+        try{
+            final ContentInfoDialog originalDialog = Vars.ui == null ? null : Vars.ui.content;
+            Vars.ui.content = new ContentInfoDialog(){
+                @Override
+                public void show(UnlockableContent content){
+                    if(!isPatchViewerEnabled()){
+                        if(originalDialog != null && originalDialog != this){
+                            originalDialog.show(content);
+                        }else{
+                            super.show(content);
+                        }
+                        return;
+                    }
+
+                    // Calling super keeps Vars.ui.content and the visible dialog as the same instance.
+                    super.show(content);
+                    showPatched(this, content);
+                }
+            };
+        }catch(Throwable error){
+            Log.err("[PatchViewer] Failed to hook ContentInfoDialog.", error);
+        }
+    }
+
+    private void setupDefaults(){
+        Core.settings.defaults(
+            keyEnabled, true,
+            keyHiddenEntries, true,
+            keyRemovedColor, defaultRemovedColor,
+            keyModifiedOldColor, defaultModifiedOldColor,
+            keyModifiedNewColor, defaultModifiedNewColor,
+            keyAddedColor, defaultAddedColor,
+            keyQuickDisplayMode, quickModeHud,
+            keyQuickHudOpacity, 70,
+            keyQuickHudWidth, 420,
+            keyQuickHudBackgroundColor, defaultQuickHudBackgroundColor
+        );
+    }
+
+    private void refreshSettingsBackupStorage(){
+        try{
+            Fi backupFolder = Core.settings.getBackupFolder();
+            if(backupFolder == null || !backupFolder.exists()) return;
+            Seq<Fi> backups = backupFolder.seq();
+            backups.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            for(int i = 1; i < backups.size; i++){
+                backups.get(i).delete();
+            }
+        }catch(Throwable error){
+            Log.err("[PatchViewer] Failed to refresh settings_backups storage.", error);
+        }
+    }
+
+    private void captureBaselineAtStartup(){
+        if(Vars.headless) return;
+        if(baselineCaptured || Vars.content == null) return;
+        if(!isPatchViewerEnabled()) return;
+        baselineSnapshots.clear();
+
+        Seq<UnlockableContent> all = collectAllContents();
+        for(UnlockableContent content : all){
+            ContentSnapshot snapshot = snapshot(content);
+            if(snapshot != null) baselineSnapshots.put(content, snapshot);
+        }
+        baselineCaptured = true;
+    }
+
+    private void rebuildAfterSnapshots(){
+        afterSnapshots.clear();
+        diffsByContent.clear();
+        compactDiffsByContent.clear();
+        if(!baselineCaptured) captureBaselineAtStartup();
+        if(Vars.state == null) return;
+
+        Seq<UnlockableContent> all = collectAllContents();
+        for(UnlockableContent content : all){
+            ContentSnapshot before;
+            ContentSnapshot after;
+            try{
+                before = baselineSnapshots.get(content);
+                after = snapshot(content);
+            }catch(Throwable t){
+                Log.debug("[PatchViewer] Failed to snapshot @: @", content.name, Strings.getSimpleMessage(t));
+                continue;
+            }
+            if(after != null) afterSnapshots.put(content, after);
+            if(before == null || after == null) continue;
+
+            ContentDiff diff = diff(before, after);
+            if(diff != null && !diff.isEmpty()){
+                diffsByContent.put(content, diff);
+                CompactDiff compact = buildCompactDiff(content, before, after, diff);
+                if(compact != null && !compact.isEmpty()) compactDiffsByContent.put(content, compact);
+            }
+        }
+
+        refreshHiddenEntries(true);
+    }
+
+    private void updateQuickDisplay(){
+        if(!baselineCaptured && isPatchViewerEnabled()) captureBaselineAtStartup();
+        if(!shouldShowQuickDiff()){
+            hideQuickHud();
+            hideInjectedRows(lastBuildInfoRoot);
+            return;
+        }
+
+        if(isHiddenEntriesEnabled()) refreshHiddenEntries(false);
+        QuickTarget target = findQuickTarget();
+        CompactDiff compact = target == null ? null : compactDiffsByContent.get(target.content);
+        Seq<HiddenEntry> hidden = target == null || !isHiddenEntriesEnabled() ? null : hiddenEntriesByContent.get(target.content);
+        boolean hasCompact = compact != null && !compact.isEmpty();
+        boolean hasHidden = hidden != null && !hidden.isEmpty();
+        if(!hasCompact && !hasHidden){
+            hideQuickHud();
+            hideInjectedRows(lastBuildInfoRoot);
+            return;
+        }
+
+        if(quickModeBuildInfo.equals(readQuickDisplayMode())){
+            hideQuickHud();
+            if(!showBuildInfoDiff(target, compact, hidden)){
+                hideInjectedRows(lastBuildInfoRoot);
+            }
+        }else{
+            hideInjectedRows(lastBuildInfoRoot);
+            showQuickHud(target.content, compact, hidden);
+        }
+    }
+
+    private boolean shouldShowQuickDiff(){
+        if(!isPatchViewerEnabled()) return false;
+        if(quickViewKey == null) registerKeybinds();
+        if(quickViewKey == null || !Core.input.keyDown(quickViewKey)) return false;
+        if(Vars.state == null || !Vars.state.isGame()) return false;
+        if(Core.scene == null) return false;
+        return !Core.scene.hasDialog() && !Core.scene.hasField() && !Core.scene.hasKeyboard();
+    }
+
+    private QuickTarget findQuickTarget(){
+        tryInitPlacementReflection();
+        probeMi2u();
+
+        if(isMi2uReplaceActive()){
+            Building build = getMi2uHoverBuild();
+            Table table = getMi2uBuildt();
+            if(build != null && build.block instanceof UnlockableContent){
+                return new QuickTarget(build.block, table, true);
+            }
+        }
+
+        try{
+            Object pf = Vars.ui == null || Vars.ui.hudfrag == null ? null : Vars.ui.hudfrag.blockfrag;
+            if(pf != null && placementReflectReady){
+                Table topTable = (Table)fieldTopTable.get(pf);
+                Block menuHoverBlock = (Block)fieldMenuHoverBlock.get(pf);
+                if(menuHoverBlock != null){
+                    return new QuickTarget(menuHoverBlock, topTable, false);
+                }
+
+                Displayable hover = (Displayable)fieldHover.get(pf);
+                QuickTarget target = targetFromDisplayable(hover, topTable);
+                if(target != null) return target;
+
+                Displayable hover2 = (Displayable)fieldHover2.get(pf);
+                target = targetFromDisplayable(hover2, topTable);
+                if(target != null) return target;
+            }
+        }catch(Throwable ignored){
+        }
+
+        Building build = findMouseBuilding();
+        if(build != null && build.block instanceof UnlockableContent){
+            return new QuickTarget(build.block, null, false);
+        }
+
+        Unit unit = findMouseUnit();
+        if(unit != null && unit.type != null){
+            return new QuickTarget(unit.type, null, false);
+        }
+        return null;
+    }
+
+    private QuickTarget targetFromDisplayable(Displayable displayable, Table topTable){
+        if(displayable instanceof Building){
+            Building build = (Building)displayable;
+            return build.block instanceof UnlockableContent ? new QuickTarget(build.block, topTable, false) : null;
+        }
+        if(displayable instanceof Unit){
+            Unit unit = (Unit)displayable;
+            return unit.type == null ? null : new QuickTarget(unit.type, topTable, false);
+        }
+        return null;
+    }
+
+    private Building findMouseBuilding(){
+        if(Vars.world == null) return null;
+        try{
+            Tile tile = Vars.world.tileWorld(Core.input.mouseWorldX(), Core.input.mouseWorldY());
+            if(tile == null || tile.build == null) return null;
+            return tile.build;
+        }catch(Throwable ignored){
+            return null;
+        }
+    }
+
+    private Unit findMouseUnit(){
+        if(Vars.control == null || Vars.control.input == null || Vars.player == null) return null;
+        Vec2 pos = Core.input.mouseWorld();
+        if(pos == null) return null;
+        final Unit[] best = {null};
+        final float[] bestDst = {Float.MAX_VALUE};
+        Groups.unit.intersect(pos.x - 48f, pos.y - 48f, 96f, 96f, unit -> {
+            if(unit == null || unit.dead || unit.type == null) return;
+            float radius = Math.max(unit.hitSize + 8f, 12f);
+            float dst = unit.dst2(pos.x, pos.y);
+            if(dst <= radius * radius && dst < bestDst[0]){
+                best[0] = unit;
+                bestDst[0] = dst;
+            }
+        });
+        return best[0];
+    }
+
+    private void showQuickHud(UnlockableContent content, CompactDiff compact, Seq<HiddenEntry> hidden){
+        if(Core.scene == null) return;
+        ensureQuickHud();
+        if(quickHud == null || quickHudPane == null) return;
+        applyQuickHudBackground();
+
+        float width = readQuickHudWidth();
+        if(lastQuickHudContent != content || lastQuickHudHidden != hidden || Math.abs(lastQuickHudWidth - width) > 0.5f){
+            rebuildQuickHudContent(content, compact, hidden);
+            lastQuickHudContent = content;
+            lastQuickHudHidden = hidden;
+            lastQuickHudWidth = width;
+        }
+
+        float margin = 8f;
+        float mouseX = Core.input.mouseX();
+        float mouseY = Core.input.mouseY();
+        quickHudPane.setWidth(width);
+        quickHud.pack();
+        float maxHeight = Math.max(120f, Core.scene.getHeight() - margin * 2f);
+        float height = Math.min(maxHeight, Math.max(60f, quickHud.getPrefHeight()));
+        quickHudPane.setSize(width, height);
+
+        boolean right = mouseX <= Core.scene.getWidth() / 2f;
+        boolean above = mouseY <= Core.scene.getHeight() / 2f;
+        float x = right ? mouseX + margin : mouseX - width - margin;
+        float y = above ? mouseY + margin : mouseY - height - margin;
+        x = Mathf.clamp(x, margin, Math.max(margin, Core.scene.getWidth() - width - margin));
+        y = Mathf.clamp(y, margin, Math.max(margin, Core.scene.getHeight() - height - margin));
+        quickHudPane.setPosition(x, y);
+        quickHudPane.visible = true;
+        quickHudPane.toFront();
+    }
+
+    private void ensureQuickHud(){
+        if(quickHudPane != null && quickHudPane.parent != null) return;
+        if(Core.scene == null || Core.scene.root == null) return;
+
+        quickHud = new Table(Tex.whiteui);
+        quickHud.name = quickHudName;
+        quickHud.left().top().margin(8f);
+        applyQuickHudBackground();
+        quickHudPane = new ScrollPane(quickHud);
+        quickHudPane.setScrollingDisabled(true, false);
+        quickHudPane.setOverscroll(false, false);
+        quickHudPane.name = quickHudName;
+        Core.scene.root.addChild(quickHudPane);
+    }
+
+    private void rebuildQuickHudContent(UnlockableContent content, CompactDiff compact, Seq<HiddenEntry> hidden){
+        quickHud.clearChildren();
+        quickHud.left().top().defaults().left().top();
+        applyQuickHudBackground();
+        float width = readQuickHudWidth() - 20f;
+        quickHud.table(title -> {
+            title.left();
+            title.image(content.uiIcon).size(28f).scaling(Scaling.fit).padRight(6f);
+            Label label = new Label("[accent]" + escape(content.localizedName) + "[]");
+            label.setWrap(true);
+            title.add(label).growX().width(width - 40f);
+        }).growX().fillX().width(width);
+        quickHud.row();
+        addCompactLines(quickHud, compact, width, true);
+        addHiddenLines(quickHud, hidden, width, hiddenEntryLimit);
+    }
+
+    private void applyQuickHudBackground(){
+        if(quickHud == null) return;
+        Color color = new Color(readQuickHudBackgroundColor());
+        color.a = readQuickHudOpacity();
+        quickHud.setColor(color);
+    }
+
+    private boolean showBuildInfoDiff(QuickTarget target, CompactDiff compact, Seq<HiddenEntry> hidden){
+        Table root = target == null ? null : target.topTable;
+        if(root == null) return false;
+        if((compact == null || compact.isEmpty()) && (hidden == null || hidden.isEmpty())) return false;
+        lastBuildInfoRoot = root;
+
+        boolean changed = target.content != lastBuildInfoContent || compact != lastBuildInfoCompact || hidden != lastBuildInfoHidden || root != lastBuildInfoRebuildRoot;
+        lastBuildInfoContent = target.content;
+        lastBuildInfoCompact = compact;
+        lastBuildInfoHidden = hidden;
+        lastBuildInfoRebuildRoot = root;
+
+        Table extra = (Table)root.find(quickBuildInfoName);
+        if(extra == null){
+            extra = new Table();
+            extra.name = quickBuildInfoName;
+            insertBuildInfoTable(root, extra);
+        }
+        extra.visible = true;
+
+        if(!changed) return true;
+
+        extra.clearChildren();
+        extra.left().top().defaults().left().top();
+
+        float width = Math.max(120f, Math.min(420f, root.getWidth() > 0f ? root.getWidth() - 12f : readQuickHudWidth()));
+        extra.table(title -> {
+            title.left();
+            title.add("[accent]" + escape(target.content.localizedName) + "[]").left().wrap().width(width);
+        }).left().width(width).padTop(3f);
+        extra.row();
+        addCompactLines(extra, compact, width, false);
+        addHiddenLines(extra, hidden, width, hiddenBuildInfoLimit);
+        return true;
+    }
+
+    private void insertBuildInfoTable(Table root, Table extra){
+        int rows = 0;
+        try{
+            for(Cell cell : root.getCells()){
+                if(cell != null && cell.get() != null) rows++;
+            }
+        }catch(Throwable ignored){
+        }
+        if(rows > 0) root.row();
+        root.add(extra).left().top().growX().fillX().colspan(4).padTop(3f);
+    }
+
+    private void addCompactLines(Table table, CompactDiff compact, float width, boolean withHeaders){
+        if(compact == null) return;
+        boolean addedHeader = false;
+        boolean modifiedHeader = false;
+        boolean removedHeader = false;
+        for(CompactChange change : compact.ordered){
+            if(change == null) continue;
+            if(withHeaders){
+                if(change.bucket == CompactBucket.ADDED && !addedHeader){
+                    addCompactHeader(table, bundle("patchviewer.quick.added", "Added"), width);
+                    addedHeader = true;
+                }else if(change.bucket == CompactBucket.MODIFIED && !modifiedHeader){
+                    addCompactHeader(table, bundle("patchviewer.quick.modified", "Modified"), width);
+                    modifiedHeader = true;
+                }else if(change.bucket == CompactBucket.REMOVED && !removedHeader){
+                    addCompactHeader(table, bundle("patchviewer.quick.removed", "Removed"), width);
+                    removedHeader = true;
+                }
+            }
+            addCompactChangeLine(table, change, width);
+        }
+    }
+
+    private void addCompactChangeLine(Table table, CompactChange change, float width){
+        if(table == null || change == null) return;
+        if(renderCompactStackDiff(table, change, width)) return;
+        String markup = compactChangeMarkup(change);
+        if(markup == null || markup.isEmpty()) return;
+        addCompactLine(table, markup, width);
+    }
+
+    private String compactChangeMarkup(CompactChange change){
+        if(change == null) return null;
+        String label = escape(change.label == null ? "" : change.label);
+        String left = change.before;
+        String right = change.after;
+        String separator = ": ";
+        String modifiedSeparator = ": []";
+        if(change.bucket == CompactBucket.ADDED){
+            return addedColorTag() + "+[]" + label + separator + addedColorTag() + escape(formatCompactValue(right, change.kind)) + "[]";
+        }
+        if(change.bucket == CompactBucket.REMOVED){
+            return removedColorTag() + label + separator + removedColorTag() + escape(formatCompactValue(left, change.kind)) + "[]";
+        }
+        String oldValue = formatCompactValue(left, change.kind);
+        String newValue = formatCompactValue(right, change.kind);
+        return "[lightgray]" + label + modifiedSeparator
+            + modifiedOldColorTag() + escape(oldValue) + breakArrow(oldValue, newValue)
+            + modifiedNewColorTag() + escape(newValue) + "[]";
+    }
+
+    private void addCompactHeader(Table table, String text, float width){
+        Label label = new Label("[accent]" + escape(text) + "[]", Styles.outlineLabel);
+        label.setFontScale(1.35f);
+        label.setWrap(true);
+        label.setEllipsis(false);
+        table.add(label).left().width(width).growX().fillX().padTop(8f).row();
+    }
+
+    private void addCompactLine(Table table, String text, float width){
+        if(text == null) return;
+        String normalized = compactDisplayText(text);
+        if(normalized == null || normalized.isEmpty()) return;
+        Seq<String> lines = splitCompactDisplayLines(normalized);
+        for(String lineText : lines){
+            if(lineText == null || Strings.stripColors(lineText).trim().isEmpty()) continue;
+            Table line = new Table();
+            line.left().top().defaults().left().top();
+            addCompactInline(line, lineText, width);
+            table.add(line).left().top().width(width).growX().fillX();
+            table.row();
+        }
+    }
+
+    private String compactDisplayText(String text){
+        String cleaned = (text == null ? "" : text)
+            .replace("<Image>", "")
+            .replace("<Stack>", "")
+            .replace("<Collapser>", "")
+            .replaceAll("[ \\t]{2,}", " ")
+            .trim();
+        if(Strings.stripColors(cleaned).isEmpty()) return "";
+        return cleaned;
+    }
+
+    private Seq<String> splitCompactDisplayLines(String text){
+        Seq<String> lines = new Seq<>();
+        if(text == null) return lines;
+        StringBuilder line = new StringBuilder();
+        String activeColor = "";
+        for(int i = 0; i < text.length(); i++){
+            char ch = text.charAt(i);
+            if(ch == '\n'){
+                lines.add(line.toString());
+                line.setLength(0);
+                if(!activeColor.isEmpty()) line.append(activeColor);
+                continue;
+            }
+            if(ch == '['){
+                if(i + 1 < text.length() && text.charAt(i + 1) == '['){
+                    line.append("[[");
+                    i++;
+                    continue;
+                }
+                int close = text.indexOf(']', i + 1);
+                if(close >= 0){
+                    String tag = text.substring(i, close + 1);
+                    line.append(tag);
+                    activeColor = "[]".equals(tag) ? "" : tag;
+                    i = close;
+                    continue;
+                }
+            }
+            line.append(ch);
+        }
+        lines.add(line.toString());
+        return lines;
+    }
+
+    private void addCompactInline(Table table, String text, float width){
+        if(table == null || text == null) return;
+        boolean hasIcon = findIconMatch(text, 0) != null;
+        if(!hasIcon){
+            addCompactTextSegment(table, text, width, "", true);
+            return;
+        }
+        boolean keepPlainIconsInline = shouldKeepPlainIconsInline(text);
+        int index = 0;
+        boolean added = false;
+        float[] usedWidth = {0f};
+        boolean[] rowHasContent = {false};
+        while(index < text.length()){
+            ContentMatch match = findIconMatch(text, index);
+            if(match == null){
+                added |= addCompactTextSegment(table, text.substring(index), width, activeColorPrefix(text, index), false, usedWidth, rowHasContent);
+                break;
+            }
+            if(match.start > index){
+                added |= addCompactTextSegment(table, text.substring(index, match.start), width, activeColorPrefix(text, index), false, usedWidth, rowHasContent);
+            }
+            String activeColor = activeColorPrefix(text, match.start);
+            StackAmount amount = parseStackAmount(text, match.end, match.content);
+            if(amount != null){
+                Element stackView = compactStackView(match.content, amount.amountText, activeColor);
+                addCompactElement(table, stackView, width, usedWidth, rowHasContent, 4f, added ? 2f : 0f);
+                added = true;
+                index = amount.end;
+                continue;
+            }
+
+            int consumedLabel = consumeIconLabelTail(text, match.end, match.content);
+            if(consumedLabel != match.end){
+                Element iconView = compactNamedIconView(match.content, activeColor, keepPlainIconsInline ? 24f : 16f);
+                addCompactElement(table, iconView, width, usedWidth, rowHasContent, keepPlainIconsInline ? 5f : 3f, added ? 2f : 0f, !keepPlainIconsInline);
+            }else{
+                Image image = new Image(match.content.uiIcon);
+                image.setScaling(Scaling.fit);
+                image.setColor(Color.white);
+                image.update(() -> image.setColor(Color.white));
+                float iconSize = compactIconSize(match.content, keepPlainIconsInline ? 24f : 16f);
+                addCompactImage(table, image, width, usedWidth, rowHasContent, keepPlainIconsInline ? 5f : 3f, added ? 2f : 0f, !keepPlainIconsInline, iconSize);
+            }
+            added = true;
+            index = consumedLabel == match.end ? match.end : consumedLabel;
+        }
+        if(!added){
+            addCompactTextSegment(table, text, width, "", true);
+        }
+    }
+
+    private boolean shouldKeepPlainIconsInline(String text){
+        if(text == null) return false;
+        boolean hasPlainIcon = false;
+        int index = 0;
+        while(index < text.length()){
+            ContentMatch match = findIconMatch(text, index);
+            if(match == null) break;
+            if(parseStackAmount(text, match.end, match.content) != null) return false;
+            hasPlainIcon = true;
+            index = match.end;
+        }
+        return hasPlainIcon;
+    }
+
+    private boolean addCompactTextSegment(Table table, String text, float width, String activeColor, boolean wrap){
+        return addCompactTextSegment(table, text, width, activeColor, wrap, null, null);
+    }
+
+    private boolean addCompactTextSegment(Table table, String text, float width, String activeColor, boolean wrap, float[] usedWidth, boolean[] rowHasContent){
+        if(table == null || text == null) return false;
+        String visible = Strings.stripColors(text).replace("[[", "[").trim();
+        if(visible.isEmpty()) return false;
+        String markup = (activeColor == null ? "" : activeColor) + text;
+        Label label = new Label(markup);
+        label.setWrap(wrap);
+        label.setEllipsis(false);
+        if(!wrap && usedWidth != null && rowHasContent != null){
+            if(shouldWrapCompactTextSegment(label, visible, width, usedWidth[0])){
+                if(rowHasContent[0]){
+                    table.row();
+                }
+                label.setWrap(true);
+                table.add(label).left().top().growX().fillX().width(Math.max(1f, width - 4f));
+                table.row();
+                usedWidth[0] = 0f;
+                rowHasContent[0] = false;
+                return true;
+            }
+            addCompactElement(table, label, width, usedWidth, rowHasContent, 0f, 0f, !isArrowSegment(visible));
+            return true;
+        }
+        Cell<Label> cell = table.add(label).left().top();
+        if(wrap){
+            cell.growX().fillX().width(Math.max(1f, width - 20f));
+        }
+        return true;
+    }
+
+    private boolean shouldWrapCompactTextSegment(Label label, String visible, float width, float usedWidth){
+        if(label == null || visible == null || isArrowSegment(visible)) return false;
+        float availableWidth = Math.max(1f, width - 4f - Math.max(0f, usedWidth));
+        return visible.indexOf('\n') >= 0 || compactElementWidth(label) > availableWidth;
+    }
+
+    private void addCompactElement(Table table, Element element, float width, float[] usedWidth, boolean[] rowHasContent, float padRight, float padLeft){
+        addCompactElement(table, element, width, usedWidth, rowHasContent, padRight, padLeft, true);
+    }
+
+    private void addCompactElement(Table table, Element element, float width, float[] usedWidth, boolean[] rowHasContent, float padRight, float padLeft, boolean allowWrapBefore){
+        if(table == null || element == null) return;
+        float elementWidth = compactElementWidth(element) + padLeft + padRight;
+        if(allowWrapBefore && rowHasContent != null && usedWidth != null && rowHasContent[0] && usedWidth[0] + elementWidth > Math.max(40f, width - 4f)){
+            table.row();
+            usedWidth[0] = 0f;
+            rowHasContent[0] = false;
+            padLeft = 0f;
+            elementWidth = compactElementWidth(element) + padRight;
+        }
+        table.add(element).padRight(padRight).padLeft(padLeft).top();
+        if(usedWidth != null) usedWidth[0] += elementWidth;
+        if(rowHasContent != null) rowHasContent[0] = true;
+    }
+
+    private void addCompactImage(Table table, Image image, float width, float[] usedWidth, boolean[] rowHasContent, float padRight, float padLeft){
+        addCompactImage(table, image, width, usedWidth, rowHasContent, padRight, padLeft, true, 16f);
+    }
+
+    private void addCompactImage(Table table, Image image, float width, float[] usedWidth, boolean[] rowHasContent, float padRight, float padLeft, boolean allowWrapBefore, float size){
+        if(table == null || image == null) return;
+        image.setColor(Color.white);
+        float iconSize = Math.max(1f, size);
+        float elementWidth = iconSize + padLeft + padRight;
+        if(allowWrapBefore && rowHasContent != null && usedWidth != null && rowHasContent[0] && usedWidth[0] + elementWidth > Math.max(40f, width - 4f)){
+            table.row();
+            usedWidth[0] = 0f;
+            rowHasContent[0] = false;
+            padLeft = 0f;
+            elementWidth = iconSize + padRight;
+        }
+        table.add(image).size(iconSize).scaling(Scaling.fit).padRight(padRight).padLeft(padLeft).top();
+        if(usedWidth != null) usedWidth[0] += elementWidth;
+        if(rowHasContent != null) rowHasContent[0] = true;
+    }
+
+    private float compactElementWidth(Element element){
+        if(element == null) return 0f;
+        element.pack();
+        float width = Math.max(element.getPrefWidth(), element.getWidth());
+        return width <= 0f ? 20f : width;
+    }
+
+    private boolean isArrowSegment(String text){
+        return text != null && Strings.stripColors(text).trim().equals("->");
+    }
+
+    private float compactIconSize(UnlockableContent content, float fallbackSize){
+        return content instanceof UnitType
+            ? calcUnitStatIconSize((UnitType)content)
+            : fallbackSize;
+    }
+
+    private Element compactStackView(UnlockableContent content, String amountText, String amountColorTag){
+        if(content == null) return new Table();
+        Element out;
+        boolean perSecond = compactAmountPerSecond(amountText);
+        float amount = compactAmountValue(amountText);
+        if(content instanceof mindustry.type.Liquid){
+            out = StatValues.displayLiquid((mindustry.type.Liquid)content, amount, perSecond);
+        }else if(content instanceof mindustry.type.Item){
+            int rounded = Math.max(0, Math.round(amount));
+            mindustry.type.Item item = (mindustry.type.Item)content;
+            out = perSecond
+                ? StatValues.displayItem(item, rounded, 60f, true)
+                : StatValues.displayItem(item, rounded, true);
+        }else{
+            Table named = new Table();
+            named.left().top();
+            Image image = new Image(content.uiIcon);
+            image.setScaling(Scaling.fit);
+            image.setColor(Color.white);
+            named.add(image).size(compactIconSize(content, 24f)).scaling(Scaling.fit).top();
+            if(amountText != null && !amountText.isEmpty()){
+                named.add((amountColorTag == null ? "" : amountColorTag) + escape(formatCompactStackAmount(amountText)) + "[]", Styles.outlineLabel).padLeft(3f).top();
+            }
+            named.add(content.localizedName).padLeft(4f).top();
+            out = named;
+        }
+        colorStackAmountLabels(out, amountColorTag);
+        return out;
+    }
+
+    private Element compactNamedIconView(UnlockableContent content, String colorTag, float size){
+        Table out = new Table();
+        out.left().top();
+        Image image = new Image(content.uiIcon);
+        image.setScaling(Scaling.fit);
+        image.setColor(Color.white);
+        out.add(image).size(compactIconSize(content, size)).scaling(Scaling.fit).top();
+        if(content.localizedName != null && !content.localizedName.isEmpty()){
+            Label name = new Label((colorTag == null ? "" : colorTag) + escape(content.localizedName) + "[]", Styles.outlineLabel);
+            name.setWrap(true);
+            name.setEllipsis(false);
+            // Same zero preferred width as other wrap labels: without a floor the compact flow
+            // measures this view as icon-only and later segments overlap the name.
+            out.add(name).padLeft(4f).top().minWidth(Math.max(1f, measureMarkupWidth(escape(content.localizedName))));
+        }
+        return out;
+    }
+
+    private boolean compactAmountPerSecond(String text){
+        if(text == null) return false;
+        String normalized = text.toLowerCase(Locale.ROOT);
+        return normalized.contains("/s") || normalized.contains("/秒");
+    }
+
+    private float compactAmountValue(String text){
+        if(text == null || text.isEmpty()) return 0f;
+        String value = text;
+        int slash = value.indexOf('/');
+        if(slash >= 0) value = value.substring(0, slash);
+        float multiplier = 1f;
+        if(value.endsWith("k") || value.endsWith("K")){
+            multiplier = 1000f;
+            value = value.substring(0, value.length() - 1);
+        }else if(value.endsWith("M")){
+            multiplier = 1_000_000f;
+            value = value.substring(0, value.length() - 1);
+        }else if(value.endsWith("B")){
+            multiplier = 1_000_000_000f;
+            value = value.substring(0, value.length() - 1);
+        }
+        try{
+            return Float.parseFloat(value.trim()) * multiplier;
+        }catch(Throwable ignored){
+            return 0f;
+        }
+    }
+
+    private String formatCompactStackAmount(String text){
+        if(text == null) return "";
+        String cleaned = text.trim();
+        if(cleaned.isEmpty()) return cleaned;
+        try{
+            float value = Float.parseFloat(cleaned);
+            if(Math.abs(value) >= 1000f){
+                return String.format(Locale.ROOT, "%.1fK", value / 1000f);
+            }
+        }catch(Throwable ignored){
+        }
+        return cleaned;
+    }
+
+    private String activeColorPrefix(String text, int end){
+        if(text == null || end <= 0) return "";
+        String active = "";
+        int limit = Math.min(end, text.length());
+        for(int i = 0; i < limit; i++){
+            char ch = text.charAt(i);
+            if(ch != '[') continue;
+            if(i + 1 < limit && text.charAt(i + 1) == '['){
+                i++;
+                continue;
+            }
+            int close = text.indexOf(']', i + 1);
+            if(close < 0 || close >= limit) continue;
+            String tag = text.substring(i, close + 1);
+            active = "[]".equals(tag) ? "" : tag;
+            i = close;
+        }
+        return active;
+    }
+
+    private StackAmount parseStackAmount(String text, int start, UnlockableContent content){
+        if(text == null) return null;
+        int i = skipCompactNoise(text, start);
+        if(i >= text.length()) return null;
+        i = consumeContentName(text, i, content);
+        i = skipCompactNoise(text, i);
+        if(i >= text.length()) return null;
+        char prefix = text.charAt(i);
+        if(prefix == 'x' || prefix == 'X' || prefix == '×'){
+            i++;
+            i = skipCompactNoise(text, i);
+        }
+        int numberStart = i;
+        i = consumeCompactNumberEnd(text, numberStart);
+        if(i < 0) return null;
+        try{
+            String amountText = text.substring(numberStart, i);
+            RateSuffix directRate = consumeRateSuffix(text, i, content);
+            if(directRate != null){
+                return new StackAmount(amountText + directRate.suffix, directRate.end, "");
+            }
+
+            CompactAmountSuffix amountSuffix = consumeCompactAmountSuffix(text, i);
+            int valueEnd = amountSuffix == null ? i : amountSuffix.end;
+            if(amountSuffix != null) amountText += amountSuffix.suffix;
+            int end = consumeContentName(text, valueEnd, content);
+            if(end != valueEnd){
+                RateAmount rateAmount = consumeRateAmount(text, end, content);
+                if(rateAmount != null){
+                    return new StackAmount(rateAmount.amountText + rateAmount.suffix, rateAmount.end, "");
+                }
+                return new StackAmount(amountText, end, "");
+            }
+            return new StackAmount(amountText, valueEnd, "");
+        }catch(Throwable ignored){
+            return null;
+        }
+    }
+
+    private int consumeContentName(String text, int start, UnlockableContent content){
+        if(text == null || content == null) return start;
+        int i = skipCompactNoise(text, start);
+        int end = consumeContentNameAlias(text, i, content.localizedName);
+        if(end >= 0) return skipCompactNoise(text, end);
+        end = consumeContentNameAlias(text, i, content.name);
+        if(end >= 0) return skipCompactNoise(text, end);
+        return start;
+    }
+
+    private int consumeIconLabelTail(String text, int start, UnlockableContent content){
+        int end = consumeContentName(text, start, content);
+        if(end == start) return start;
+        int i = skipCompactNoise(text, end);
+        while(i < text.length() && text.charAt(i) == '?'){
+            i = skipCompactNoise(text, i + 1);
+        }
+        return i;
+    }
+
+    private String normalizeStackCompactText(String text){
+        if(text == null) return null;
+        StringBuilder out = new StringBuilder();
+        int index = 0;
+        while(index < text.length()){
+            ContentMatch match = findIconMatch(text, index);
+            if(match == null) break;
+
+            if(out.length() > 0) out.append(' ');
+            out.append(iconToken(match.content));
+
+            StackAmount amount = parseStackAmount(text, match.end, match.content);
+            if(amount != null && amount.amountText != null && !amount.amountText.isEmpty()){
+                out.append(' ').append(amount.amountText);
+                if(amount.suffix != null && !amount.suffix.isEmpty()){
+                    out.append(amount.suffix);
+                }
+                index = Math.max(amount.end, match.end);
+            }else{
+                int consumed = consumeIconLabelTail(text, match.end, match.content);
+                index = consumed == match.end ? match.end : consumed;
+            }
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    private int consumeContentNameAlias(String text, int start, String name){
+        if(text == null || name == null || name.isEmpty()) return -1;
+        return start + name.length() <= text.length() && text.startsWith(name, start) ? start + name.length() : -1;
+    }
+
+    private int skipCompactNoise(String text, int start){
+        if(text == null) return Math.max(0, start);
+        int i = Math.max(0, start);
+        while(i < text.length()){
+            char ch = text.charAt(i);
+            if(Character.isWhitespace(ch)){
+                i++;
+                continue;
+            }
+            if(ch == '[' && !(i + 1 < text.length() && text.charAt(i + 1) == '[')){
+                int close = text.indexOf(']', i + 1);
+                if(close >= 0){
+                    i = close + 1;
+                    continue;
+                }
+            }
+            break;
+        }
+        return i;
+    }
+
+    private int consumeCompactNumberEnd(String text, int start){
+        if(text == null) return -1;
+        int i = skipCompactNoise(text, start);
+        int numberStart = i;
+        while(i < text.length() && Character.isDigit(text.charAt(i))) i++;
+        if(i < text.length() && text.charAt(i) == '.'){
+            int dot = i++;
+            while(i < text.length() && Character.isDigit(text.charAt(i))) i++;
+            if(i == dot + 1) i = dot;
+        }
+        return i == numberStart ? -1 : i;
+    }
+
+    private CompactAmountSuffix consumeCompactAmountSuffix(String text, int start){
+        if(text == null) return null;
+        int i = Math.max(0, start);
+        while(i < text.length() && text.charAt(i) == '['){
+            int close = text.indexOf(']', i + 1);
+            if(close < 0) break;
+            i = close + 1;
+        }
+
+        String[][] candidates = {
+            {"k", "k"}, {"K", "k"}, {"M", "M"}, {"B", "B"},
+            {"千", "k"}, {"万", "k"}, {"百万", "M"}, {"亿", "B"}
+        };
+        if(Core.bundle != null){
+            candidates = new String[][]{
+                {Core.bundle.get("unit.thousands", "k"), "k"},
+                {Core.bundle.get("unit.millions", "M"), "M"},
+                {Core.bundle.get("unit.billions", "B"), "B"},
+                {"k", "k"}, {"K", "k"}, {"M", "M"}, {"B", "B"},
+                {"千", "k"}, {"万", "k"}, {"百万", "M"}, {"亿", "B"}
+            };
+        }
+        for(String[] candidate : candidates){
+            if(candidate[0] != null && !candidate[0].isEmpty() && text.startsWith(candidate[0], i)){
+                return new CompactAmountSuffix(candidate[1], skipCompactNoise(text, i + candidate[0].length()));
+            }
+        }
+        return null;
+    }
+
+    private RateAmount consumeRateAmount(String text, int start, UnlockableContent content){
+        if(text == null) return null;
+        int numberStart = skipCompactNoise(text, start);
+        int i = consumeCompactNumberEnd(text, numberStart);
+        if(i < 0) return null;
+        RateSuffix suffix = consumeRateSuffix(text, i, content);
+        if(suffix == null) return null;
+        return new RateAmount(text.substring(numberStart, i), suffix.suffix, suffix.end);
+    }
+
+    private RateSuffix consumeRateSuffix(String text, int start, UnlockableContent content){
+        if(text == null) return null;
+        int i = skipCompactNoise(text, start);
+        if(i >= text.length() || text.charAt(i) != '/') return null;
+        int suffixStart = skipCompactNoise(text, i + 1);
+        int suffixEnd = suffixStart;
+        if(suffixEnd < text.length() && text.charAt(suffixEnd) == '秒'){
+            suffixEnd++;
+        }else if(suffixEnd + 3 <= text.length() && text.regionMatches(true, suffixEnd, "sec", 0, 3)){
+            suffixEnd += 3;
+        }else if(suffixEnd < text.length() && (text.charAt(suffixEnd) == 's' || text.charAt(suffixEnd) == 'S')){
+            suffixEnd++;
+        }else{
+            return null;
+        }
+        int end = consumeContentName(text, suffixEnd, content);
+        if(end == suffixEnd) end = skipCompactNoise(text, suffixEnd);
+        return new RateSuffix("/s", end);
+    }
+
+    private ContentMatch findIconMatch(String text, int start){
+        if(text == null || Vars.content == null) return null;
+        int at = text.indexOf(iconTokenPrefix, Math.max(start, 0));
+        while(at >= 0){
+            int end = text.indexOf('>', at + iconTokenPrefix.length());
+            if(end < 0) return null;
+            UnlockableContent content = contentFromIconToken(text.substring(at, end + 1));
+            if(content != null && content.uiIcon != null){
+                return new ContentMatch(content, at, end + 1);
+            }
+            at = text.indexOf(iconTokenPrefix, end + 1);
+        }
+        return null;
+    }
+
+    private String iconToken(UnlockableContent content){
+        if(content == null) return "";
+        return iconTokenPrefix + content.getContentType().name() + ":" + content.id + ">";
+    }
+
+    private UnlockableContent contentFromIconToken(String token){
+        if(token == null || !token.startsWith(iconTokenPrefix) || !token.endsWith(">") || Vars.content == null) return null;
+        String body = token.substring(iconTokenPrefix.length(), token.length() - 1);
+        int split = body.indexOf(':');
+        if(split <= 0 || split >= body.length() - 1) return null;
+        try{
+            ContentType type = ContentType.valueOf(body.substring(0, split));
+            int id = Integer.parseInt(body.substring(split + 1));
+            Content content = Vars.content.getByID(type, id);
+            return content instanceof UnlockableContent ? (UnlockableContent)content : null;
+        }catch(Throwable ignored){
+            return null;
+        }
+    }
+
+    private Seq<UnlockableContent> iconContentTargets(){
+        Seq<UnlockableContent> result = new Seq<>();
+        if(Vars.content == null) return result;
+        for(ContentType type : new ContentType[]{ContentType.item, ContentType.liquid, ContentType.block, ContentType.unit}){
+            Seq<Content> seq = Vars.content.getBy(type);
+            if(seq == null) continue;
+            for(Content raw : seq){
+                if(raw instanceof UnlockableContent) result.add((UnlockableContent)raw);
+            }
+        }
+        result.sort((a, b) -> {
+            int al = a == null || a.localizedName == null ? 0 : a.localizedName.length();
+            int bl = b == null || b.localizedName == null ? 0 : b.localizedName.length();
+            return Integer.compare(bl, al);
+        });
+        return result;
+    }
+
+    private void hideQuickHud(){
+        if(quickHudPane != null) quickHudPane.visible = false;
+        lastQuickHudContent = null;
+        lastQuickHudHidden = null;
+        lastQuickHudWidth = -1f;
+    }
+
+    private void hideInjectedRows(Table root){
+        lastBuildInfoContent = null;
+        lastBuildInfoCompact = null;
+        lastBuildInfoHidden = null;
+        lastBuildInfoRebuildRoot = null;
+        if(root == null) return;
+        try{
+            Element extra = root.find(quickBuildInfoName);
+            if(extra instanceof Table){
+                Table table = (Table)extra;
+                table.clearChildren();
+                table.visible = false;
+            }
+        }catch(Throwable ignored){
+        }
+    }
+
+    private void tryInitPlacementReflection(){
+        if(placementReflectReady) return;
+        try{
+            Class<?> cls = Class.forName("mindustry.ui.fragments.PlacementFragment");
+            fieldTopTable = cls.getDeclaredField("topTable");
+            fieldHover = cls.getDeclaredField("hover");
+            fieldHover2 = cls.getDeclaredField("hover2");
+            fieldMenuHoverBlock = cls.getDeclaredField("menuHoverBlock");
+            fieldTopTable.setAccessible(true);
+            fieldHover.setAccessible(true);
+            fieldHover2.setAccessible(true);
+            fieldMenuHoverBlock.setAccessible(true);
+            placementReflectReady = true;
+        }catch(Throwable ignored){
+            placementReflectReady = false;
+        }
+    }
+
+    private void probeMi2u(){
+        if(mi2uAvailable || mi2uClassMissing) return;
+        try{
+            Class<?> vars = Class.forName("mi2u.MI2UVars");
+            Field varsField = vars.getDeclaredField("mi2ui");
+            varsField.setAccessible(true);
+            Object instance = varsField.get(null);
+            if(instance == null) return;
+
+            Class<?> mindow2 = Class.forName("mi2u.ui.elements.Mindow2");
+            Field settingsField = mindow2.getDeclaredField("settings");
+            settingsField.setAccessible(true);
+            Class<?> settingHandler = Class.forName("mi2u.io.SettingHandler");
+            java.lang.reflect.Method getBool = settingHandler.getMethod("getBool", String.class);
+
+            Class<?> hover = Class.forName("mi2u.ui.HoverTopTable");
+            Field hoverInfoField = hover.getDeclaredField("hoverInfo");
+            hoverInfoField.setAccessible(true);
+            Field buildField = hover.getDeclaredField("build");
+            buildField.setAccessible(true);
+            Field buildtField = hover.getDeclaredField("buildt");
+            buildtField.setAccessible(true);
+
+            mi2uMi2uiInstance = instance;
+            mi2uMi2uiSettingsField = settingsField;
+            mi2uSettingsGetBool = getBool;
+            mi2uHoverInfoField = hoverInfoField;
+            mi2uHoverBuildField = buildField;
+            mi2uHoverBuildtField = buildtField;
+            mi2uAvailable = true;
+        }catch(ClassNotFoundException | NoClassDefFoundError missing){
+            mi2uClassMissing = true;
+        }catch(Throwable ignored){
+        }
+    }
+
+    private boolean isMi2uReplaceActive(){
+        if(!mi2uAvailable) return false;
+        try{
+            Object handler = mi2uMi2uiSettingsField.get(mi2uMi2uiInstance);
+            if(handler == null) return false;
+            Object value = mi2uSettingsGetBool.invoke(handler, "replaceTopTable");
+            return value instanceof Boolean && (Boolean)value;
+        }catch(Throwable ignored){
+            return false;
+        }
+    }
+
+    private Building getMi2uHoverBuild(){
+        if(!mi2uAvailable) return null;
+        try{
+            Object hoverInfo = mi2uHoverInfoField.get(null);
+            if(hoverInfo == null) return null;
+            Object build = mi2uHoverBuildField.get(hoverInfo);
+            return build instanceof Building ? (Building)build : null;
+        }catch(Throwable ignored){
+            return null;
+        }
+    }
+
+    private Table getMi2uBuildt(){
+        if(!mi2uAvailable) return null;
+        try{
+            Object hoverInfo = mi2uHoverInfoField.get(null);
+            if(hoverInfo == null) return null;
+            Object buildt = mi2uHoverBuildtField.get(hoverInfo);
+            return buildt instanceof Table ? (Table)buildt : null;
+        }catch(Throwable ignored){
+            return null;
+        }
+    }
+
+    private Seq<UnlockableContent> collectAllContents(){
+        Seq<UnlockableContent> result = new Seq<>();
+        for(ContentType type : ContentType.all){
+            if(type.name().indexOf('_') != -1) continue;
+            Seq<Content> seq = Vars.content.getBy(type);
+            if(seq == null) continue;
+            for(Content raw : seq){
+                if(raw instanceof UnlockableContent) result.add((UnlockableContent)raw);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Rebuilds the hidden-entry cache from the game's datapatch records. This is read-only: it never
+     * un-applies or re-applies patches. Only blocks (and their direct DrawBlock/BulletType children)
+     * are considered; everything else is silently ignored.
+     */
+    private void refreshHiddenEntries(boolean force){
+        if(!isHiddenEntriesEnabled()){
+            clearHiddenEntries();
+            return;
+        }
+        if(!force){
+            if(++hiddenRefreshTicker < hiddenRefreshFrames) return;
+            hiddenRefreshTicker = 0;
+        }
+
+        try{
+            if(Vars.state == null || !Vars.state.isGame() || Vars.headless){
+                clearHiddenEntries();
+                return;
+            }
+
+            Object data = Reflector.get(Vars.state, "data");
+            Object patcher = data == null ? Reflector.get(Vars.state, "patcher") : Reflector.get(data, "patcher");
+            if(patcher == null){
+                warnHiddenPatcherOnce();
+                clearHiddenEntries();
+                return;
+            }
+
+            Object used = Reflector.get(patcher, "usedpatches");
+            if(!(used instanceof Iterable)){
+                warnHiddenPatcherOnce();
+                clearHiddenEntries();
+                return;
+            }
+
+            long signature = 31L * System.identityHashCode(patcher) + 17L;
+            for(Object item : (Iterable<?>)used){
+                signature = signature * 1099511628211L + System.identityHashCode(item);
+            }
+            boolean signatureChanged = !hiddenCacheReady || signature != hiddenCacheSignature;
+            if(!force && !signatureChanged) return;
+            if(signatureChanged) hiddenOwnerIndex = null;
+
+            hiddenEntriesByContent.clear();
+            hiddenCacheSignature = signature;
+            hiddenCacheReady = true;
+
+            ObjectMap<Object, Seq<HiddenOwner>> owners = null;
+            for(Object item : (Iterable<?>)used){
+                HiddenPatchRecord record = hiddenPatchRecord(item);
+                if(record == null) continue;
+
+                Block block;
+                String path;
+                if(record.target instanceof Block){
+                    block = (Block)record.target;
+                    path = record.field.getName();
+                }else if(record.target instanceof ConsumePower || record.target instanceof DrawBlock || record.target instanceof BulletType){
+                    if(owners == null) owners = hiddenOwnerIndex();
+                    if(owners == null) continue;
+                    Seq<HiddenOwner> candidates = owners.get(record.target);
+                    if(candidates == null || candidates.size != 1) continue;
+                    HiddenOwner owner = candidates.first();
+                    if(!(owner.content instanceof Block)) continue;
+                    block = (Block)owner.content;
+                    path = owner.fieldName + "." + record.field.getName();
+                }else{
+                    continue;
+                }
+
+                if(isHiddenDeniedField(record.field.getName())) continue;
+
+                Object value;
+                try{
+                    record.field.setAccessible(true);
+                    value = record.field.get(record.target);
+                }catch(Throwable ignored){
+                    continue;
+                }
+                if(hiddenValuesEqual(record.oldValue, value)) continue;
+
+                boolean container = isHiddenContainer(record.oldValue) || isHiddenContainer(value);
+                String beforeText = container ? null : hiddenValueText(record.oldValue);
+                String afterText = container ? null : hiddenValueText(value);
+                if(!container && (beforeText == null || afterText == null || beforeText.equals(afterText))){
+                    // Opaque values and changes that round to the same text are summarized instead of
+                    // rendering "changed -> changed" or "5 -> 5".
+                    container = true;
+                    beforeText = null;
+                    afterText = null;
+                }
+
+                Stat mapped = hiddenStatFor(record);
+                if(hiddenStatAlreadyShown(block, mapped)) continue;
+                // A patched PowerTurret bullet is already visible in the ammo panel.
+                if(mapped == null && record.target instanceof BulletType && path.startsWith("shootType.")
+                    && hiddenStatAlreadyShown(block, Stat.ammo)) continue;
+
+                String label = hiddenLabel(mapped, path);
+                HiddenEntry entry = new HiddenEntry(path, label, beforeText, afterText, container);
+
+                Seq<HiddenEntry> entries = hiddenEntriesByContent.get(block);
+                if(entries == null){
+                    entries = new Seq<>();
+                    hiddenEntriesByContent.put(block, entries);
+                }
+                boolean duplicate = false;
+                for(HiddenEntry existing : entries){
+                    if(existing != null && existing.path.equals(path)){
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if(!duplicate) entries.add(entry);
+            }
+
+            for(Seq<HiddenEntry> entries : hiddenEntriesByContent.values()){
+                entries.sort((a, b) -> a.path.compareTo(b.path));
+            }
+        }catch(Throwable error){
+            Log.debug("[PatchViewer] Failed to read hidden datapatch entries: @", Strings.getSimpleMessage(error));
+            clearHiddenEntries();
+        }
+    }
+
+    private void clearHiddenEntries(){
+        hiddenEntriesByContent.clear();
+        hiddenCacheSignature = 0L;
+        hiddenCacheReady = false;
+    }
+
+    private void warnHiddenPatcherOnce(){
+        if(hiddenPatcherWarned) return;
+        hiddenPatcherWarned = true;
+        Log.warn("[PatchViewer] Datapatch internals were not found; hidden-field differences are disabled.");
+    }
+
+    private HiddenPatchRecord hiddenPatchRecord(Object item){
+        if(item == null || item instanceof Content) return null;
+        Object field = Reflector.get(item, "field");
+        if(!(field instanceof Field)) return null;
+        Object target = Reflector.get(item, "target");
+        if(target == null) return null;
+        return new HiddenPatchRecord(target, (Field)field, Reflector.get(item, "value"));
+    }
+
+    /** Indexes direct child objects of every block so one-level nested records can be attributed. */
+    private ObjectMap<Object, Seq<HiddenOwner>> hiddenOwnerIndex(){
+        if(hiddenOwnerIndex != null) return hiddenOwnerIndex;
+        if(hiddenOwnerIndexFailed) return null;
+
+        ObjectMap<Object, Seq<HiddenOwner>> index = new ObjectMap<>();
+        try{
+            for(UnlockableContent content : collectAllContents()){
+                if(!(content instanceof Block)) continue;
+                Block block = (Block)content;
+                Class<?> current = block.getClass();
+                while(current != null && current != Object.class){
+                    Field[] fields = current.getDeclaredFields();
+                    for(Field field : fields){
+                        int modifiers = field.getModifiers();
+                        if(Modifier.isStatic(modifiers) || field.isSynthetic()) continue;
+                        Class<?> fieldType = field.getType();
+                        if(!ConsumePower.class.isAssignableFrom(fieldType)
+                            && !DrawBlock.class.isAssignableFrom(fieldType)
+                            && !BulletType.class.isAssignableFrom(fieldType)) continue;
+                        try{
+                            field.setAccessible(true);
+                            Object value = field.get(block);
+                            if(value == null) continue;
+                            Seq<HiddenOwner> owners = index.get(value);
+                            if(owners == null){
+                                owners = new Seq<>();
+                                index.put(value, owners);
+                            }
+                            owners.add(new HiddenOwner(block, field.getName()));
+                        }catch(Throwable ignored){
+                        }
+                    }
+                    current = current.getSuperclass();
+                }
+            }
+            hiddenOwnerIndex = index;
+        }catch(Throwable error){
+            hiddenOwnerIndexFailed = true;
+            Log.debug("[PatchViewer] Failed to index block child objects: @", Strings.getSimpleMessage(error));
+        }
+
+        return hiddenOwnerIndex;
+    }
+
+    private Stat hiddenStatFor(HiddenPatchRecord record){
+        if(record == null || record.field == null) return null;
+        String name = record.field.getName();
+
+        if(record.target instanceof ConsumePower){
+            if("usage".equals(name)) return Stat.powerUse;
+            if("capacity".equals(name)) return Stat.powerCapacity;
+            return null;
+        }
+
+        Class<?> declaring = record.field.getDeclaringClass();
+        if(!Block.class.isAssignableFrom(declaring)) return null;
+
+        if("health".equals(name)) return Stat.health;
+        if("armor".equals(name)) return Stat.armor;
+        if("size".equals(name)) return Stat.size;
+        if("buildTime".equals(name)) return Stat.buildTime;
+        if("itemCapacity".equals(name)) return Stat.itemCapacity;
+        if("liquidCapacity".equals(name)) return Stat.liquidCapacity;
+        if("unitCapModifier".equals(name)) return Stat.maxUnits;
+        if("range".equals(name)){
+            if(hiddenTypeIs(declaring, "BaseTurret", "MassDriver", "PayloadMassDriver")) return Stat.shootRange;
+            if(hiddenTypeIs(declaring, "BeamNode")) return Stat.powerRange;
+            if(hiddenTypeIs(declaring, "LogicBlock")) return Stat.linkRange;
+            return Stat.range;
+        }
+        if("reload".equals(name)){
+            if(hiddenTypeIs(declaring, "MendProjector")){
+                Stat mendReload = hiddenStatExt("mendReload");
+                return mendReload != null ? mendReload : Stat.repairTime;
+            }
+            if(hiddenTypeIs(declaring, "OverdriveProjector")) return null;
+            return Stat.reload;
+        }
+        if("inaccuracy".equals(name)) return Stat.inaccuracy;
+        if("targetAir".equals(name)) return Stat.targetsAir;
+        if("targetGround".equals(name)) return Stat.targetsGround;
+        if("ammoPerShot".equals(name)) return Stat.ammoUse;
+        if("heatRequirement".equals(name)) return Stat.input;
+        if("maxHeatEfficiency".equals(name)) return Stat.maxEfficiency;
+        if("canOverdrive".equals(name)) return hiddenStatExt("canOverdrive");
+        return null;
+    }
+
+    private boolean hiddenTypeIs(Class<?> type, String... names){
+        Class<?> current = type;
+        while(current != null && current != Object.class){
+            String simpleName = current.getSimpleName();
+            for(String name : names){
+                if(name.equals(simpleName)) return true;
+            }
+            current = current.getSuperclass();
+        }
+        return false;
+    }
+
+    private Stat hiddenStatExt(String fieldName){
+        if(hiddenStatExtCache.containsKey(fieldName)) return hiddenStatExtCache.get(fieldName);
+
+        Stat res = null;
+        try{
+            Class<?> statExt = Class.forName("mindustryX.features.StatExt");
+            Object value = statExt.getField(fieldName).get(null);
+            if(value instanceof Stat) res = (Stat)value;
+        }catch(Throwable ignored){
+        }
+        hiddenStatExtCache.put(fieldName, res);
+        return res;
+    }
+
+    private boolean hiddenStatAlreadyShown(UnlockableContent content, Stat stat){
+        if(content == null || stat == null) return false;
+        ContentDiff diff = diffsByContent.get(content);
+        if(diff == null || diff.isEmpty()) return false;
+
+        String key = hiddenSnapshotStatKey(baselineSnapshots.get(content), stat);
+        if(key == null) key = hiddenSnapshotStatKey(afterSnapshots.get(content), stat);
+        return key != null && diff.rows.containsKey(key);
+    }
+
+    private String hiddenSnapshotStatKey(ContentSnapshot snapshot, Stat stat){
+        if(snapshot == null || stat == null) return null;
+        for(ObjectMap.Entry<String, SnapshotRow> entry : snapshot.rows.entries()){
+            if(entry.value != null && entry.value.stat == stat) return entry.key;
+        }
+        return null;
+    }
+
+    private boolean isHiddenDeniedField(String name){
+        return "localizedName".equals(name)
+            || "name".equals(name)
+            || "description".equals(name)
+            || "details".equals(name)
+            || "requirements".equals(name);
+    }
+
+    private String hiddenLabel(Stat stat, String path){
+        if(stat != null){
+            String base = stat.localized();
+            if(base != null && !base.isEmpty()){
+                if(path != null && path.indexOf('.') >= 0) return base + " (" + path + ")";
+                return base;
+            }
+        }
+        return path == null ? "" : path;
+    }
+
+    private boolean isHiddenContainer(Object value){
+        if(value == null) return false;
+        return value.getClass().isArray() || value instanceof Seq || value instanceof ObjectMap;
+    }
+
+    private boolean hiddenValuesEqual(Object first, Object second){
+        if(first == second) return true;
+        if(first == null || second == null) return false;
+
+        if(first instanceof Number && second instanceof Number){
+            double left = ((Number)first).doubleValue();
+            double right = ((Number)second).doubleValue();
+            return left == right || (Double.isNaN(left) && Double.isNaN(right));
+        }
+        if(first instanceof CharSequence || second instanceof CharSequence){
+            return first.toString().equals(second.toString());
+        }
+        if(first instanceof Color && second instanceof Color) return first.equals(second);
+        if(first instanceof Content && second instanceof Content) return first == second;
+
+        if(first.getClass().isArray() && second.getClass().isArray()){
+            int length = java.lang.reflect.Array.getLength(first);
+            if(length != java.lang.reflect.Array.getLength(second)) return false;
+            for(int i = 0; i < length; i++){
+                Object left = java.lang.reflect.Array.get(first, i);
+                Object right = java.lang.reflect.Array.get(second, i);
+                if(left == right) continue;
+                if(!hiddenValuesEqual(left, right)) return false;
+            }
+            return true;
+        }
+
+        if(first instanceof Seq && second instanceof Seq){
+            Seq<?> left = (Seq<?>)first;
+            Seq<?> right = (Seq<?>)second;
+            if(left.size != right.size) return false;
+            for(int i = 0; i < left.size; i++){
+                Object leftItem = left.get(i);
+                Object rightItem = right.get(i);
+                if(leftItem == rightItem) continue;
+                if(!hiddenValuesEqual(leftItem, rightItem)) return false;
+            }
+            return true;
+        }
+
+        return first.equals(second);
+    }
+
+    private String hiddenValueText(Object value){
+        if(value == null) return bundle("patchviewer.hidden.none", "none");
+        if(value instanceof Number) return hiddenNumberText((Number)value);
+        if(value instanceof Boolean){
+            boolean flag = (Boolean)value;
+            return Core.bundle == null ? (flag ? "true" : "false") : Core.bundle.get(flag ? "yes" : "no", flag ? "Yes" : "No");
+        }
+        if(value instanceof CharSequence){
+            String text = value.toString();
+            return text.isEmpty() ? bundle("patchviewer.hidden.none", "none") : hiddenText(text);
+        }
+        if(value instanceof Color) return "#" + value.toString();
+        if(value instanceof Enum) return ((Enum<?>)value).name().toLowerCase(Locale.ROOT);
+        if(value instanceof UnlockableContent) return hiddenText(((UnlockableContent)value).localizedName);
+        if(value instanceof Content){
+            Class<?> type = value.getClass();
+            String simpleName = type.getSimpleName();
+            if(simpleName == null || simpleName.isEmpty()){
+                Class<?> superclass = type.getSuperclass();
+                simpleName = superclass == null ? "" : superclass.getSimpleName();
+            }
+            return hiddenText(simpleName.isEmpty() ? String.valueOf(value) : simpleName);
+        }
+
+        String buildVisibility = hiddenBuildVisibilityName(value);
+        if(buildVisibility != null) return buildVisibility;
+
+        // Opaque value: no stable text form, let the caller collapse it to a single "changed" row.
+        return null;
+    }
+
+    private String hiddenBuildVisibilityName(Object value){
+        if(value == null) return null;
+        try{
+            Class<?> type = value.getClass();
+            if(!"BuildVisibility".equals(type.getSimpleName())) return null;
+            for(Field field : type.getFields()){
+                if(!Modifier.isStatic(field.getModifiers())) continue;
+                if(field.getType() != type) continue;
+                if(field.get(null) == value) return field.getName();
+            }
+        }catch(Throwable ignored){
+        }
+        return null;
+    }
+
+    private String hiddenNumberText(Number number){
+        if(number instanceof Float || number instanceof Double){
+            double value = number.doubleValue();
+            if(Double.isNaN(value) || Double.isInfinite(value)) return String.valueOf(value);
+            if(value == Math.rint(value) && Math.abs(value) < 1e15) return String.valueOf((long)value);
+            String text = String.format(Locale.ROOT, "%.6f", value);
+            while(text.endsWith("0")) text = text.substring(0, text.length() - 1);
+            if(text.endsWith(".")) text = text.substring(0, text.length() - 1);
+            if("-0".equals(text)) text = "0";
+            return text;
+        }
+        return String.valueOf(number);
+    }
+
+    private String hiddenText(String text){
+        if(text == null) return "";
+        if(text.length() <= hiddenTextLimit) return text;
+        return text.substring(0, hiddenTextLimit) + "...";
+    }
+
+    private ContentSnapshot snapshot(UnlockableContent content){
+        if(content == null) return null;
+        content.checkStats();
+
+        ContentSnapshot snapshot = new ContentSnapshot();
+        snapshot.title = normalizeText(content.localizedName);
+        snapshot.description = normalizeText(content.displayDescription());
+        snapshot.details = normalizeText(content.details);
+        snapshot.buildCost = extractBuildCost(content);
+
+        Stats stats = content.stats;
+        for(StatCat cat : stats.toMap().keys()){
+            OrderedMap<Stat, Seq<StatValue>> map = stats.toMap().get(cat);
+            if(map.size == 0) continue;
+
+            for(Stat stat : map.keys()){
+                String key = rowKey(cat, stat);
+                SnapshotRow row = new SnapshotRow(cat, stat, stat.localized());
+                Table rendered = buildRenderedTable(map.get(stat));
+                row.kind = classifyRow(stat, rendered);
+                row.compactKind = classifyCompactRow(stat, rendered, row.kind);
+                row.text = extractRowSignature(rendered);
+                if(row.kind != RowKind.TEXT || row.compactKind != RowKind.TEXT){
+                    row.rendered = rendered;
+                    captureLabelStates(rendered, row.labels);
+                    // Some native StatValues (for example drillables) calculate their colspan
+                    // from the stat inset's existing label cell. Keep a baseline copy built in
+                    // that exact context for the database diff view; `rendered` intentionally
+                    // remains the lightweight value-only table used by the compact displays.
+                    row.nativeInset = buildNativeStatInset(row.label, map.get(stat));
+                    captureLabelStates(row.nativeInset, row.nativeLabels);
+                    row.compactText = extractStructuredCompactText(rendered);
+                    if(row.compactKind == RowKind.STACK_LIST){
+                        row.compactText = normalizeStackCompactText(row.compactText);
+                    }
+                    if(row.compactText == null) row.compactText = extractCompactLabelText(row);
+                    if(row.compactKind == RowKind.STACK_LIST){
+                        row.compactText = normalizeStackCompactText(row.compactText);
+                    }
+                }
+                if(row.compactText == null && row.compactKind != RowKind.STACK_LIST) row.compactText = row.text;
+                row.numeric = extractNumbers(row.text);
+                snapshot.rows.put(key, row);
+                snapshot.order.add(key);
+            }
+        }
+
+        return snapshot;
+    }
+
+    private Table buildRenderedTable(Seq<StatValue> values){
+        Table table = new Table();
+        table.left().top();
+        if(values != null){
+            for(StatValue value : values){
+                try{
+                    value.display(table);
+                    table.add().size(10f);
+                }catch(Throwable ignored){
+                }
+            }
+        }
+        return table;
+    }
+
+    /** Mirrors ContentInfoDialog's per-stat construction, including its leading stat-label cell. */
+    private Table buildNativeStatInset(String label, Seq<StatValue> values){
+        Table inset = new Table();
+        inset.left();
+        inset.add("[lightgray]" + (label == null ? "" : label) + ":[] ").left().top();
+        if(values != null){
+            for(StatValue value : values){
+                try{
+                    value.display(inset);
+                    inset.add().size(10f);
+                }catch(Throwable ignored){
+                }
+            }
+        }
+        return inset;
+    }
+
+    private UnlockableContent contentForImage(Image image){
+        if(image == null || !(image.getDrawable() instanceof TextureRegionDrawable)) return null;
+        TextureRegion region = ((TextureRegionDrawable)image.getDrawable()).getRegion();
+        if(region == null) return null;
+        for(UnlockableContent content : iconContentTargets()){
+            if(content != null && (sameRegion(content.uiIcon, region) || sameRegion(content.fullIcon, region))){
+                return content;
+            }
+        }
+        return null;
+    }
+
+    private boolean sameRegion(TextureRegion a, TextureRegion b){
+        if(a == null || b == null) return false;
+        return a == b || (a.texture == b.texture && a.getX() == b.getX() && a.getY() == b.getY() && a.width == b.width && a.height == b.height);
+    }
+
+    private float calcUnitStatIconSize(UnitType unit){
+        // Match the fixed 40px unit cell used by the vanilla unit production displays.
+        return defaultUnitStatIconSize;
+    }
+
+    private void captureLabelStates(Element element, Seq<LabelState> out){
+        captureLabelStates(element, out, "root", false);
+    }
+
+    private String extractCompactLabelText(SnapshotRow row){
+        if(row == null || row.labels == null || row.labels.isEmpty()) return row == null ? null : row.text;
+        StringBuilder out = new StringBuilder();
+        String last = null;
+        for(LabelState state : row.labels){
+            if(state == null) continue;
+            String text = normalizeCompactLine(state.visibleText);
+            if(text == null || text.isEmpty() || text.equals(last)) continue;
+            if(out.length() > 0) out.append("\n");
+            out.append(text);
+            last = text;
+        }
+        return out.length() == 0 ? row.text : out.toString();
+    }
+
+    private String extractStructuredCompactText(Element element){
+        Seq<CompactPart> rows = new Seq<>();
+        collectStructuredCompactRows(element, rows);
+        StringBuilder out = new StringBuilder();
+        String last = null;
+        for(CompactPart row : rows){
+            if(row == null || !row.hasIcon) continue;
+            String text = cleanCompactRow(row.text);
+            if(text == null || text.equals(last)) continue;
+            if(out.length() > 0) out.append("\n");
+            out.append(text);
+            last = text;
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    private void collectStructuredCompactRows(Element element, Seq<CompactPart> out){
+        if(element == null || out == null) return;
+        if(element instanceof ScrollPane){
+            collectStructuredCompactRows(((ScrollPane)element).getWidget(), out);
+            return;
+        }
+        if(element instanceof Table){
+            Table table = (Table)element;
+            Seq<Cell> cells = table.getCells();
+            if(cells.size > 0){
+                CompactPart row = new CompactPart();
+                for(int i = 0; i < cells.size; i++){
+                    Element child = cells.get(i).get();
+                    CompactPart part = compactPart(child);
+                    appendCompactPart(row, part);
+                    if(cells.get(i).isEndRow()){
+                        addStructuredCompactRow(out, row);
+                        row = new CompactPart();
+                    }
+                }
+                addStructuredCompactRow(out, row);
+                return;
+            }
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                collectStructuredCompactRows(children.get(i), out);
+            }
+            return;
+        }
+
+        CompactPart part = compactPart(element);
+        addStructuredCompactRow(out, part);
+    }
+
+    private CompactPart compactPart(Element element){
+        if(element == null) return new CompactPart();
+        if(element instanceof Label){
+            String raw = ((Label)element).getText() == null ? "" : ((Label)element).getText().toString();
+            String text = normalizeCompactLine(raw);
+            return text == null ? new CompactPart() : new CompactPart(text, false);
+        }
+        if(element instanceof Image){
+            UnlockableContent content = contentForImage((Image)element);
+            return content == null ? new CompactPart() : new CompactPart(iconToken(content), true);
+        }
+        if(element instanceof ScrollPane){
+            return compactPart(((ScrollPane)element).getWidget());
+        }
+        if(element instanceof Table){
+            Table table = (Table)element;
+            CompactPart part = new CompactPart();
+            Seq<Cell> cells = table.getCells();
+            if(cells.size > 0){
+                for(int i = 0; i < cells.size; i++){
+                    appendCompactPart(part, compactPart(cells.get(i).get()));
+                }
+            }else{
+                Seq<Element> children = ((Group)element).getChildren();
+                for(int i = 0; i < children.size; i++){
+                    appendCompactPart(part, compactPart(children.get(i)));
+                }
+            }
+            return part;
+        }
+        if(element instanceof Group){
+            CompactPart out = new CompactPart();
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                appendCompactPart(out, compactPart(children.get(i)));
+            }
+            return out;
+        }
+        return new CompactPart();
+    }
+
+    private void addStructuredCompactRow(Seq<CompactPart> out, CompactPart row){
+        if(out == null || row == null || !row.hasIcon) return;
+        String text = cleanCompactRow(row.text);
+        if(text == null) return;
+        out.add(new CompactPart(text, true));
+    }
+
+    private void appendCompactPart(CompactPart row, CompactPart part){
+        if(row == null || part == null) return;
+        String text = cleanCompactRow(part.text);
+        if(text == null) return;
+        if(row.text.length() > 0){
+            if(row.hasIcon && part.hasIcon){
+                row.text.append(' ');
+            }else if(!startsWithPunctuation(text) && !endsWithPunctuation(row.text)){
+                row.text.append(' ');
+            }
+        }
+        row.text.append(text);
+        row.hasIcon |= part.hasIcon;
+    }
+
+    private boolean startsWithPunctuation(String text){
+        if(text == null || text.isEmpty()) return false;
+        char ch = text.charAt(0);
+        return ch == '/' || ch == '%' || ch == ',' || ch == '.' || ch == ')' || ch == ']' || ch == ':' || ch == ';';
+    }
+
+    private boolean endsWithPunctuation(StringBuilder text){
+        if(text == null || text.length() == 0) return false;
+        char ch = text.charAt(text.length() - 1);
+        return ch == '(' || ch == '[' || ch == ':' || ch == '/' || ch == '-';
+    }
+
+    private String cleanCompactRow(CharSequence text){
+        if(text == null) return null;
+        String cleaned = text.toString()
+            .replace("<Image>", "")
+            .replace("<Stack>", "")
+            .replace("<Collapser>", "")
+            .replaceAll("[ \\t]+", " ")
+            .replaceAll(" *\\n *", "\n")
+            .trim();
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    private String normalizeCompactLine(String text){
+        if(text == null) return null;
+        String stripped = Strings.stripColors(text)
+            .replace("<Image>", "")
+            .replace("<Stack>", "")
+            .replace("<Collapser>", "")
+            .replaceAll("\\s+", " ")
+            .trim();
+        if("?".equals(stripped)) return null;
+        return stripped.isEmpty() ? null : stripped;
+    }
+
+    private void captureLabelStates(Element element, Seq<LabelState> out, String groupKey, boolean insideStack){
+        if(element == null || out == null) return;
+        boolean nextInsideStack = insideStack || element instanceof Stack;
+        if(element instanceof Label){
+            Label label = (Label)element;
+            String raw = label.getText() == null ? "" : label.getText().toString();
+            String visible = Strings.stripColors(raw);
+            String normalized = normalizeText(visible);
+            out.add(new LabelState(label, raw, visible, normalized, buildLabelMatchKey(normalized), groupKey, nextInsideStack, new Color(label.color), readLabelWrap(label), readLabelEllipsis(label)));
+            return;
+        }
+        if(element instanceof Table){
+            Seq<Cell> cells = ((Table)element).getCells();
+            int childIndex = 0;
+            for(int i = 0; i < cells.size; i++){
+                Element child = cells.get(i).get();
+                if(child == null) continue;
+                String childGroupKey = "root".equals(groupKey) ? groupKey + "/" + childIndex : groupKey;
+                captureLabelStates(child, out, childGroupKey, nextInsideStack);
+                childIndex++;
+            }
+            return;
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                captureLabelStates(children.get(i), out, groupKey, nextInsideStack);
+            }
+        }
+    }
+
+    private String buildLabelMatchKey(String normalized){
+        if(normalized == null) return "";
+        String key = normalized.replaceAll("-?\\d+(?:\\.\\d+)?", "#").replaceAll("\\s+", " ").trim();
+        return key.isEmpty() ? normalized : key;
+    }
+
+    private boolean readLabelWrap(Label label){
+        Object value = Reflector.get(label, "wrap");
+        return value instanceof Boolean && (Boolean)value;
+    }
+
+    private String readLabelEllipsis(Label label){
+        Object value = Reflector.get(label, "ellipsis");
+        return value instanceof String ? (String)value : null;
+    }
+
+    private void restoreLabelStates(Seq<LabelState> labels){
+        if(labels == null) return;
+        for(LabelState state : labels){
+            if(state == null || state.label == null) continue;
+            state.label.setText(state.rawText);
+            state.label.setColor(state.originalColor);
+            state.label.setWrap(state.originalWrap);
+            if(state.originalEllipsis == null){
+                state.label.setEllipsis(false);
+            }else{
+                state.label.setEllipsis(state.originalEllipsis);
+            }
+        }
+    }
+
+    private boolean labelsMatch(LabelState before, LabelState after){
+        if(before == null || after == null) return false;
+        if(before.normalizedText == null || after.normalizedText == null) return before.normalizedText == after.normalizedText;
+        if(before.normalizedText.equals(after.normalizedText)) return true;
+        return before.matchKey.equals(after.matchKey);
+    }
+
+    private void highlightWholeLabel(LabelState state, String colorTag){
+        if(state == null || state.label == null) return;
+        state.label.setColor(1f, 1f, 1f, state.originalColor.a);
+        state.label.setText(colorTag + escape(state.visibleText) + "[]");
+    }
+
+    private void highlightMatchedLabels(LabelState before, LabelState after){
+        if(before == null || after == null) return;
+        if(before.normalizedText == null ? after.normalizedText == null : before.normalizedText.equals(after.normalizedText)) return;
+
+        String beforeMarkup = buildNumericHighlightMarkup(before.visibleText, after.visibleText, modifiedOldColorTag());
+        String afterMarkup = buildNumericHighlightMarkup(after.visibleText, before.visibleText, modifiedNewColorTag());
+
+        if(beforeMarkup == null || afterMarkup == null){
+            beforeMarkup = buildSegmentHighlightMarkup(before.visibleText, after.visibleText, modifiedOldColorTag());
+            afterMarkup = buildSegmentHighlightMarkup(after.visibleText, before.visibleText, modifiedNewColorTag());
+        }
+
+        if(beforeMarkup == null) beforeMarkup = modifiedOldColorTag() + escape(before.visibleText) + "[]";
+        if(afterMarkup == null) afterMarkup = modifiedNewColorTag() + escape(after.visibleText) + "[]";
+
+        before.label.setColor(1f, 1f, 1f, before.originalColor.a);
+        before.label.setText(beforeMarkup);
+        after.label.setColor(1f, 1f, 1f, after.originalColor.a);
+        after.label.setText(afterMarkup);
+    }
+
+    private String buildNumericHighlightMarkup(String source, String other, String colorTag){
+        if(source == null || other == null) return null;
+        Seq<String> sourceNumbers = extractNumbers(source);
+        Seq<String> otherNumbers = extractNumbers(other);
+        if(sourceNumbers.isEmpty() || sourceNumbers.size != otherNumbers.size) return null;
+
+        boolean changed = false;
+        StringBuilder out = new StringBuilder();
+        Matcher matcher = numberPattern.matcher(source);
+        int index = 0;
+        int last = 0;
+        while(matcher.find()){
+            out.append(escape(source.substring(last, matcher.start())));
+            String number = matcher.group();
+            boolean different = !number.equals(otherNumbers.get(index));
+            if(different){
+                changed = true;
+                out.append(colorTag).append(escape(number)).append("[]");
+            }else{
+                out.append(escape(number));
+            }
+            last = matcher.end();
+            index++;
+        }
+        out.append(escape(source.substring(last)));
+        return changed ? out.toString() : null;
+    }
+
+    private String buildSegmentHighlightMarkup(String source, String other, String colorTag){
+        if(source == null || other == null) return null;
+        if(source.equals(other)) return null;
+
+        int prefix = 0;
+        int maxPrefix = Math.min(source.length(), other.length());
+        while(prefix < maxPrefix && source.charAt(prefix) == other.charAt(prefix)){
+            prefix++;
+        }
+
+        int suffix = 0;
+        int sourceRemaining = source.length() - prefix;
+        int otherRemaining = other.length() - prefix;
+        while(suffix < sourceRemaining && suffix < otherRemaining &&
+            source.charAt(source.length() - 1 - suffix) == other.charAt(other.length() - 1 - suffix)){
+            suffix++;
+        }
+
+        int middleEnd = source.length() - suffix;
+        String changed = source.substring(prefix, middleEnd);
+        if(changed.isEmpty()) return null;
+
+        StringBuilder out = new StringBuilder();
+        out.append(escape(source.substring(0, prefix)));
+        out.append(colorTag).append(escape(changed)).append("[]");
+        out.append(escape(source.substring(middleEnd)));
+        return out.toString();
+    }
+
+    private void prepareRenderedDiff(Seq<LabelState> beforeLabels, Seq<LabelState> afterLabels){
+        restoreLabelStates(beforeLabels);
+        restoreLabelStates(afterLabels);
+        if(beforeLabels == null || afterLabels == null) return;
+
+        OrderedSet<String> changedBeforeGroups = new OrderedSet<>();
+        OrderedSet<String> changedAfterGroups = new OrderedSet<>();
+        int beforeSize = beforeLabels.size;
+        int afterSize = afterLabels.size;
+        int[][] lcs = new int[beforeSize + 1][afterSize + 1];
+
+        for(int i = beforeSize - 1; i >= 0; i--){
+            for(int j = afterSize - 1; j >= 0; j--){
+                if(labelsMatch(beforeLabels.get(i), afterLabels.get(j))){
+                    lcs[i][j] = lcs[i + 1][j + 1] + 1;
+                }else{
+                    lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+                }
+            }
+        }
+
+        int i = 0, j = 0;
+        while(i < beforeSize || j < afterSize){
+            if(i < beforeSize && j < afterSize && labelsMatch(beforeLabels.get(i), afterLabels.get(j)) &&
+                lcs[i][j] == lcs[i + 1][j + 1] + 1){
+                LabelState before = beforeLabels.get(i);
+                LabelState after = afterLabels.get(j);
+                boolean changed = before.normalizedText == null ? after.normalizedText != null : !before.normalizedText.equals(after.normalizedText);
+                highlightMatchedLabels(before, after);
+                if(changed){
+                    changedBeforeGroups.add(before.groupKey);
+                    changedAfterGroups.add(after.groupKey);
+                }
+                i++;
+                j++;
+            }else if(i < beforeSize && (j >= afterSize || lcs[i + 1][j] >= lcs[i][j + 1])){
+                LabelState before = beforeLabels.get(i);
+                highlightWholeLabel(before, removedColorTag());
+                changedBeforeGroups.add(before.groupKey);
+                i++;
+            }else if(j < afterSize){
+                LabelState after = afterLabels.get(j);
+                highlightWholeLabel(after, addedColorTag());
+                changedAfterGroups.add(after.groupKey);
+                j++;
+            }
+        }
+
+        highlightChangedStackAmounts(beforeLabels, changedBeforeGroups);
+        highlightChangedStackAmounts(afterLabels, changedAfterGroups);
+    }
+
+    private void highlightChangedStackAmounts(Seq<LabelState> labels, OrderedSet<String> changedGroups){
+        if(labels == null || changedGroups == null) return;
+        for(LabelState state : labels){
+            if(state == null || !state.insideStack) continue;
+            if(changedGroups.contains(state.groupKey)){
+                String colorTag = detectGroupHighlightColor(labels, state.groupKey);
+                if(colorTag != null){
+                    highlightWholeLabel(state, colorTag);
+                }
+            }
+        }
+    }
+
+    private void highlightChangedGroups(Seq<LabelState> labels){
+        if(labels == null) return;
+        OrderedSet<String> changedGroups = new OrderedSet<>();
+        for(LabelState state : labels){
+            if(state == null || state.label == null) continue;
+            String current = state.label.getText() == null ? "" : state.label.getText().toString();
+            if(!current.equals(state.rawText)) changedGroups.add(state.groupKey);
+        }
+        for(LabelState state : labels){
+            if(state == null) continue;
+            if(changedGroups.contains(state.groupKey)){
+                String colorTag = detectGroupHighlightColor(labels, state.groupKey);
+                if(colorTag != null){
+                    highlightWholeLabel(state, colorTag);
+                }
+            }
+        }
+    }
+
+    private void highlightAllLabels(Seq<LabelState> labels, String colorTag){
+        if(labels == null) return;
+        for(LabelState state : labels){
+            highlightWholeLabel(state, colorTag);
+        }
+    }
+
+    private String detectGroupHighlightColor(Seq<LabelState> labels, String groupKey){
+        if(labels == null || groupKey == null) return null;
+        boolean hasRemoved = false;
+        boolean hasAdded = false;
+        boolean hasModifiedOld = false;
+        boolean hasModifiedNew = false;
+        for(LabelState state : labels){
+            if(state == null || !groupKey.equals(state.groupKey) || state.label == null) continue;
+            String current = state.label.getText() == null ? "" : state.label.getText().toString();
+            if(current.contains(removedColorTag())){
+                hasRemoved = true;
+            }else if(current.contains(addedColorTag())){
+                hasAdded = true;
+            }else if(current.contains(modifiedOldColorTag())){
+                hasModifiedOld = true;
+            }else if(current.contains(modifiedNewColorTag())){
+                hasModifiedNew = true;
+            }
+        }
+        if(hasRemoved) return removedColorTag();
+        if(hasAdded) return addedColorTag();
+        if(hasModifiedOld) return modifiedOldColorTag();
+        if(hasModifiedNew) return modifiedNewColorTag();
+        return null;
+    }
+
+    private RowKind classifyRow(Stat stat, Element rendered){
+        if(stat == Stat.buildCost) return RowKind.BUILD_COST;
+        if(stat == Stat.weapons) return RowKind.WEAPON_PANEL;
+        if(stat == Stat.abilities) return RowKind.ABILITY_PANEL;
+        if(stat == Stat.ammo) return RowKind.AMMO_PANEL;
+        if(stat == Stat.input || stat == Stat.output) return RowKind.STACK_LIST;
+        if(rendered == null) return RowKind.TEXT;
+        if(containsPanelElement(rendered)) return RowKind.NATIVE_PANEL;
+        if(containsStackLikeElement(rendered)) return RowKind.STACK_LIST;
+        return RowKind.TEXT;
+    }
+
+    private RowKind classifyCompactRow(Stat stat, Element rendered, RowKind displayKind){
+        if(stat == Stat.buildCost) return RowKind.BUILD_COST;
+        if(stat == Stat.input || stat == Stat.output || stat == Stat.tiles || stat == Stat.drillTier || stat == Stat.mineTier) return RowKind.STACK_LIST;
+        return displayKind == null ? classifyRow(stat, rendered) : displayKind;
+    }
+
+    private boolean containsPanelElement(Element element){
+        if(element == null) return false;
+        String name = element.getClass().getSimpleName();
+        if("Collapser".equals(name) || "ScrollPane".equals(name)) return true;
+        if(element instanceof Table){
+            Table table = (Table)element;
+            if(table.getBackground() != null) return true;
+            if(table.getCells().size > 2 && ((Group)element).getChildren().size > 2) return true;
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                if(containsPanelElement(children.get(i))) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsStackLikeElement(Element element){
+        if(element == null) return false;
+        String name = element.getClass().getSimpleName();
+        if("Image".equals(name) || "Stack".equals(name)) return true;
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                if(containsStackLikeElement(children.get(i))) return true;
+            }
+        }
+        return false;
+    }
+
+    private Seq<ItemStack> extractBuildCost(UnlockableContent content){
+        Object value = Reflector.get(content, "requirements");
+        if(!(value instanceof ItemStack[])) return null;
+        ItemStack[] stacks = (ItemStack[])value;
+        Seq<ItemStack> out = new Seq<>();
+        for(ItemStack stack : stacks){
+            if(stack == null || stack.item == null) continue;
+            out.add(stack.copy());
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private String extractRowSignature(Element rendered){
+        return rendered == null ? null : normalizeText(extractTreeSignature(rendered));
+    }
+
+    private String extractTreeSignature(Element element){
+        if(element == null) return "";
+        StringBuilder out = new StringBuilder();
+        appendTreeSignature(out, element);
+        return out.toString().trim();
+    }
+
+    private void appendTreeSignature(StringBuilder out, Element element){
+        if(element == null) return;
+        if(element instanceof Label){
+            CharSequence text = ((Label)element).getText();
+            if(text != null){
+                String cleaned = Strings.stripColors(text.toString()).trim();
+                if(!cleaned.isEmpty()){
+                    if(out.length() > 0) out.append(' ');
+                    out.append(cleaned);
+                }
+            }
+            return;
+        }
+
+        String name = element.getClass().getSimpleName();
+        if("Image".equals(name) || "Stack".equals(name) || "Collapser".equals(name)){
+            if(out.length() > 0) out.append(' ');
+            out.append('<').append(name).append('>');
+        }
+
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                appendTreeSignature(out, children.get(i));
+            }
+        }
+    }
+
+    private Seq<String> extractNumbers(String text){
+        Seq<String> out = new Seq<>();
+        if(text == null) return out;
+        Matcher matcher = numberPattern.matcher(text);
+        while(matcher.find()){
+            out.add(matcher.group());
+        }
+        return out;
+    }
+
+    private String normalizeText(String text){
+        if(text == null) return null;
+        String stripped = Strings.stripColors(text).replace('\n', ' ').replaceAll("\\s+", " ").trim();
+        return stripped.isEmpty() ? null : stripped;
+    }
+
+    private String rowKey(StatCat cat, Stat stat){
+        return cat.name + "::" + stat.name;
+    }
+
+    private ContentDiff diff(ContentSnapshot before, ContentSnapshot after){
+        ContentDiff diff = new ContentDiff();
+        diff.title = buildDiff(before.title, after.title);
+        diff.description = buildDiff(before.description, after.description);
+        diff.details = buildDiff(before.details, after.details);
+
+        if(!sameStacks(before.buildCost, after.buildCost)){
+            diff.rows.put(buildCostRowKey, InlineRow.forBuildCost(Stat.buildCost.localized(), copyStacks(before.buildCost), copyStacks(after.buildCost)));
+        }
+
+        OrderedSet<String> union = new OrderedSet<>();
+        union.addAll(before.order);
+        union.addAll(after.order);
+        union.add(buildCostRowKey);
+
+        for(String key : union){
+            if(buildCostRowKey.equals(key)) continue;
+            SnapshotRow beforeRow = before.rows.get(key);
+            SnapshotRow afterRow = after.rows.get(key);
+            if(beforeRow == null && afterRow == null) continue;
+
+            if(beforeRow == null){
+                if(afterRow.kind == RowKind.TEXT){
+                    String markup = buildDiff(null, afterRow.text);
+                    if(markup != null) diff.rows.put(key, InlineRow.forText(afterRow.label, markup));
+                }else{
+                    diff.rows.put(key, InlineRow.forNative(afterRow.label, afterRow.kind, null, null, afterRow.rendered, afterRow.labels));
+                }
+                continue;
+            }
+
+            if(afterRow == null){
+                if(beforeRow.kind == RowKind.TEXT){
+                    String markup = buildDiff(beforeRow.text, null);
+                    if(markup != null) diff.rows.put(key, InlineRow.forText(beforeRow.label, markup));
+                }else{
+                    diff.rows.put(key, InlineRow.forNative(beforeRow.label, beforeRow.kind, beforeRow.rendered, beforeRow.labels, null, null));
+                }
+                continue;
+            }
+
+            if(afterRow.kind != beforeRow.kind){
+                diff.rows.put(key, InlineRow.forNative(afterRow.label, afterRow.kind, beforeRow.rendered, beforeRow.labels, afterRow.rendered, afterRow.labels));
+                continue;
+            }
+
+            RowKind compactKind = afterRow.compactKind == null ? afterRow.kind : afterRow.compactKind;
+            switch(compactKind){
+                case TEXT:
+                    String markup = buildDiff(beforeRow.text, afterRow.text);
+                    if(markup != null) diff.rows.put(key, InlineRow.forText(afterRow.label, markup));
+                    break;
+                case STACK_LIST:
+                    if(!sameCompactRows(beforeRow, afterRow)) diff.rows.put(key, InlineRow.forNative(afterRow.label, afterRow.kind, beforeRow.rendered, beforeRow.labels, afterRow.rendered, afterRow.labels));
+                    break;
+                case AMMO_PANEL:
+                    if(!sameNumbers(beforeRow, afterRow)) diff.rows.put(key, InlineRow.forNative(afterRow.label, afterRow.kind, beforeRow.rendered, beforeRow.labels, afterRow.rendered, afterRow.labels));
+                    break;
+                case WEAPON_PANEL:
+                case ABILITY_PANEL:
+                case NATIVE_PANEL:
+                    if(!sameTextAndNumbers(beforeRow, afterRow)) diff.rows.put(key, InlineRow.forNative(afterRow.label, afterRow.kind, beforeRow.rendered, beforeRow.labels, afterRow.rendered, afterRow.labels));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return diff.isEmpty() ? null : diff;
+    }
+
+    private CompactDiff buildCompactDiff(UnlockableContent content, ContentSnapshot before, ContentSnapshot after, ContentDiff diff){
+        if(content == null || before == null || after == null || diff == null) return null;
+        CompactDiff compact = new CompactDiff();
+        addCompactChange(compact, bundle("patchviewer.quick.name", "Name"), before.title, after.title, RowKind.TEXT);
+        addCompactChange(compact, bundle("patchviewer.quick.description", "Description"), before.description, after.description, RowKind.TEXT);
+        addCompactChange(compact, bundle("patchviewer.quick.details", "Details"), before.details, after.details, RowKind.TEXT);
+
+        OrderedSet<String> displayKeys = new OrderedSet<>();
+        displayKeys.addAll(before.order);
+        displayKeys.addAll(after.order);
+        displayKeys.addAll(diff.rows.keys().toSeq());
+        displayKeys.add(buildCostRowKey);
+
+        for(String key : displayKeys){
+            InlineRow row = diff.rows.get(key);
+            if(row == null) continue;
+            SnapshotRow beforeRow = before.rows.get(key);
+            SnapshotRow afterRow = after.rows.get(key);
+            String label = row.label == null ? key : row.label;
+            RowKind kind = afterRow != null ? afterRow.compactKind : beforeRow != null ? beforeRow.compactKind : row.kind;
+            if(kind == null) kind = afterRow != null ? afterRow.kind : beforeRow != null ? beforeRow.kind : row.kind;
+            if(isBuildCostDiffRow(row)){
+                addCompactChange(compact, label, compactStacks(row.buildCostBefore), compactStacks(row.buildCostAfter), RowKind.BUILD_COST);
+            }else{
+                String beforeText = compactRowText(beforeRow);
+                String afterText = compactRowText(afterRow);
+                if(kind == RowKind.STACK_LIST && (beforeText != null || afterText != null)){
+                    addCompactStackItemChanges(compact, label, beforeText, afterText);
+                    continue;
+                }
+                if(shouldFilterCommonCompactLines(kind) && beforeText != null && afterText != null){
+                    String originalBefore = beforeText;
+                    String originalAfter = afterText;
+                    beforeText = compactDifferentLines(originalBefore, originalAfter);
+                    afterText = compactDifferentLines(originalAfter, originalBefore);
+                    if(beforeText == null && afterText == null) continue;
+                }
+                addCompactChange(compact, label, beforeText, afterText, kind);
+            }
+        }
+        return compact;
+    }
+
+    private void addCompactStackItemChanges(CompactDiff compact, String label, String before, String after){
+        Seq<CompactStackItem> left = parseCompactStackItems(before);
+        Seq<CompactStackItem> right = parseCompactStackItems(after);
+        if(left.isEmpty() && right.isEmpty()){
+            addCompactChange(compact, label, before, after, RowKind.STACK_LIST);
+            return;
+        }
+
+        Seq<CompactStackChange> changes = buildCompactStackChanges(left, right);
+        if(changes.isEmpty()) return;
+        CompactChange change = new CompactChange(label, before, after, RowKind.STACK_LIST, compactStackBucket(changes));
+        change.stackChanges = changes;
+        addCompactChange(compact, change);
+    }
+
+    private Seq<CompactStackChange> buildCompactStackChanges(String before, String after){
+        return buildCompactStackChanges(parseCompactStackItems(before), parseCompactStackItems(after));
+    }
+
+    private Seq<CompactStackChange> buildCompactStackChanges(Seq<CompactStackItem> left, Seq<CompactStackItem> right){
+        Seq<CompactStackChange> changes = new Seq<>();
+        boolean[] usedLeft = new boolean[left == null ? 0 : left.size];
+        if(right != null){
+            for(CompactStackItem item : right){
+                if(item == null) continue;
+                int same = findCompactStackItem(left, usedLeft, item, true);
+                if(same >= 0){
+                    usedLeft[same] = true;
+                    continue;
+                }
+                int changed = findCompactStackItem(left, usedLeft, item, false);
+                if(changed >= 0){
+                    usedLeft[changed] = true;
+                    changes.add(new CompactStackChange(left.get(changed), item, CompactBucket.MODIFIED));
+                }else{
+                    changes.add(new CompactStackChange(null, item, CompactBucket.ADDED));
+                }
+            }
+        }
+        if(left != null){
+            for(int i = 0; i < left.size; i++){
+                if(!usedLeft[i] && left.get(i) != null){
+                    changes.add(new CompactStackChange(left.get(i), null, CompactBucket.REMOVED));
+                }
+            }
+        }
+        return changes;
+    }
+
+    private CompactBucket compactStackBucket(Seq<CompactStackChange> changes){
+        boolean added = false;
+        boolean modified = false;
+        boolean removed = false;
+        for(CompactStackChange change : changes){
+            if(change == null) continue;
+            added |= change.bucket == CompactBucket.ADDED;
+            modified |= change.bucket == CompactBucket.MODIFIED;
+            removed |= change.bucket == CompactBucket.REMOVED;
+        }
+        if(modified || (added && removed)) return CompactBucket.MODIFIED;
+        return added ? CompactBucket.ADDED : CompactBucket.REMOVED;
+    }
+
+    private int findCompactStackItem(Seq<CompactStackItem> items, boolean[] used, CompactStackItem needle, boolean requireSameAmount){
+        if(items == null || needle == null) return -1;
+        for(int i = 0; i < items.size; i++){
+            if(used != null && used[i]) continue;
+            CompactStackItem item = items.get(i);
+            if(item == null || item.content != needle.content) continue;
+            if(requireSameAmount && !sameCompactAmount(item.amount, needle.amount)) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    private boolean sameCompactAmount(String a, String b){
+        return a == null ? b == null : a.equals(b);
+    }
+
+    private boolean sameCompactRows(SnapshotRow before, SnapshotRow after){
+        if(before == null || after == null) return before == after;
+        String left = compactRowText(before);
+        String right = compactRowText(after);
+        if(left == null || right == null) return sameTextAndNumbers(before, after);
+        return Strings.stripColors(left).equals(Strings.stripColors(right));
+    }
+
+    private Seq<CompactStackItem> parseCompactStackItems(String text){
+        Seq<CompactStackItem> out = new Seq<>();
+        if(text == null) return out;
+        int index = 0;
+        while(index < text.length()){
+            ContentMatch match = findIconMatch(text, index);
+            if(match == null) break;
+            StackAmount amount = parseStackAmount(text, match.end, match.content);
+            if(amount != null && amount.amountText != null && !amount.amountText.isEmpty()){
+                String amountText = amount.amountText + (amount.suffix == null ? "" : amount.suffix);
+                out.add(new CompactStackItem(match.content, amountText));
+                index = Math.max(amount.end, match.end);
+            }else{
+                out.add(new CompactStackItem(match.content, ""));
+                int consumed = consumeIconLabelTail(text, match.end, match.content);
+                index = consumed == match.end ? match.end : consumed;
+            }
+        }
+        return out;
+    }
+
+    private boolean shouldFilterCommonCompactLines(RowKind kind){
+        return kind == RowKind.WEAPON_PANEL || kind == RowKind.ABILITY_PANEL || kind == RowKind.NATIVE_PANEL || kind == RowKind.AMMO_PANEL;
+    }
+
+    private String compactDifferentLines(String source, String other){
+        if(source == null) return null;
+        if(other == null) return source;
+        String[] sourceLines = source.split("\\n", -1);
+        String[] otherLines = other.split("\\n", -1);
+        boolean[] used = new boolean[otherLines.length];
+        StringBuilder out = new StringBuilder();
+        for(String line : sourceLines){
+            String key = compactLineCompareKey(line);
+            if(key == null) continue;
+            boolean matched = false;
+            for(int i = 0; i < otherLines.length; i++){
+                if(used[i]) continue;
+                String otherKey = compactLineCompareKey(otherLines[i]);
+                if(key.equals(otherKey)){
+                    used[i] = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if(matched) continue;
+            if(out.length() > 0) out.append("\n");
+            out.append(line.trim());
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    private String compactLineCompareKey(String line){
+        if(line == null) return null;
+        String key = Strings.stripColors(line)
+            .replaceAll("[ \\t]+", " ")
+            .trim();
+        return key.isEmpty() ? null : key;
+    }
+
+    private void addCompactChange(CompactDiff compact, String label, String before, String after, RowKind kind){
+        String left = cleanCompactValue(before);
+        String right = cleanCompactValue(after);
+        String leftCompare = normalizeText(left);
+        String rightCompare = normalizeText(right);
+        if(leftCompare == null ? rightCompare == null : leftCompare.equals(rightCompare)) return;
+        CompactBucket bucket = left == null ? CompactBucket.ADDED : right == null ? CompactBucket.REMOVED : CompactBucket.MODIFIED;
+        CompactChange change = new CompactChange(label, left, right, kind, bucket);
+        if(kind == RowKind.STACK_LIST || kind == RowKind.BUILD_COST){
+            change.stackChanges = buildCompactStackChanges(left, right);
+        }
+        addCompactChange(compact, change);
+    }
+
+    private void addCompactChange(CompactDiff compact, CompactChange change){
+        if(compact == null || change == null) return;
+        compact.ordered.add(change);
+        if(change.bucket == CompactBucket.ADDED){
+            compact.added.add(change);
+        }else if(change.bucket == CompactBucket.REMOVED){
+            compact.removed.add(change);
+        }else{
+            compact.modified.add(change);
+        }
+    }
+
+    private String compactRowText(SnapshotRow row){
+        if(row == null) return null;
+        String text = row.compactText == null ? row.text : row.compactText;
+        return effectiveCompactKind(row) == RowKind.STACK_LIST ? normalizeStackCompactText(text) : text;
+    }
+
+    private RowKind effectiveCompactKind(SnapshotRow row){
+        if(row == null) return RowKind.TEXT;
+        return row.compactKind == null ? row.kind : row.compactKind;
+    }
+
+    private String compactStacks(Seq<ItemStack> stacks){
+        if(stacks == null || stacks.isEmpty()) return null;
+        StringBuilder out = new StringBuilder();
+        for(ItemStack stack : stacks){
+            if(stack == null || stack.item == null) continue;
+            if(out.length() > 0) out.append(" ");
+            out.append(iconToken(stack.item)).append(" x").append(stack.amount);
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    private String formatCompactValue(String value, RowKind kind){
+        if(value == null) return null;
+        if(kind == RowKind.BUILD_COST || kind == RowKind.STACK_LIST){
+            return Strings.stripColors(value).replaceAll(" *\\n *", " ");
+        }
+        return value;
+    }
+
+    private String cleanCompactValue(String value){
+        if(value == null) return null;
+        String cleaned = value
+            .replace("<Image>", "")
+            .replace("<Stack>", "")
+            .replace("<Collapser>", "")
+            .replaceAll("[ \t]+", " ")
+            .replaceAll(" *\\n *", "\n")
+            .trim();
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    private boolean sameNumbers(SnapshotRow before, SnapshotRow after){
+        if(before == null || after == null) return before == after;
+        if(before.numeric.size != after.numeric.size) return false;
+        for(int i = 0; i < before.numeric.size; i++){
+            if(!before.numeric.get(i).equals(after.numeric.get(i))) return false;
+        }
+        return true;
+    }
+
+    private boolean sameTextAndNumbers(SnapshotRow before, SnapshotRow after){
+        if(before == null || after == null) return before == after;
+        boolean sameText = before.text == null ? after.text == null : before.text.equals(after.text);
+        if(!sameText) return false;
+        if(before.numeric.size != after.numeric.size) return false;
+        for(int i = 0; i < before.numeric.size; i++){
+            if(!before.numeric.get(i).equals(after.numeric.get(i))) return false;
+        }
+        return true;
+    }
+
+    private boolean sameStacks(Seq<ItemStack> before, Seq<ItemStack> after){
+        if(before == null || after == null) return before == after;
+        if(before.size != after.size) return false;
+        for(int i = 0; i < before.size; i++){
+            ItemStack a = before.get(i), b = after.get(i);
+            if(a == null || b == null) return a == b;
+            if(a.item != b.item || a.amount != b.amount) return false;
+        }
+        return true;
+    }
+
+    private Seq<ItemStack> copyStacks(Seq<ItemStack> source){
+        if(source == null) return null;
+        Seq<ItemStack> out = new Seq<>();
+        for(ItemStack stack : source){
+            out.add(stack == null ? null : stack.copy());
+        }
+        return out;
+    }
+
+    private String buildDiff(String before, String after){
+        String left = normalizeText(before);
+        String right = normalizeText(after);
+        if(left == null ? right == null : left.equals(right)) return null;
+        if(left == null && right == null) return null;
+        if(left == null) return addedColorTag() + escape(right) + "[]";
+        if(right == null) return removedColorTag() + escape(left) + "[]";
+        return modifiedOldColorTag() + escape(left) + breakArrow(left, right) + modifiedNewColorTag() + escape(right) + "[]";
+    }
+
+    // The arrow never carries a forced newline: labels word-wrap at spaces and the segment
+    // flow wraps only in front of a value, so "->" always stays on the old-value line.
+    private String breakArrow(String before, String after){
+        return "[] " + arrowColor + "-> []";
+    }
+
+    private float measureRenderedWidth(Table rendered){
+        if(rendered == null) return 0f;
+        rendered.pack();
+        return Math.max(rendered.getPrefWidth(), rendered.getWidth());
+    }
+
+    private float measureMarkupWidth(String text){
+        if(text == null) return 0f;
+        String cleaned = Strings.stripColors(text);
+        float max = 0f;
+        for(String line : cleaned.split("\\n", -1)){
+            Label label = new Label(line == null ? "" : line);
+            max = Math.max(max, label.getPrefWidth());
+        }
+        return max;
+    }
+
+    private boolean isBuildCostDiffRow(InlineRow row){
+        return row != null && (row.buildCostBefore != null || row.buildCostAfter != null);
+    }
+
+    /** Applies diffs only to the native rows that changed; every other dialog node stays untouched. */
+    private void showPatched(ContentInfoDialog dialog, UnlockableContent content){
+        if(dialog == null || content == null) return;
+
+        if(isHiddenEntriesEnabled()) refreshHiddenEntries(true);
+        ContentDiff diff = diffsByContent.get(content);
+        Seq<HiddenEntry> hidden = isHiddenEntriesEnabled() ? hiddenEntriesByContent.get(content) : null;
+        boolean hasDiff = diff != null && !diff.isEmpty();
+        boolean hasHidden = hidden != null && !hidden.isEmpty();
+        if(!hasDiff && !hasHidden) return;
+
+        Table table = findNativeContentTable(dialog.cont);
+        if(table == null) return;
+
+        ContentSnapshot before = baselineSnapshots.get(content);
+        ContentSnapshot after = afterSnapshots.get(content);
+
+        if(hasDiff){
+            applyContentTextDiff(table, content.displayDescription(), diff.description);
+            applyContentTextDiff(table, content.details, diff.details);
+            applyNativeStatDiffs(table, content, before, after, diff);
+        }
+        if(hasHidden){
+            appendHiddenSection(table, hidden);
+        }
+    }
+
+    private Table findNativeContentTable(Element element){
+        if(element == null) return null;
+        if(element instanceof ScrollPane){
+            Element widget = ((ScrollPane)element).getWidget();
+            if(widget instanceof Table) return (Table)widget;
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                Table table = findNativeContentTable(children.get(i));
+                if(table != null) return table;
+            }
+        }
+        return null;
+    }
+
+    private void applyContentTextDiff(Table root, String currentText, String markup){
+        if(root == null || markup == null) return;
+        String expected = normalizeText(currentText);
+        if(expected == null) return;
+
+        Label label = findLabelWithText(root, expected);
+        if(label == null) return;
+        label.setText("[lightgray]" + markup);
+        label.setWrap(true);
+        label.setEllipsis(false);
+    }
+
+    private Label findLabelWithText(Element element, String expected){
+        if(element == null || expected == null) return null;
+        if(element instanceof Label){
+            CharSequence text = ((Label)element).getText();
+            String visible = normalizeText(text == null ? null : Strings.stripColors(text.toString()));
+            return expected.equals(visible) ? (Label)element : null;
+        }
+        if(element instanceof ScrollPane){
+            return findLabelWithText(((ScrollPane)element).getWidget(), expected);
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                Label label = findLabelWithText(children.get(i), expected);
+                if(label != null) return label;
+            }
+        }
+        return null;
+    }
+
+    private void applyNativeStatDiffs(Table root, UnlockableContent content, ContentSnapshot before, ContentSnapshot after, ContentDiff diff){
+        if(root == null || content == null || diff == null) return;
+
+        OrderedSet<String> displayKeys = new OrderedSet<>();
+        if(before != null) displayKeys.addAll(before.order);
+        if(after != null) displayKeys.addAll(after.order);
+        displayKeys.addAll(diff.rows.keys().toSeq());
+
+        for(String key : displayKeys){
+            InlineRow row = diff.rows.get(key);
+            if(row == null) continue;
+
+            SnapshotRow beforeRow = before == null ? null : before.rows.get(key);
+            SnapshotRow afterRow = after == null ? null : after.rows.get(key);
+            SnapshotRow source = afterRow != null ? afterRow : beforeRow;
+            if(source == null) continue;
+
+            NativeStatInset inset = findNativeStatInset(root, source.label);
+            if(inset == null) continue;
+
+            wrapNativeStatInset(inset, row, beforeRow);
+        }
+
+        root.invalidateHierarchy();
+    }
+
+    private void appendHiddenSection(Table root, Seq<HiddenEntry> hidden){
+        if(root == null || hidden == null || hidden.isEmpty()) return;
+
+        float contentWidth = root.getWidth() > 0f ? root.getWidth() : root.getPrefWidth();
+        contentWidth = Math.max(160f, contentWidth - 44f);
+
+        Table section = new Table();
+        section.name = hiddenSectionName;
+        section.left().top().defaults().left().top();
+
+        Label header = new Label("[accent]" + escape(bundle("patchviewer.hidden.title", "Hidden entries")) + "[]");
+        header.setWrap(true);
+        header.setEllipsis(false);
+        section.add(header).left().width(contentWidth).padTop(10f).row();
+
+        int shown = 0;
+        for(HiddenEntry entry : hidden){
+            if(entry == null) continue;
+            if(shown >= hiddenDialogLimit) break;
+            addHiddenEntryRow(section, entry, contentWidth);
+            shown++;
+        }
+        if(hidden.size > shown){
+            Label more = new Label("[lightgray]" + escape(hiddenMoreText(hidden.size - shown)) + "[]");
+            more.setWrap(true);
+            more.setEllipsis(false);
+            section.add(more).left().width(contentWidth).padTop(2f).row();
+        }
+
+        root.row();
+        root.add(section).left().top().width(contentWidth).padLeft(4f);
+        root.invalidateHierarchy();
+    }
+
+    private void addHiddenEntryRow(Table section, HiddenEntry entry, float width){
+        if(section == null || entry == null) return;
+
+        Table row = new Table();
+        row.left().top().defaults().left().top();
+
+        float available = Math.max(120f, width - 8f);
+        String labelText = "[lightgray]" + escape(entry.label) + ":[]";
+        if(entry.container){
+            Label line = new Label(labelText + " " + modifiedNewColorTag() + escape(bundle("patchviewer.hidden.changed", "changed")) + "[]");
+            line.setWrap(true);
+            line.setEllipsis(false);
+            row.add(line).left().width(available);
+            section.add(row).left().width(available).padTop(2f).row();
+            return;
+        }
+
+        String beforeText = entry.before == null ? "" : entry.before;
+        String afterText = entry.after == null ? "" : entry.after;
+
+        Label label = new Label(labelText);
+        label.setWrap(true);
+        label.setEllipsis(false);
+        Label oldLabel = new Label(modifiedOldColorTag() + escape(beforeText) + "[]");
+        oldLabel.setWrap(true);
+        oldLabel.setEllipsis(false);
+        Label arrowLabel = new Label(arrowColor + "->[]");
+        Label newLabel = new Label(modifiedNewColorTag() + escape(afterText) + "[]");
+        newLabel.setWrap(true);
+        newLabel.setEllipsis(false);
+
+        float arrowWidth = Math.max(18f, measureMarkupWidth("->") + 12f);
+        float labelWidth = Math.max(36f, Math.min(available * 0.42f, measureMarkupWidth(escape(entry.label + ": "))));
+        float oldWidth = Math.max(28f, Math.min(available * 0.32f, measureMarkupWidth(escape(beforeText))));
+        float remaining = available - labelWidth - oldWidth - arrowWidth - 8f;
+        boolean inline = remaining >= 60f && measureMarkupWidth(escape(afterText)) <= remaining;
+
+        if(labelWidth + oldWidth + arrowWidth + 60f > available){
+            labelWidth = Math.max(28f, available * 0.34f);
+            oldWidth = Math.max(24f, available * 0.28f);
+            remaining = Math.max(40f, available - labelWidth - oldWidth - arrowWidth - 8f);
+            inline = false;
+        }
+
+        row.add(label).width(labelWidth);
+        row.add(oldLabel).width(oldWidth).padLeft(3f);
+        row.add(arrowLabel).padLeft(3f).padRight(3f);
+        if(inline){
+            row.add(newLabel).width(remaining);
+            section.add(row).left().width(available).padTop(2f).row();
+        }else{
+            section.add(row).left().width(available).padTop(2f).row();
+            Table next = new Table();
+            next.left().top().defaults().left().top();
+            next.add(newLabel).left().width(Math.max(80f, available - 10f));
+            section.add(next).left().width(available).padLeft(10f).row();
+        }
+    }
+
+    private void addHiddenLines(Table table, Seq<HiddenEntry> hidden, float width, int limit){
+        if(table == null || hidden == null || hidden.isEmpty()) return;
+
+        // Always emit the header: build-info mode disables the other headers, and a bare
+        // "field: old -> new" line would be indistinguishable from a modified stat row.
+        addCompactHeader(table, bundle("patchviewer.hidden.title", "Hidden entries"), width);
+
+        int shown = 0;
+        for(HiddenEntry entry : hidden){
+            if(entry == null) continue;
+            if(shown >= limit) break;
+            addCompactLine(table, hiddenEntryMarkup(entry), width);
+            shown++;
+        }
+        if(hidden.size > shown){
+            addCompactLine(table, "[lightgray]" + escape(hiddenMoreText(hidden.size - shown)) + "[]", width);
+        }
+    }
+
+    private String hiddenEntryMarkup(HiddenEntry entry){
+        if(entry == null) return null;
+        String label = escape(entry.label);
+        if(entry.container){
+            return "[lightgray]" + label + ": []" + modifiedNewColorTag()
+                + escape(bundle("patchviewer.hidden.changed", "changed")) + "[]";
+        }
+        String beforeText = entry.before == null ? "" : entry.before;
+        String afterText = entry.after == null ? "" : entry.after;
+        // Non-breaking space keeps the arrow on the old value's line when the label wraps.
+        return "[lightgray]" + label + ": []"
+            + modifiedOldColorTag() + escape(beforeText) + "\u00A0"
+            + arrowColor + "-> " + modifiedNewColorTag() + escape(afterText) + "[]";
+    }
+
+    private String hiddenMoreText(int count){
+        return bundle("patchviewer.hidden.more", "{0} more").replace("{0}", String.valueOf(count));
+    }
+
+    private NativeStatInset findNativeStatInset(Table root, String label){
+        if(root == null || label == null) return null;
+        String expected = label.trim() + ":";
+        Seq<Cell> cells = root.getCells();
+        for(int i = 0; i < cells.size; i++){
+            Element child = cells.get(i).get();
+            if(!(child instanceof Table)) continue;
+            Table candidate = (Table)child;
+            if(hiddenSectionName.equals(candidate.name)) continue;
+            Seq<Cell> candidateCells = candidate.getCells();
+            if(candidateCells.isEmpty()) continue;
+            Element first = candidateCells.first().get();
+            if(!(first instanceof Label)) continue;
+            CharSequence text = ((Label)first).getText();
+            String visible = Strings.stripColors(text == null ? "" : text.toString()).trim();
+            if(expected.equals(visible)) return new NativeStatInset(cells.get(i), candidate);
+        }
+        return null;
+    }
+
+    /**
+     * Leaves the original post-patch inset intact and wraps it with a baseline inset.  Moving the
+     * original element rather than rebuilding it preserves the game's native icon sizing, click
+     * listeners, wrapping, and any version-specific StatValue layout behavior.
+     */
+    private void wrapNativeStatInset(NativeStatInset target, InlineRow row, SnapshotRow beforeRow){
+        if(target == null || target.table == null || target.cell == null) return;
+
+        Table beforeInset = baselineInset(beforeRow);
+        Seq<LabelState> beforeLabels = baselineInsetLabels(beforeRow, beforeInset);
+        Seq<LabelState> afterLabels = new Seq<>();
+        captureLabelStates(target.table, afterLabels);
+
+        if(beforeInset != null && !afterLabels.isEmpty()){
+            if(beforeRow != null && beforeRow.nativeInset == null){
+                // A plain snapshot has a single reconstructed value label while the native after
+                // row can contain several cells (number and unit, for example). Keep the cells
+                // intact and color each side as a modification instead of treating them as a
+                // removal/addition mismatch.
+                restoreLabelStates(beforeLabels);
+                highlightStatValueLabels(beforeLabels, modifiedOldColorTag());
+                highlightStatValueLabels(afterLabels, modifiedNewColorTag());
+            }else{
+                prepareRenderedDiff(beforeLabels, afterLabels);
+            }
+            if(row.kind == RowKind.STACK_LIST){
+                highlightChangedGroups(beforeLabels);
+                highlightChangedGroups(afterLabels);
+            }
+        }else if(beforeInset != null){
+            restoreLabelStates(beforeLabels);
+            highlightStatValueLabels(beforeLabels, removedColorTag());
+            if(row.kind == RowKind.STACK_LIST) highlightChangedGroups(beforeLabels);
+        }else{
+            highlightStatValueLabels(afterLabels, addedColorTag());
+            if(row.kind == RowKind.STACK_LIST) highlightChangedGroups(afterLabels);
+        }
+
+        Table wrapper = new Table();
+        wrapper.left().top().defaults().left().top();
+
+        if(beforeInset != null){
+            Table owner = target.cell == null ? null : target.cell.getTable();
+            float available = 0f;
+            if(owner != null){
+                available = owner.getWidth() > 0f ? owner.getWidth() : owner.getPrefWidth();
+            }
+            available = Math.max(140f, available - 12f);
+            // Arrow padding plus the wrappers' padding around each panel.
+            float inlineWidth = measureRenderedWidth(beforeInset) + measureRenderedWidth(target.table)
+                + measureMarkupWidth("->") + 24f;
+            if(inlineWidth <= available){
+                // The trailing value inset is appended right after the arrow by the shared tail below,
+                // keeping "[old] -> [new]" on one line.
+                wrapper.add(beforeInset).left().top();
+                wrapper.add(arrowColor + "->[]").center().padLeft(6f).padRight(6f).top();
+            }else{
+                // Keep the arrow beside the old value; only the new value drops to its own row.
+                wrapper.table(oldRow -> {
+                    oldRow.left().top().defaults().left().top();
+                    oldRow.add(beforeInset).left().top().growX().fillX();
+                    oldRow.add(arrowColor + "->[]").right().padLeft(8f).top();
+                }).left().top().fillX().growX().padBottom(2f).row();
+            }
+        }
+
+        // Replace the root cell first, then move the original inset into the wrapper. This avoids
+        // rebuilding any post-patch StatValue widgets and keeps their original event handlers.
+        target.cell.setElement(wrapper);
+        if(beforeInset != null) hideRepeatedNativeStatLabel(target.table);
+        wrapper.add(target.table).left().top().fillX().growX();
+    }
+
+    /**
+     * The baseline row already owns the stat key. Keep the native after row's first cell so
+     * colspan-based StatValues retain their original column count, but make its duplicate label
+     * visually empty.
+     */
+    private void hideRepeatedNativeStatLabel(Table inset){
+        if(inset == null) return;
+        Seq<Cell> cells = inset.getCells();
+        if(cells.isEmpty()) return;
+        Element first = cells.first().get();
+        if(first instanceof Label){
+            ((Label)first).setText("");
+        }
+    }
+
+    private Table baselineInset(SnapshotRow row){
+        if(row == null) return null;
+        if(row.nativeInset != null) return row.nativeInset;
+
+        // Plain rows have no child widgets to preserve. Their snapshot text is sufficient for a
+        // baseline row while the post-patch row remains the original game-created widget.
+        Table inset = new Table();
+        inset.left();
+        inset.add("[lightgray]" + escape(row.label == null ? "" : row.label) + ":[] ").left().top();
+        Label value = new Label(row.text == null ? "" : row.text);
+        value.setWrap(true);
+        value.setEllipsis(false);
+        // Wrap-enabled labels report a preferred width of zero, so pack-based measurement and
+        // the inline fit check in wrapNativeStatInset would under-count the old value and
+        // squeeze "[old] -> [new]" into overlapping text. Anchor the column with the real
+        // text width instead.
+        inset.add(value).left().top().fillX().growX()
+            .minWidth(Math.max(1f, measureMarkupWidth(row.text == null ? "" : row.text)));
+        return inset;
+    }
+
+    private Seq<LabelState> baselineInsetLabels(SnapshotRow row, Table inset){
+        if(row != null && row.nativeInset == inset) return row.nativeLabels;
+        Seq<LabelState> labels = new Seq<>();
+        captureLabelStates(inset, labels);
+        return labels;
+    }
+
+    /** Keeps the static stat label neutral when an entire added or removed row is highlighted. */
+    private void highlightStatValueLabels(Seq<LabelState> labels, String colorTag){
+        if(labels == null) return;
+        for(int i = 1; i < labels.size; i++){
+            highlightWholeLabel(labels.get(i), colorTag);
+        }
+    }
+
+    private boolean renderCompactStackDiff(Table table, CompactChange change, float width){
+        if(table == null || change == null || (change.kind != RowKind.STACK_LIST && change.kind != RowKind.BUILD_COST)) return false;
+        Seq<CompactStackItem> beforeItems = parseCompactStackItems(change.before);
+        Seq<CompactStackItem> afterItems = parseCompactStackItems(change.after);
+        Seq<CompactStackChange> changes = buildCompactStackChanges(beforeItems, afterItems);
+        if(changes == null || changes.isEmpty()) return false;
+
+        Table row = new Table();
+        row.left().top().defaults().left().top();
+        String labelColor = change.bucket == CompactBucket.ADDED ? addedColorTag()
+            : change.bucket == CompactBucket.REMOVED ? removedColorTag() : "[lightgray]";
+        String labelPrefix = change.bucket == CompactBucket.ADDED ? "+" : "";
+        row.add(labelColor + labelPrefix + escape(change.label == null ? "" : change.label) + ":[]").left().top().row();
+
+        Seq<Element> beforeComponents = new Seq<>();
+        for(CompactStackItem item : beforeItems){
+            CompactStackChange stackChange = findCompactStackChange(changes, item, true);
+            if(stackChange == null) continue;
+            String color = stackChange.after == null ? removedColorTag() : modifiedOldColorTag();
+            beforeComponents.add(compactStackView(item.content, item.amount, color));
+        }
+
+        Seq<Element> afterComponents = new Seq<>();
+        for(CompactStackItem item : afterItems){
+            CompactStackChange stackChange = findCompactStackChange(changes, item, false);
+            if(stackChange == null) continue;
+            String color = stackChange.before == null ? addedColorTag() : modifiedNewColorTag();
+            afterComponents.add(compactStackView(item.content, item.amount, color));
+        }
+
+        if(beforeComponents.isEmpty() && afterComponents.isEmpty()) return false;
+
+        if(!beforeComponents.isEmpty() && !afterComponents.isEmpty()){
+            float arrowWidth = measureMarkupWidth("->") + compactComponentGap * 2f;
+            boolean fitsOneLine = compactFlowWidth(beforeComponents) + arrowWidth + compactFlowWidth(afterComponents) <= width;
+            Seq<Element> beforeLine = new Seq<>(beforeComponents);
+            beforeLine.add(new Label(arrowColor + "->[]"));
+            if(fitsOneLine){
+                Seq<Element> merged = new Seq<>(beforeLine);
+                merged.addAll(afterComponents);
+                addCompactFlow(row, merged, width);
+            }else{
+                // Break only between "->" and the new value so the arrow stays on the old-value line.
+                addCompactFlow(row, beforeLine, width);
+                addCompactFlow(row, afterComponents, width);
+            }
+        }else if(!beforeComponents.isEmpty()){
+            addCompactFlow(row, beforeComponents, width);
+        }else{
+            addCompactFlow(row, afterComponents, width);
+        }
+
+        table.add(row).left().top().growX().fillX().width(width);
+        table.row();
+        return true;
+    }
+
+    /** Total laid-out width of a flow's components, using the same metrics as {@link AtomicStatFlow#rebuild}. */
+    private float compactFlowWidth(Seq<Element> components){
+        float total = 0f;
+        boolean hasContent = false;
+        for(Element component : components){
+            if(component == null) continue;
+            component.pack();
+            float componentWidth = Math.max(1f, Math.max(component.getPrefWidth(), component.getWidth()));
+            total += hasContent ? compactComponentGap + componentWidth : componentWidth;
+            hasContent = true;
+        }
+        return total;
+    }
+
+    private void addCompactFlow(Table table, Seq<Element> components, float width){
+        if(table == null || components == null || components.isEmpty()) return;
+        AtomicStatFlow flow = new AtomicStatFlow(components);
+        flow.rebuild(width);
+        table.add(flow).left().top().growX().fillX().width(width).row();
+    }
+
+    private CompactStackChange findCompactStackChange(Seq<CompactStackChange> changes, CompactStackItem item, boolean before){
+        if(changes == null || item == null) return null;
+        for(CompactStackChange change : changes){
+            if(change == null) continue;
+            if(before ? change.before == item : change.after == item){
+                return change;
+            }
+        }
+        return null;
+    }
+
+    private void colorStackAmountLabels(Element element, String amountColorTag){
+        if(element == null || amountColorTag == null) return;
+        if(element instanceof Label){
+            Label label = (Label)element;
+            String raw = label.getText() == null ? "" : label.getText().toString();
+            String visible = Strings.stripColors(raw);
+            if(visible != null && numberPattern.matcher(visible).find()){
+                label.setColor(1f, 1f, 1f, label.color.a);
+                label.setText(amountColorTag + escape(visible) + "[]");
+            }
+            return;
+        }
+        if(element instanceof ScrollPane){
+            colorStackAmountLabels(((ScrollPane)element).getWidget(), amountColorTag);
+            return;
+        }
+        if(element instanceof Group){
+            Seq<Element> children = ((Group)element).getChildren();
+            for(int i = 0; i < children.size; i++){
+                colorStackAmountLabels(children.get(i), amountColorTag);
+            }
+        }
+    }
+
+    private void shareContent(UnlockableContent content, boolean detailed){
+        try{
+            Class<?> share = Class.forName("mindustryX.features.ShareFeature");
+            share.getMethod("shareContent", UnlockableContent.class, boolean.class).invoke(null, content, detailed);
+        }catch(Throwable ignored){
+        }
+    }
+
+    private void buildSettings(SettingsMenuDialog.SettingsTable table){
+        table.defaults().growX().pad(4f).left();
+
+        table.checkPref(keyEnabled, true);
+        table.checkPref(keyHiddenEntries, true);
+        table.pref(new QuickDisplayModeSetting());
+        table.sliderPref(keyQuickHudOpacity, 70, 20, 100, 1, value -> value + "%");
+        table.sliderPref(keyQuickHudWidth, 420, 100, 900, 10, value -> value + "px");
+        addColorSetting(table, "patchviewer.settings.hud-background", "HUD background color", keyQuickHudBackgroundColor, defaultQuickHudBackgroundColor);
+        table.pref(new MessageSetting("patchviewer-color-hint", "patchviewer.settings.color-hint", "Colors support named values like gold and hex values like #ffd700 or ffd700."));
+        addColorSetting(table, "patchviewer.settings.removed", "Removed entry color", keyRemovedColor, defaultRemovedColor);
+        addColorSetting(table, "patchviewer.settings.modified-old", "Modified entry color (before)", keyModifiedOldColor, defaultModifiedOldColor);
+        addColorSetting(table, "patchviewer.settings.modified-new", "Modified entry color (after)", keyModifiedNewColor, defaultModifiedNewColor);
+        addColorSetting(table, "patchviewer.settings.added", "Added entry color", keyAddedColor, defaultAddedColor);
+    }
+
+    /** Populates a {@link mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable} with this mod's settings. */
+    public void bekBuildSettings(SettingsMenuDialog.SettingsTable table){
+        buildSettings(table);
+    }
+
+
+    private void addColorSetting(SettingsMenuDialog.SettingsTable table, String titleKey, String titleFallback, String key, String defaultValue){
+        table.pref(new ColorSetting(key, titleKey, titleFallback, defaultValue));
+    }
+
+    private String settingTitle(String key, String fallbackKey, String fallback){
+        String defaultTitle = bundle(fallbackKey, fallback);
+        return Core.bundle == null ? defaultTitle : Core.bundle.get("setting." + key + ".name", defaultTitle);
+    }
+
+    private class QuickDisplayModeSetting extends SettingsMenuDialog.SettingsTable.Setting{
+        QuickDisplayModeSetting(){
+            super(keyQuickDisplayMode);
+            title = settingTitle(name, "patchviewer.settings.quick-mode", "Quick display mode");
+        }
+
+        @Override
+        public void add(SettingsMenuDialog.SettingsTable table){
+            Cell<Table> cell = table.table(row -> {
+                row.left().defaults().left();
+                row.add(title).width(210f).wrap().padRight(8f);
+
+                CheckBox cursor = new CheckBox(modeLabel(quickModeHud));
+                CheckBox buildInfo = new CheckBox(modeLabel(quickModeBuildInfo));
+                boolean[] updating = {false};
+                Runnable refresh = () -> {
+                    updating[0] = true;
+                    String mode = readQuickDisplayMode();
+                    cursor.setChecked(quickModeHud.equals(mode));
+                    buildInfo.setChecked(quickModeBuildInfo.equals(mode));
+                    updating[0] = false;
+                };
+
+                cursor.changed(() -> {
+                    if(updating[0]) return;
+                    Core.settings.put(name, cursor.isChecked() ? quickModeHud : quickModeBuildInfo);
+                    refresh.run();
+                });
+                buildInfo.changed(() -> {
+                    if(updating[0]) return;
+                    Core.settings.put(name, buildInfo.isChecked() ? quickModeBuildInfo : quickModeHud);
+                    refresh.run();
+                });
+
+                refresh.run();
+                row.add(cursor).padRight(18f);
+                row.add(buildInfo);
+            }).growX().fillX();
+
+            addDesc(cell.get());
+            table.row();
+        }
+    }
+
+    private class MessageSetting extends SettingsMenuDialog.SettingsTable.Setting{
+        private final String messageKey;
+        private final String messageFallback;
+
+        MessageSetting(String name, String messageKey, String messageFallback){
+            super(name);
+            title = null;
+            this.messageKey = messageKey;
+            this.messageFallback = messageFallback;
+        }
+
+        @Override
+        public void add(SettingsMenuDialog.SettingsTable table){
+            table.add("[lightgray]" + bundle(messageKey, messageFallback) + "[]").left().wrap().growX();
+            table.row();
+        }
+    }
+
+    private class ColorSetting extends SettingsMenuDialog.SettingsTable.Setting{
+        private final String defaultValue;
+
+        ColorSetting(String name, String titleKey, String titleFallback, String defaultValue){
+            super(name);
+            title = settingTitle(name, titleKey, titleFallback);
+            this.defaultValue = defaultValue;
+        }
+
+        @Override
+        public void add(SettingsMenuDialog.SettingsTable table){
+            Cell<Table> cell = table.table(row -> {
+                row.left().defaults().left();
+
+                row.add(title).width(210f).wrap().padRight(8f);
+
+                TextField field = new TextField(readColorSetting(name, defaultValue));
+                field.setMessageText(defaultValue);
+                row.add(field).minWidth(180f).growX().maxWidth(280f);
+
+                Image preview = new Image(Tex.whiteui);
+                preview.setColor(readColorValue(name, defaultValue));
+                row.add(preview).size(26f).padLeft(8f).padRight(8f);
+
+                Label sample = new Label("");
+                sample.setColor(Color.white);
+                row.add(sample).minWidth(64f).left();
+
+                boolean[] updating = {false};
+                Runnable refresh = () -> {
+                    String normalized = normalizeColorSpec(field.getText());
+                    if(normalized != null){
+                        if(!updating[0]){
+                            Core.settings.put(name, normalized);
+                        }
+                        preview.setColor(parseColorSpec(normalized, readColorValue(name, defaultValue)));
+                        sample.setText(colorTag(normalized) + bundle("patchviewer.settings.preview", "Preview") + "[]");
+                    }else{
+                        preview.setColor(readColorValue(name, defaultValue));
+                        sample.setText("[lightgray]" + bundle("patchviewer.settings.invalid", "Invalid") + "[]");
+                    }
+                };
+
+                field.changed(() -> {
+                    if(updating[0]) return;
+                    refresh.run();
+                });
+                updating[0] = true;
+                refresh.run();
+                updating[0] = false;
+
+                row.button(bundle("patchviewer.settings.reset", "Reset"), Styles.flatt, () -> {
+                    Core.settings.remove(name);
+                    updating[0] = true;
+                    field.setText(readColorSetting(name, defaultValue));
+                    refresh.run();
+                    updating[0] = false;
+                }).height(42f).padLeft(8f);
+            }).growX().fillX();
+
+            addDesc(cell.get());
+            table.row();
+        }
+    }
+
+    private String bundle(String key, String fallback){
+        return Core.bundle == null ? fallback : Core.bundle.get(key, fallback);
+    }
+
+    private String escape(String text){
+        return text == null ? "null" : text.replace("[", "[[");
+    }
+
+    private boolean isPatchViewerEnabled(){
+        return Core.settings.getBool(keyEnabled, true);
+    }
+
+    private boolean isHiddenEntriesEnabled(){
+        return isPatchViewerEnabled() && Core.settings.getBool(keyHiddenEntries, true);
+    }
+
+    private String readQuickDisplayMode(){
+        String mode = Core.settings.getString(keyQuickDisplayMode, quickModeHud);
+        return quickModeBuildInfo.equals(mode) ? quickModeBuildInfo : quickModeHud;
+    }
+
+    private String modeLabel(String mode){
+        return quickModeBuildInfo.equals(mode)
+            ? bundle("patchviewer.settings.quick-mode.buildinfo", "Build info")
+            : bundle("patchviewer.settings.quick-mode.cursor", "Near cursor");
+    }
+
+    private float readQuickHudOpacity(){
+        return Mathf.clamp(Core.settings.getInt(keyQuickHudOpacity, 70), 20, 100) / 100f;
+    }
+
+    private float readQuickHudWidth(){
+        return Mathf.clamp(Core.settings.getInt(keyQuickHudWidth, 420), 100, 900);
+    }
+
+    private Color readQuickHudBackgroundColor(){
+        return readColorValue(keyQuickHudBackgroundColor, defaultQuickHudBackgroundColor);
+    }
+
+    private String removedColorTag(){
+        return colorTag(readColorSetting(keyRemovedColor, defaultRemovedColor));
+    }
+
+    private String modifiedOldColorTag(){
+        return colorTag(readColorSetting(keyModifiedOldColor, defaultModifiedOldColor));
+    }
+
+    private String modifiedNewColorTag(){
+        return colorTag(readColorSetting(keyModifiedNewColor, defaultModifiedNewColor));
+    }
+
+    private String addedColorTag(){
+        return colorTag(readColorSetting(keyAddedColor, defaultAddedColor));
+    }
+
+    private String readColorSetting(String key, String fallback){
+        String raw = Core.settings.getString(key, fallback);
+        String normalized = normalizeColorSpec(raw);
+        if(normalized == null){
+            normalized = normalizeColorSpec(fallback);
+        }
+        return normalized == null ? fallback : normalized;
+    }
+
+    private Color readColorValue(String key, String fallback){
+        return parseColorSpec(readColorSetting(key, fallback), Color.white);
+    }
+
+    private String normalizeColorSpec(String raw){
+        if(raw == null) return null;
+        String text = raw.trim();
+        if(text.isEmpty()) return null;
+
+        if(isHexColorSpec(text)){
+            return "#" + stripLeadingHash(text).toUpperCase(Locale.ROOT);
+        }
+
+        String lower = text.toLowerCase(Locale.ROOT);
+        if(Colors.get(lower) != null) return lower;
+        if(Colors.get(text) != null) return text;
+        String upper = text.toUpperCase(Locale.ROOT);
+        if(Colors.get(upper) != null) return upper;
+        return null;
+    }
+
+    private boolean isHexColorSpec(String raw){
+        String text = stripLeadingHash(raw);
+        if(text.length() != 6 && text.length() != 8) return false;
+        for(int i = 0; i < text.length(); i++){
+            char c = text.charAt(i);
+            boolean digit = c >= '0' && c <= '9';
+            boolean lower = c >= 'a' && c <= 'f';
+            boolean upper = c >= 'A' && c <= 'F';
+            if(!digit && !lower && !upper) return false;
+        }
+        return true;
+    }
+
+    private String stripLeadingHash(String raw){
+        if(raw == null) return "";
+        return raw.startsWith("#") ? raw.substring(1) : raw;
+    }
+
+    private Color parseColorSpec(String raw, Color fallback){
+        String normalized = normalizeColorSpec(raw);
+        if(normalized == null) return fallback;
+        try{
+            if(normalized.startsWith("#")){
+                return Color.valueOf(normalized.substring(1));
+            }
+            Color named = Colors.get(normalized);
+            if(named == null) named = Colors.get(normalized.toLowerCase(Locale.ROOT));
+            if(named == null) named = Colors.get(normalized.toUpperCase(Locale.ROOT));
+            return named == null ? fallback : named;
+        }catch(Throwable ignored){
+            return fallback;
+        }
+    }
+
+    private String colorTag(String raw){
+        String normalized = normalizeColorSpec(raw);
+        if(normalized == null) normalized = "#FFFFFF";
+        if(normalized.startsWith("#")){
+            return "[#" + normalized.substring(1) + "]";
+        }
+        return "[" + normalized + "]";
+    }
+
+    private static class Reflector{
+        static Object get(Object object, String fieldName){
+            try{
+                Class<?> current = object.getClass();
+                while(current != null && current != Object.class){
+                    try{
+                        Field field = current.getDeclaredField(fieldName);
+                        field.setAccessible(true);
+                        return field.get(object);
+                    }catch(NoSuchFieldException ignored){
+                        current = current.getSuperclass();
+                    }
+                }
+            }catch(Throwable ignored){
+            }
+            return null;
+        }
+    }
+
+    private static class AtomicStatFlow extends Table{
+        final Seq<Element> components = new Seq<>();
+        float layoutWidth = -1f;
+
+        AtomicStatFlow(Seq<Element> components){
+            if(components != null) this.components.addAll(components);
+            left().top();
+        }
+
+        float largestComponentWidth(){
+            float width = 0f;
+            for(Element component : components){
+                if(component == null) continue;
+                component.pack();
+                width = Math.max(width, Math.max(component.getPrefWidth(), component.getWidth()));
+            }
+            return width;
+        }
+
+        void rebuild(float availableWidth){
+            float width = Math.max(1f, availableWidth);
+            if(Math.abs(layoutWidth - width) < 0.5f && !getCells().isEmpty()){
+                setWidth(width);
+                return;
+            }
+
+            for(Element component : components){
+                if(component != null) component.remove();
+            }
+            clearChildren();
+
+            Table line = new Table();
+            line.left().top().defaults().left().top();
+            float usedWidth = 0f;
+            boolean hasContent = false;
+            for(Element component : components){
+                if(component == null) continue;
+                component.pack();
+                float componentWidth = Math.max(1f, Math.max(component.getPrefWidth(), component.getWidth()));
+                float nextWidth = hasContent ? usedWidth + compactComponentGap + componentWidth : componentWidth;
+                if(hasContent && nextWidth > width){
+                    add(line).left().top().row();
+                    line = new Table();
+                    line.left().top().defaults().left().top();
+                    usedWidth = 0f;
+                    hasContent = false;
+                }
+                line.add(component).left().top().padLeft(hasContent ? compactComponentGap : 0f);
+                usedWidth += (hasContent ? compactComponentGap : 0f) + componentWidth;
+                hasContent = true;
+            }
+            if(hasContent){
+                add(line).left().top();
+            }
+
+            layoutWidth = width;
+            setWidth(width);
+            invalidateHierarchy();
+        }
+    }
+
+    private static class HiddenPatchRecord{
+        final Object target;
+        final Field field;
+        final Object oldValue;
+
+        HiddenPatchRecord(Object target, Field field, Object oldValue){
+            this.target = target;
+            this.field = field;
+            this.oldValue = oldValue;
+        }
+    }
+
+    private static class HiddenOwner{
+        final UnlockableContent content;
+        final String fieldName;
+
+        HiddenOwner(UnlockableContent content, String fieldName){
+            this.content = content;
+            this.fieldName = fieldName;
+        }
+    }
+
+    private static class HiddenEntry{
+        final String path;
+        final String label;
+        final String before;
+        final String after;
+        final boolean container;
+
+        HiddenEntry(String path, String label, String before, String after, boolean container){
+            this.path = path;
+            this.label = label;
+            this.before = before;
+            this.after = after;
+            this.container = container;
+        }
+    }
+
+    private static class ContentSnapshot{
+        String title;
+        String description;
+        String details;
+        Seq<ItemStack> buildCost;
+        final OrderedSet<String> order = new OrderedSet<>();
+        final ObjectMap<String, SnapshotRow> rows = new ObjectMap<>();
+    }
+
+    private static class SnapshotRow{
+        final StatCat cat;
+        final Stat stat;
+        final String label;
+        RowKind kind;
+        RowKind compactKind;
+        String text;
+        String compactText;
+        Seq<String> numeric = new Seq<>();
+        Table rendered;
+        final Seq<LabelState> labels = new Seq<>();
+        Table nativeInset;
+        final Seq<LabelState> nativeLabels = new Seq<>();
+
+        SnapshotRow(StatCat cat, Stat stat, String label){
+            this.cat = cat;
+            this.stat = stat;
+            this.label = label;
+        }
+    }
+
+    private static class ContentDiff{
+        String title;
+        String description;
+        String details;
+        final ObjectMap<String, InlineRow> rows = new ObjectMap<>();
+
+        boolean isEmpty(){
+            return title == null && description == null && details == null && rows.isEmpty();
+        }
+    }
+
+    private static class CompactDiff{
+        final Seq<CompactChange> added = new Seq<>();
+        final Seq<CompactChange> modified = new Seq<>();
+        final Seq<CompactChange> removed = new Seq<>();
+        final Seq<CompactChange> ordered = new Seq<>();
+
+        boolean isEmpty(){
+            return ordered.isEmpty();
+        }
+    }
+
+    private static class CompactChange{
+        final String label;
+        final String before;
+        final String after;
+        final RowKind kind;
+        final CompactBucket bucket;
+        Seq<CompactStackChange> stackChanges;
+
+        CompactChange(String label, String before, String after, RowKind kind, CompactBucket bucket){
+            this.label = label;
+            this.before = before;
+            this.after = after;
+            this.kind = kind == null ? RowKind.TEXT : kind;
+            this.bucket = bucket == null ? CompactBucket.MODIFIED : bucket;
+        }
+    }
+
+    private static class CompactStackChange{
+        final CompactStackItem before;
+        final CompactStackItem after;
+        final CompactBucket bucket;
+
+        CompactStackChange(CompactStackItem before, CompactStackItem after, CompactBucket bucket){
+            this.before = before;
+            this.after = after;
+            this.bucket = bucket;
+        }
+    }
+
+    private enum CompactBucket{
+        ADDED,
+        MODIFIED,
+        REMOVED
+    }
+
+    private static class ContentMatch{
+        final UnlockableContent content;
+        final int start;
+        final int end;
+
+        ContentMatch(UnlockableContent content, int start, int end){
+            this.content = content;
+            this.start = start;
+            this.end = end;
+        }
+    }
+
+    private static class StackAmount{
+        final String amountText;
+        final int end;
+        final String suffix;
+
+        StackAmount(String amountText, int end, String suffix){
+            this.amountText = amountText;
+            this.end = end;
+            this.suffix = suffix;
+        }
+    }
+
+    private static class CompactAmountSuffix{
+        final String suffix;
+        final int end;
+
+        CompactAmountSuffix(String suffix, int end){
+            this.suffix = suffix;
+            this.end = end;
+        }
+    }
+
+    private static class RateSuffix{
+        final String suffix;
+        final int end;
+
+        RateSuffix(String suffix, int end){
+            this.suffix = suffix;
+            this.end = end;
+        }
+    }
+
+    private static class RateAmount{
+        final String amountText;
+        final String suffix;
+        final int end;
+
+        RateAmount(String amountText, String suffix, int end){
+            this.amountText = amountText;
+            this.suffix = suffix;
+            this.end = end;
+        }
+    }
+
+    private static class CompactPart{
+        final StringBuilder text = new StringBuilder();
+        boolean hasIcon;
+
+        CompactPart(){
+        }
+
+        CompactPart(String text, boolean hasIcon){
+            if(text != null) this.text.append(text);
+            this.hasIcon = hasIcon;
+        }
+    }
+
+    private class CompactStackItem{
+        final UnlockableContent content;
+        final String amount;
+
+        CompactStackItem(UnlockableContent content, String amount){
+            this.content = content;
+            this.amount = amount == null ? "" : amount;
+        }
+
+        String markup(){
+            return iconToken(content) + (amount.isEmpty() ? "" : " " + amount);
+        }
+    }
+
+    private static class QuickTarget{
+        final UnlockableContent content;
+        final Table topTable;
+        final boolean mi2u;
+
+        QuickTarget(UnlockableContent content, Table topTable, boolean mi2u){
+            this.content = content;
+            this.topTable = topTable;
+            this.mi2u = mi2u;
+        }
+    }
+
+    private static class InlineRow{
+        final String label;
+        final String markup;
+        final Seq<ItemStack> buildCostBefore;
+        final Seq<ItemStack> buildCostAfter;
+        final boolean nativeWidgetDiff;
+        final RowKind kind;
+        final Table beforeRendered;
+        final Seq<LabelState> beforeLabels;
+        final Table afterRendered;
+        final Seq<LabelState> afterLabels;
+
+        InlineRow(String label, String markup){
+            this(label, markup, null, null, false, RowKind.TEXT, null, null, null, null);
+        }
+
+        InlineRow(String label, String markup, Seq<ItemStack> buildCostBefore, Seq<ItemStack> buildCostAfter, boolean nativeWidgetDiff, RowKind kind, Table beforeRendered, Seq<LabelState> beforeLabels, Table afterRendered, Seq<LabelState> afterLabels){
+            this.label = label;
+            this.markup = markup;
+            this.buildCostBefore = buildCostBefore;
+            this.buildCostAfter = buildCostAfter;
+            this.nativeWidgetDiff = nativeWidgetDiff;
+            this.kind = kind;
+            this.beforeRendered = beforeRendered;
+            this.beforeLabels = beforeLabels;
+            this.afterRendered = afterRendered;
+            this.afterLabels = afterLabels;
+        }
+
+        static InlineRow forText(String label, String markup){
+            return new InlineRow(label, markup);
+        }
+
+        static InlineRow forBuildCost(String label, Seq<ItemStack> before, Seq<ItemStack> after){
+            return new InlineRow(label, null, before, after, false, RowKind.BUILD_COST, null, null, null, null);
+        }
+
+        static InlineRow forNative(String label, RowKind kind, Table beforeRendered, Seq<LabelState> beforeLabels, Table afterRendered, Seq<LabelState> afterLabels){
+            return new InlineRow(label, null, null, null, true, kind, beforeRendered, beforeLabels, afterRendered, afterLabels);
+        }
+    }
+
+    private static class NativeStatInset{
+        final Cell cell;
+        final Table table;
+
+        NativeStatInset(Cell cell, Table table){
+            this.cell = cell;
+            this.table = table;
+        }
+    }
+
+    private static class LabelState{
+        final Label label;
+        final String rawText;
+        final String visibleText;
+        final String normalizedText;
+        final String matchKey;
+        final String groupKey;
+        final boolean insideStack;
+        final Color originalColor;
+        final boolean originalWrap;
+        final String originalEllipsis;
+
+        LabelState(Label label, String rawText, String visibleText, String normalizedText, String matchKey, String groupKey, boolean insideStack, Color originalColor, boolean originalWrap, String originalEllipsis){
+            this.label = label;
+            this.rawText = rawText;
+            this.visibleText = visibleText == null ? "" : visibleText;
+            this.normalizedText = normalizedText;
+            this.matchKey = matchKey == null ? "" : matchKey;
+            this.groupKey = groupKey == null ? "" : groupKey;
+            this.insideStack = insideStack;
+            this.originalColor = originalColor;
+            this.originalWrap = originalWrap;
+            this.originalEllipsis = originalEllipsis;
+        }
+    }
+
+    private enum RowKind{
+        TEXT,
+        STACK_LIST,
+        BUILD_COST,
+        NATIVE_PANEL,
+        AMMO_PANEL,
+        WEAPON_PANEL,
+        ABILITY_PANEL
+    }
+}

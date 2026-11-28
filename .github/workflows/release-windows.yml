@@ -1,0 +1,96 @@
+name: Release Windows
+
+# 在 Linux runner 上交叉编译 Windows exe，并发布到本仓库 Releases。
+# 不需要 Windows 机器 / Wine；产物由 GITHUB_TOKEN 上传，无需额外密钥。
+on:
+  push:
+    branches: [master, windows-exe]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/release-windows.yml'
+      - 'RELEASE_NOTES.md'
+      - 'NOTICE'
+      - 'SOURCES.md'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
+            nsis python3-pil unzip curl zip
+          sudo apt-get install -y -qq p7zip-full 2>/dev/null \
+            || sudo apt-get install -y -qq 7zip
+          command -v 7z
+          command -v makensis
+          command -v x86_64-w64-mingw32-windres
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Fetch GPL-3.0 full text
+        run: |
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/Anuken/Mindustry/v160.7/LICENSE \
+            -o LICENSE
+          wc -l LICENSE
+
+      - name: Build Windows exe and portable zip
+        env:
+          # GitHub runner 在海外，用 Adoptium 官方 API 取 JRE 更快；
+          # Mindustry.jar 直接从官方 Release 下载（同域）。
+          SS_JRE_URL_PRIMARY: https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse
+          SS_JRE_URL_FALLBACK: https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jre/x64/windows/OpenJDK17U-jre_x64_windows_hotspot_17.0.21_9.zip
+          SS_HTTP_TIMEOUT: '600'
+        run: bash windows/build-exe.sh
+
+      - name: Verify artifacts
+        run: |
+          set -e
+          ls -lh windows/dist/
+          file windows/dist/*.exe
+          unzip -t windows/dist/*Portable.zip | tail -3
+          test -s windows/dist/SHA256SUMS.txt
+          cat windows/dist/SHA256SUMS.txt
+          # 包内必须带齐 GPL 合规文件
+          unzip -l windows/dist/*Portable.zip | grep -E 'LICENSE|NOTICE|SOURCES.md|Mindustry.jar|ProjectShatteredStar.jar|javaw.exe'
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: windows-v0.1.0
+        run: |
+          set -euo pipefail
+          # 幂等：重跑时替换同一 tag 的资产
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag || true
+          fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Windows · Mindustry v160.7 + 碎星计划 (Mod 0.2.0)" \
+            --notes-file RELEASE_NOTES.md \
+            windows/dist/Mindustry-ShatteredStar-Windows-x64-Setup.exe \
+            windows/dist/Mindustry-ShatteredStar-Windows-x64-Portable.zip \
+            windows/dist/SHA256SUMS.txt
+          gh release view "$TAG" --json tagName,url,assets

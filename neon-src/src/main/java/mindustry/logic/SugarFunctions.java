@@ -1,0 +1,3241 @@
+package mindustry.logic;
+
+import arc.struct.Seq;
+import logicsugar.assist.data.DataModules;
+import logicsugar.assist.data.DataCallStatement;
+import logicsugar.assist.data.DataModule;
+import logicsugar.assist.expr.ArrayRegistry;
+import logicsugar.assist.expr.ExprCompiler;
+import logicsugar.assist.expr.ExprIntrinsics;
+import logicsugar.assist.expr.ShortCircuitCompiler;
+import logicsugar.assist.expr.SpanAccess;
+import mindustry.logic.LStatements.GetLinkStatement;
+import mindustry.logic.LStatements.InvalidStatement;
+import mindustry.logic.LStatements.JumpStatement;
+import mindustry.logic.LStatements.OperationStatement;
+import mindustry.logic.LStatements.PackColorStatement;
+import mindustry.logic.LStatements.ReadStatement;
+import mindustry.logic.LStatements.SensorStatement;
+import mindustry.logic.LStatements.SetStatement;
+import mindustry.logic.LStatements.WriteStatement;
+import mindustry.logic.SugarCompiler.FuncMode;
+import mindustry.logic.SugarStatements.BeginStatement;
+import mindustry.logic.SugarStatements.BlockEndStatement;
+import mindustry.logic.SugarStatements.BreakStatement;
+import mindustry.logic.SugarStatements.ContinueStatement;
+import mindustry.logic.SugarStatements.CaseStatement;
+import mindustry.logic.SugarStatements.ElseIfStatement;
+import mindustry.logic.SugarStatements.ElseStatement;
+import mindustry.logic.SugarStatements.ForBeginStatement;
+import mindustry.logic.SugarStatements.UnitBindStatement;
+import mindustry.logic.SugarStatements.UnitForBeginStatement;
+import mindustry.logic.SugarStatements.UnitFreeStatement;
+import mindustry.logic.SugarStatements.UnitNextStatement;
+import mindustry.logic.SugarStatements.FuncCallStatement;
+import mindustry.logic.SugarStatements.FuncDefStatement;
+import mindustry.logic.SugarStatements.IfBeginStatement;
+import mindustry.logic.SugarStatements.ReturnStatement;
+import mindustry.logic.SugarStatements.SwitchBeginStatement;
+import mindustry.logic.SugarStatements.WhileBeginStatement;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Function machinery for Logic Sugar: local functions (defined inside a processor) and
+ * library functions (defined in a global library file) share one compilation pipeline.
+ *
+ * <p>Pipeline: {@link #analyze} extracts function definitions, validates them (names,
+ * structure, jump boundaries, recursion, call resolution), prepares bodies (remapping
+ * statement indices into body-relative space, renaming compiler temporaries and, for
+ * library functions, mangling every name the body writes), and produces the main
+ * statement list with function blocks removed. {@link #lower} then emits mlog text,
+ * expanding each call site either inline ({@code INLINE}) or through an @counter
+ * subroutine ({@code NORMAL}).
+ *
+ * <p>NORMAL mode calling convention (no recursion, so one return variable per function
+ * suffices; LExecutor increments @counter before executing the instruction, so reading
+ * it inside the "set" yields the index of the next instruction):
+ * <pre>
+ *   set __ls_func_f_ret @counter
+ *   op add __ls_func_f_ret __ls_func_f_ret 2
+ *   jump __ls_func_f_entry always x false
+ *   ... return point ...
+ * </pre>
+ * The function body is hoisted once at the end of the program and ends with
+ * {@code set @counter __ls_func_f_ret}.
+ *
+ * <p>INLINE mode emits a fresh copy of the body per call site; every compiler-generated
+ * label and guard variable is prefixed with {@code __ls_i_<callId>_}.
+ *
+ * <p>Library (方案2) semantics: a function may not modify caller variables. Every name
+ * the body writes (plus its parameters) is mangled to {@code __ls_func_<name>_<name>};
+ * read-only names stay untouched so the function can still read the caller's globals.
+ * {@code @}-prefixed system variables and {@code cellN}/{@code bankN}/{@code memoryN}
+ * storage devices are exempt.
+ */
+public final class SugarFunctions{
+    private SugarFunctions(){}
+
+    /** Compiler-reserved prefix; user function/parameter names may not use it. */
+    public static final String reservedPrefix = "__ls_";
+
+    /** Sentinels for jumps inside a function body that target the function's own end block. */
+    public static final int exitTarget = -2;
+
+    /**
+     * Function-library statement ceiling. The library file is not a saved processor program:
+     * vanilla's {@link LExecutor#maxInstructions} cap applies to the mlog stored in a processor,
+     * while the library is shared sugar text whose used subset is inlined at compile time.
+     * {@link LAssembler#read} stops at that cap (through {@code LParser}), so library text is
+     * parsed with this raised limit instead. A processor that inlines library functions still has
+     * to fit the vanilla 1000-instruction cap; only the library file itself is allowed to be
+     * larger. 10000 is the current supported ceiling.
+     *
+     * <p>KEEP(P4) — 不要随 MDT 解耦删除或下调。函数库文本不是处理器产物，必须用
+     * {@link #readLibrary} 按这个上限解析；删掉它会让超过 1000 条的函数库在打开/保存时
+     * 被原版上限静默截断。</p>
+     */
+    public static final int libraryInstructionLimit = 10000;
+
+    /**
+     * Parses function-library text with {@link #libraryInstructionLimit} instead of the processor
+     * cap. The global parse cap is always restored before returning (including on parse failure),
+     * so processor programs keep the vanilla limit. Text over the ceiling is truncated by the
+     * parser here; write paths gate it explicitly with {@link #libraryOverLimit(String)}.
+     */
+    public static Seq<LStatement> readLibrary(String text, boolean privileged){
+        if(text == null || text.isEmpty()) return new Seq<>();
+        int previous = LExecutor.maxInstructions;
+        if(previous >= libraryInstructionLimit) return LAssembler.read(text, privileged);
+        try{
+            LExecutor.maxInstructions = libraryInstructionLimit;
+            return LAssembler.read(text, privileged);
+        }finally{
+            restoreLimit(previous, libraryInstructionLimit);
+        }
+    }
+
+    /**
+     * Compare-and-set restore of the global parse window.
+     *
+     * <p>{@code LExecutor.maxInstructions} is shared with other mods. If one of them wrote its
+     * own value while our window was installed, putting the old value back would silently
+     * clobber that write; only the value we installed is ours to undo.</p>
+     */
+    private static void restoreLimit(int previous, int installed){
+        if(LExecutor.maxInstructions == installed) LExecutor.maxInstructions = previous;
+    }
+
+    /**
+     * True when {@code text} holds more statements than {@link #libraryInstructionLimit}. Parses
+     * with a probe limit one past the ceiling, so an oversized library is reported instead of
+     * being silently truncated. Unparseable text returns false; the normal parse path reports
+     * the syntax error with its own message.
+     */
+    public static boolean libraryOverLimit(String text){
+        if(text == null || text.isEmpty()) return false;
+        int previous = LExecutor.maxInstructions;
+        int installed = Math.max(previous, libraryInstructionLimit + 1);
+        try{
+            LExecutor.maxInstructions = installed;
+            return LAssembler.read(text, true).size > libraryInstructionLimit;
+        }catch(Throwable ignored){
+            return false;
+        }finally{
+            restoreLimit(previous, installed);
+        }
+    }
+
+    /**
+     * Runs {@code action} with the library parse limit installed. Needed where vanilla code
+     * parses the text itself ({@code LCanvas.load}) during a function-library editing session.
+     * The previous limit is restored even when {@code action} throws.
+     */
+    public static void withLibraryLimit(Runnable action){
+        int previous = LExecutor.maxInstructions;
+        int installed = Math.max(previous, libraryInstructionLimit);
+        try{
+            LExecutor.maxInstructions = installed;
+            action.run();
+        }finally{
+            restoreLimit(previous, installed);
+        }
+    }
+
+    /** {@link #withLibraryLimit(Runnable)} for actions that return a value.
+     *
+     *  <p>Takes {@code arc.func.Prov} rather than {@code java.util.function.Supplier}: the latter
+     *  is API 24 and is not backported by D8 here (no core-library desugaring), so it would throw
+     *  {@code NoSuchMethodError} on API 21-23 devices.</p> */
+    public static <T> T withLibraryLimitValue(arc.func.Prov<T> action){
+        int previous = LExecutor.maxInstructions;
+        int installed = Math.max(previous, libraryInstructionLimit);
+        try{
+            LExecutor.maxInstructions = installed;
+            return action.get();
+        }finally{
+            restoreLimit(previous, installed);
+        }
+    }
+
+    /** Where library statements come from. Installed by the mod; tests install their own. */
+    public interface LibrarySource{
+        /** @return the parsed and validated library index, or null when unavailable. */
+        LibraryIndex load();
+    }
+
+    private static LibrarySource librarySource;
+
+    /** Installs the library file source (called by the mod). */
+    public static void setLibrarySource(LibrarySource source){
+        librarySource = source;
+    }
+
+    /** Returns the current library index, or null when none is available. */
+    public static LibraryIndex library(){
+        if(librarySource == null) return null;
+        try{
+            return librarySource.load();
+        }catch(IllegalArgumentException e){
+            // Damaged library files behave like an empty library; processors that call a
+            // missing function report a clear error at compile time.
+            return null;
+        }
+    }
+
+    /** One compiled function: parameters, body statements and analysis results. */
+    public static final class Function{
+        public final String name;
+        public final List<String> params = new ArrayList<>();
+        /** Body statements; indices are body-relative, jumps to the function end use {@link #exitTarget}. */
+        public Seq<LStatement> body = new Seq<>();
+        /** Function-local names (library functions only): original -> mangled. */
+        public final Map<String, String> mangle = new HashMap<>();
+        /** Resolved callee names (local or library). */
+        public final Set<String> callees = new HashSet<>();
+        public boolean library;
+        public boolean hasValueReturn;
+        /** True when the function is declared {@code ~} (void): it must not return a value. */
+        public boolean declaredVoid;
+
+        Function(String name, boolean library){
+            this.name = name;
+            this.library = library;
+        }
+
+        /** Name the k-th parameter is bound to at call sites. */
+        public String bindingName(int k){
+            return library ? "__ls_func_" + name + "_" + params.get(k) : params.get(k);
+        }
+
+        public String entryName(){ return "__ls_func_" + name + "_entry"; }
+        public String exitName(){ return "__ls_func_" + name + "_exit"; }
+        public String retName(){ return "__ls_func_" + name + "_ret"; }
+        public String resultName(){ return "__ls_func_" + name + "_result"; }
+    }
+
+    /** Parsed and validated global function library. */
+    public static final class LibraryIndex{
+        public final Map<String, Function> functions = new LinkedHashMap<>();
+        /** True when the index was salvaged from a damaged library file and may be missing
+         *  definitions that could not be recovered. */
+        public boolean damaged;
+        /** Problems that were repaired while loading a damaged library file. */
+        public List<String> warnings = new ArrayList<>();
+        /** True when no user library source existed at all: the index holds injected builtins
+         *  only. An unresolved call must then blame the missing file instead of the call. */
+        public boolean userMissing;
+    }
+
+    /** Local functions plus the resolved main statement list. */
+    public static final class FunctionSet{
+        public final Map<String, Function> functions = new LinkedHashMap<>();
+        public final LibraryIndex library;
+        /** Main program statements with function definitions removed and indices remapped. */
+        public Seq<LStatement> main = new Seq<>();
+        /** Resolved callee names of the main program. */
+        public final List<String> mainCalls = new ArrayList<>();
+        /** Names reachable from the main program (transitive closure). */
+        public final Set<String> reachable = new HashSet<>();
+
+        FunctionSet(LibraryIndex library){
+            this.library = library;
+        }
+
+        /** Local function first, then library (local shadows library). */
+        public Function resolve(String name){
+            Function local = functions.get(name);
+            return local != null ? local : library != null ? library.functions.get(name) : null;
+        }
+
+        /** Reachable functions in definition order (local functions first, then library).
+         *  A shadowed library function is skipped: its name resolves to the local one. */
+        public List<Function> hoistOrder(){
+            List<Function> result = new ArrayList<>();
+            for(Function function : functions.values()){
+                if(reachable.contains(function.name) && resolve(function.name) == function) result.add(function);
+            }
+            if(library != null){
+                for(Function function : library.functions.values()){
+                    if(reachable.contains(function.name) && resolve(function.name) == function) result.add(function);
+                }
+            }
+            return result;
+        }
+    }
+
+    /** Shared call-site id counter (INLINE mode prefixes). */
+    public static final class CallIds{
+        private int next;
+        public int next(){ return next++; }
+    }
+
+    /**
+     * Validates the whole program and prepares function bodies. Mutates statement indices
+     * (jump targets and structure ends are remapped to body-relative / main-relative space).
+     */
+    public static FunctionSet analyze(Seq<LStatement> statements, LibraryIndex library){
+        FunctionSet set = new FunctionSet(library);
+        int n = statements.size;
+
+        // --- 1. locate function definitions, reject nesting -------------------------------
+        int[] endOf = new int[n];
+        Arrays.fill(endOf, -1);
+        int[] beginOf = new int[n];
+        Arrays.fill(beginOf, -1);
+        int[] ownerBody = new int[n];
+        Arrays.fill(ownerBody, -1);
+        Deque<Integer> openEnds = new ArrayDeque<>();
+        for(int i = 0; i < n; i++){
+            while(!openEnds.isEmpty() && openEnds.peek() < i) openEnds.pop();
+            LStatement statement = statements.get(i);
+            if(statement instanceof FuncDefStatement){
+                if(!openEnds.isEmpty()){
+                    throw error("funcdef", i, "must be at the top level; nested function definitions are not supported");
+                }
+                BeginStatement begin = (BeginStatement)statement;
+                if(begin.destIndex <= i || begin.destIndex >= n || !(statements.get(begin.destIndex) instanceof BlockEndStatement)){
+                    throw error("funcdef", i, "must point to a block end below it");
+                }
+                endOf[i] = begin.destIndex;
+                beginOf[begin.destIndex] = i;
+                for(int k = i + 1; k < begin.destIndex; k++) ownerBody[k] = i;
+            }
+            if(statement instanceof BeginStatement begin){
+                openEnds.push(begin.destIndex);
+            }
+        }
+
+        // --- 2. jumps may not cross function boundaries -----------------------------------
+        for(int j = 0; j < n; j++){
+            if(!(statements.get(j) instanceof JumpStatement jump)) continue;
+            int target = jump.destIndex;
+            if(target < 0 || target > n){
+                throw error("jump", j, "has no valid destination");
+            }
+            int owner = ownerBody[j];
+            if(owner >= 0){
+                int end = endOf[owner];
+                if(target < owner + 1 || target > end){
+                    throw error("jump", j, "jumps across the boundary of function '" + funcName(statements, owner)
+                        + "'; function bodies must be self-contained");
+                }
+            }else{
+                for(int s = 0; s < n; s++){
+                    if(endOf[s] < 0) continue;
+                    int e = endOf[s];
+                    if(target > s && target < e){
+                        throw error("jump", j, "jumps into the body of function '" + funcName(statements, s) + "', which is not allowed");
+                    }
+                    if(target == s || target == e){
+                        throw error("jump", j, "targets the boundary of function '" + funcName(statements, s) + "'; jumps may not cross function definitions");
+                    }
+                }
+            }
+        }
+
+        // --- 3. build local functions ------------------------------------------------------
+        for(int i = 0; i < n; i++){
+            if(endOf[i] < 0) continue;
+            Function function = buildFunction(statements, i, endOf[i], false);
+            if(set.functions.containsKey(function.name)){
+                throw error("funcdef", i, "duplicate function name '" + function.name + "'");
+            }
+            set.functions.put(function.name, function);
+        }
+
+        // --- 4. resolve calls, validate arity and result usage ----------------------------
+        for(int i = 0; i < n; i++){
+            if(ownerBody[i] >= 0) continue;
+            if(endOf[i] >= 0 || beginOf[i] >= 0) continue;
+            LStatement statement = statements.get(i);
+            if(statement instanceof FuncCallStatement call){
+                resolveCall(call, null, set, i);
+                resolveStatementExprCalls(call, null, set, i);
+            }else if(statement instanceof ReturnStatement){
+                throw error("return", i, "is outside a function");
+            }else{
+                // 条件表达式等文本中的调用也要进调用图（递归检测 / reachability / 参数校验）
+                resolveStatementExprCalls(statement, null, set, i);
+            }
+        }
+        for(Function function : set.functions.values()){
+            for(int i = 0; i < function.body.size; i++){
+                LStatement statement = function.body.get(i);
+                if(statement instanceof FuncCallStatement call){
+                    resolveCall(call, function, set, i);
+                    resolveStatementExprCalls(call, function, set, i);
+                }else{
+                    resolveStatementExprCalls(statement, function, set, i);
+                }
+            }
+        }
+
+        // --- 5. prepare bodies: rename temps, mangle library locals -----------------------
+        for(Function function : set.functions.values()){
+            prepBody(function);
+        }
+        if(library != null){
+            for(Function function : library.functions.values()){
+                if(!function.mangle.isEmpty()) continue;
+                prepBody(function);
+            }
+        }
+
+        // --- 6. recursion detection (full call graph, including unreachable functions) ----
+        checkRecursion(set);
+
+        // --- 7. reachability (NORMAL mode hoists only reachable bodies) --------------------
+        Deque<String> queue = new ArrayDeque<>(set.mainCalls);
+        set.reachable.addAll(set.mainCalls);
+        while(!queue.isEmpty()){
+            String name = queue.poll();
+            Function function = set.resolve(name);
+            if(function == null) continue;
+            for(String callee : function.callees){
+                if(set.reachable.add(callee)) queue.add(callee);
+            }
+        }
+
+        // --- 8. visible main list: strip definitions, remap indices ------------------------
+        int[] visibleIndex = new int[n];
+        Arrays.fill(visibleIndex, -1);
+        for(int i = 0; i < n; i++){
+            if(ownerBody[i] >= 0 || endOf[i] >= 0 || beginOf[i] >= 0) continue;
+            visibleIndex[i] = set.main.size;
+            set.main.add(statements.get(i));
+        }
+        for(int i = 0; i < n; i++){
+            if(visibleIndex[i] < 0) continue;
+            LStatement statement = statements.get(i);
+            if(statement instanceof BeginStatement begin && begin.destIndex >= 0 && begin.destIndex < n){
+                begin.destIndex = visibleIndex[begin.destIndex];
+            }else if(statement instanceof JumpStatement jump && jump.destIndex >= 0 && jump.destIndex < n){
+                jump.destIndex = visibleIndex[jump.destIndex];
+            }
+        }
+        return set;
+    }
+
+    /**
+     * Parses and validates a library file. The library may contain function definitions
+     * only; library bodies may only call other library functions.
+     */
+    public static LibraryIndex buildLibrary(Seq<LStatement> statements){
+        return buildLibrary(statements, false);
+    }
+
+    /**
+     * {@link #buildLibrary(Seq)} with an internal escape hatch: {@code allowReserved} admits
+     * the {@code __ls_} prefix so data-subsystem modules can inject builtin functions
+     * ({@code __ls_builtin_*}). User-facing library parsing must keep it false — a user
+     * function with a compiler-reserved name can collide with generated labels/variables.
+     */
+    public static LibraryIndex buildLibrary(Seq<LStatement> statements, boolean allowReserved){
+        LibraryIndex index = new LibraryIndex();
+        int n = statements.size;
+        if(n == 0) return index;
+
+        int[] endOf = new int[n];
+        Arrays.fill(endOf, -1);
+        int[] beginOf = new int[n];
+        Arrays.fill(beginOf, -1);
+        int[] ownerBody = new int[n];
+        Arrays.fill(ownerBody, -1);
+        Deque<Integer> openEnds = new ArrayDeque<>();
+        for(int i = 0; i < n; i++){
+            while(!openEnds.isEmpty() && openEnds.peek() < i) openEnds.pop();
+            LStatement statement = statements.get(i);
+            if(statement instanceof FuncDefStatement){
+                if(!openEnds.isEmpty()){
+                    throw error("funcdef", i, "must be at the top level; nested function definitions are not supported");
+                }
+                BeginStatement begin = (BeginStatement)statement;
+                if(begin.destIndex <= i || begin.destIndex >= n || !(statements.get(begin.destIndex) instanceof BlockEndStatement)){
+                    throw error("funcdef", i, "must point to a block end below it");
+                }
+                endOf[i] = begin.destIndex;
+                beginOf[begin.destIndex] = i;
+                for(int k = i + 1; k < begin.destIndex; k++) ownerBody[k] = i;
+            }else if(ownerBody[i] < 0 && beginOf[i] < 0){
+                throw error(statement.typeName(), i, "is not allowed in the function library; only function definitions may appear at the top level");
+            }
+            if(statement instanceof BeginStatement begin){
+                openEnds.push(begin.destIndex);
+            }
+        }
+        for(int i = 0; i < n; i++){
+            if(beginOf[i] >= 0 && endOf[beginOf[i]] != i){
+                throw error("blockend", i, "is not matched with a function definition");
+            }
+            if(endOf[i] < 0 && beginOf[i] < 0 && ownerBody[i] < 0){
+                throw error("blockend", i, "is not matched with a function definition");
+            }
+        }
+
+        // jump boundary rules identical to local functions
+        for(int j = 0; j < n; j++){
+            if(!(statements.get(j) instanceof JumpStatement jump)) continue;
+            int target = jump.destIndex;
+            if(target < 0 || target > n){
+                throw error("jump", j, "has no valid destination");
+            }
+            int owner = ownerBody[j];
+            if(owner >= 0){
+                int end = endOf[owner];
+                if(target < owner + 1 || target > end){
+                    throw error("jump", j, "jumps across the boundary of function '" + funcName(statements, owner)
+                        + "'; function bodies must be self-contained");
+                }
+            }else{
+                for(int s = 0; s < n; s++){
+                    if(endOf[s] < 0) continue;
+                    int e = endOf[s];
+                    if(target > s && target < e){
+                        throw error("jump", j, "jumps into the body of function '" + funcName(statements, s) + "', which is not allowed");
+                    }
+                    if(target == s || target == e){
+                        throw error("jump", j, "targets the boundary of function '" + funcName(statements, s) + "'; jumps may not cross function definitions");
+                    }
+                }
+            }
+        }
+
+        for(int i = 0; i < n; i++){
+            if(endOf[i] < 0) continue;
+            Function function = buildFunction(statements, i, endOf[i], true, allowReserved);
+            if(index.functions.containsKey(function.name)){
+                throw error("funcdef", i, "duplicate function name '" + function.name + "'");
+            }
+            index.functions.put(function.name, function);
+        }
+
+        // library bodies may only call library functions; validate before mangling
+        for(Function function : index.functions.values()){
+            int[] switchOwner = switchOwners(function.body);
+            int[] breakOwner = breakOwners(function.body);
+            int[] ifOwner = ifOwners(function.body);
+            boolean[] ifBad = ifChainViolations(function.body, ifOwner);
+            boolean[] defaultBad = defaultViolations(function.body, switchOwner);
+            for(int i = 0; i < function.body.size; i++){
+                LStatement statement = function.body.get(i);
+                if(statement instanceof CaseStatement && switchOwner[i] < 0){
+                    throw error("case", i, "in library function '" + function.name + "' is outside a switch");
+                }
+                if(defaultBad[i]){
+                    throw error("default", i, "in library function '" + function.name + "' is outside a switch"
+                        + " or is a second default of the same switch");
+                }
+                if(statement instanceof BreakStatement && breakOwner[i] < 0){
+                    throw error("break", i, "in library function '" + function.name + "' is outside a loop or switch");
+                }
+                if(statement instanceof ElseIfStatement && ifOwner[i] < 0){
+                    throw error("elif", i, "in library function '" + function.name + "' is outside an if");
+                }
+                if(statement instanceof ElseStatement && ifOwner[i] < 0){
+                    throw error("else", i, "in library function '" + function.name + "' is outside an if");
+                }
+                if(ifBad[i]){
+                    throw error(statement instanceof ElseStatement ? "else" : "elif", i,
+                        "in library function '" + function.name + "' appears after else (or is a duplicate else) in the same if chain");
+                }
+                if(statement instanceof FuncCallStatement call){
+                    Function target = index.functions.get(call.name);
+                    if(target == null){
+                        throw error("funccall", i, "in library function '" + function.name
+                            + "' calls undefined library function '" + call.name + "'");
+                    }
+                    int argc = splitArgs(call.args).size();
+                    if(argc != target.params.size()){
+                        throw error("funccall", i, "in library function '" + function.name + "' calls '" + call.name
+                            + "' with " + argc + " argument(s) but it expects " + target.params.size());
+                    }
+                    if(!call.result.isEmpty() && !target.hasValueReturn){
+                        throw error("funccall", i, "in library function '" + function.name + "' requests a result from '"
+                            + call.name + "' but its body never returns a value");
+                    }
+                    function.callees.add(call.name);
+                }
+            }
+        }
+
+        // library recursion check (full graph)
+        Map<String, Function> all = new LinkedHashMap<>(index.functions);
+        checkRecursion(all);
+
+        // mangling happens exactly once; cached by the caller
+        for(Function function : index.functions.values()){
+            prepBody(function);
+        }
+        return index;
+    }
+
+    /**
+     * Merges the injected builtin library (data-subsystem modules) into the user library used
+     * for one compile. Each builtin text is a self-contained one-function library and is parsed
+     * on its own — funcdef/blockend indices are local to their text, so concatenating them
+     * before parsing would break the block references. Builtin names use the reserved
+     * {@code __ls_} prefix, so they can never shadow a user function; user functions are copied
+     * first and win on any (impossible) collision. The merged index is compile-only:
+     * {@link #extractLibrarySource} still runs on the pure user text, so builtins never reach
+     * the {@code __ls_lib} carrier.
+     */
+    public static LibraryIndex withBuiltins(LibraryIndex user, List<String> builtinSugar){
+        if(builtinSugar == null || builtinSugar.isEmpty()) return user;
+        LibraryIndex merged = new LibraryIndex();
+        if(user != null){
+            merged.functions.putAll(user.functions);
+            merged.damaged = user.damaged;
+            merged.warnings = new ArrayList<>(user.warnings);
+            merged.userMissing = user.userMissing;
+        }else{
+            // The injected builtins must not turn "no library file" into "library is fine":
+            // otherwise a program that calls a user function would report a plain
+            // "undefined function" and never point at Settings -> Function Library.
+            merged.userMissing = true;
+        }
+        for(String part : builtinSugar){
+            if(part == null || part.trim().isEmpty()) continue;
+            LibraryIndex index;
+            try{
+                // 内置函数名使用保留的 __ls_builtin_ 前缀，走 allowReserved 内部通道
+                index = buildLibrary(readLibrary(part.trim(), true), true);
+            }catch(IllegalArgumentException e){
+                throw new IllegalArgumentException("internal error: the injected builtin library is invalid (" + e.getMessage() + ")");
+            }
+            if(index.functions.isEmpty()){
+                throw new IllegalArgumentException("internal error: an injected builtin library text has no function definition");
+            }
+            merged.functions.putAll(index.functions);
+        }
+        return merged;
+    }
+
+    /**
+     * Extracts the definitions of the requested functions from a library text into a
+     * self-contained library text (functions in their original order). Used to embed the
+     * used subset of the library into compiled processor code so other machines can
+     * recompile the program without the local library file.
+     *
+     * <p>Statement indices are remapped from the full-text space into the extracted-slice
+     * space: every begin/jump target inside the slice shifts by the slice start, so the
+     * funcdef keeps pointing at its own blockend. When the extracted text is re-validated
+     * with {@link #buildLibrary}, {@link #buildFunction} converts a jump to the blockend
+     * into {@link #exitTarget} as usual, and body targets become body-relative.
+     */
+    public static String extractLibrarySource(String libraryText, Set<String> usedNames){
+        return extractLibrarySource(libraryText, usedNames, 0);
+    }
+
+    /**
+     * {@link #extractLibrarySource(String, Set)} with an explicit {@code outBase}: the number of
+     * statements that already precede this slice in the text it is appended to.
+     *
+     * <p>A funcdef/begin/jump {@code destIndex} is an <em>absolute</em> statement index of the
+     * library text it belongs to ("must point to a block end below it"), so a slice concatenated
+     * after another one must be shifted by that prefix length. Merging an embedded
+     * {@code __ls_lib} subset with the newly used functions of the local library file is exactly
+     * that case: without the shift every appended funcdef points back into the prefix and is
+     * rejected as damaged, which silently drops the function from the effective library.
+     * Callers appending to an empty builder pass 0 (the default overload).
+     */
+    public static String extractLibrarySource(String libraryText, Set<String> usedNames, int outBase){
+        Seq<LStatement> statements = readLibrary(libraryText, true);
+        int n = statements.size;
+        int[] endOf = new int[n];
+        Arrays.fill(endOf, -1);
+        for(int i = 0; i < n; i++){
+            if(statements.get(i) instanceof FuncDefStatement def && usedNames.contains(def.name)){
+                int end = ((BeginStatement)statements.get(i)).destIndex;
+                if(end > i && end < n) endOf[i] = end;
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        int appended = 0;
+        for(int i = 0; i < n; i++){
+            int e = endOf[i];
+            if(e < 0) continue;
+            appended += copySlice(statements, i, e, out, outBase + appended);
+        }
+        return out.toString();
+    }
+
+    /**
+     * Copies statements [i..e] into the output, remapping begin/jump targets from the
+     * full-text coordinate space into the output space: every target shifts by (base - i)
+     * (base = statements already appended), so a funcdef keeps pointing at its own blockend
+     * when consecutive slices are concatenated. Returns the number of statements appended.
+     */
+    private static int copySlice(Seq<LStatement> statements, int i, int e, StringBuilder out, int base){
+        int appended = 0;
+        for(int k = i; k <= e; k++){
+            LStatement statement = statements.get(k);
+            // BeginStatement.copy() resets destIndex, so capture the original first.
+            int dest = -1;
+            if(statement instanceof BeginStatement begin){
+                dest = begin.destIndex;
+            }else if(statement instanceof JumpStatement jump){
+                dest = jump.destIndex;
+            }
+            LStatement copy = statement.copy();
+            if(copy == null){
+                throw new IllegalArgumentException("internal error: failed to copy a library statement");
+            }
+            if(copy instanceof BeginStatement begin){
+                begin.destIndex = dest - i + base;
+            }else if(copy instanceof JumpStatement jump){
+                jump.destIndex = dest - i + base;
+            }
+            copy.write(out);
+            out.append('\n');
+            appended++;
+        }
+        return appended;
+    }
+
+    /** Result of salvaging a (possibly damaged) library text. */
+    public static final class SanitizedLibrary{
+        /** Sanitized library text (byte-identical to the input when the library was valid). */
+        public final String text;
+        /** Partial index built from the functions that could be recovered. */
+        public final LibraryIndex index;
+        /** Problems that were repaired; empty when the library was valid. */
+        public final List<String> warnings;
+        /** True when anything had to be repaired. */
+        public final boolean damaged;
+
+        public SanitizedLibrary(String text, LibraryIndex index, List<String> warnings, boolean damaged){
+            this.text = text;
+            this.index = index;
+            this.warnings = warnings;
+            this.damaged = damaged;
+        }
+    }
+
+    /** The splice points (statement index pairs) around top-level function definitions.
+     *  Structurally broken funcdefs (no valid block end) are recorded as warnings. */
+    private static List<int[]> topLevelFuncdefSlices(Seq<LStatement> statements, List<String> warnings){
+        List<int[]> slices = new ArrayList<>();
+        int n = statements.size;
+        for(int i = 0; i < n; ){
+            if(statements.get(i) instanceof FuncDefStatement){
+                int dest = ((BeginStatement)statements.get(i)).destIndex;
+                if(dest > i && dest < n && statements.get(dest) instanceof BlockEndStatement){
+                    slices.add(new int[]{i, dest});
+                    i = dest + 1; // body + end belong to this slice (nested funcdefs damage it)
+                }else{
+                    warnings.add("funcdef at statement " + i + " is damaged and was skipped");
+                    i++;
+                }
+            }else{
+                i++;
+            }
+        }
+        return slices;
+    }
+
+    /**
+     * Salvages a library text function-by-function instead of rejecting the whole file when
+     * one definition is damaged: structurally broken or un-rewritable funcdefs are skipped,
+     * duplicate names keep the last definition, top-level stray statements are discarded, and
+     * survivors that call removed functions (or form call cycles) are removed too. The output
+     * is a sanitized text whose index is guaranteed to re-validate with {@link #buildLibrary};
+     * a fully valid input is returned byte-identical with no warnings.
+     */
+    public static SanitizedLibrary sanitizedLibrary(String text){
+        List<String> warnings = new ArrayList<>();
+        Seq<LStatement> statements;
+        try{
+            statements = readLibrary(text, true);
+        }catch(Throwable t){
+            String message = "the library text cannot be parsed: " + t.getMessage();
+            return new SanitizedLibrary("", new LibraryIndex(), Collections.singletonList(message), true);
+        }
+
+        // Fast path: the whole library validates unchanged (output must equal the input).
+        try{
+            return new SanitizedLibrary(text, buildLibrary(statements), Collections.emptyList(), false);
+        }catch(IllegalArgumentException ignored){
+            // buildLibrary remaps the bodies it processed before failing; parse again fresh
+            statements = readLibrary(text, true);
+        }
+
+        // identify top-level funcdef slices in source order
+        List<int[]> slices = topLevelFuncdefSlices(statements, warnings);
+
+        // top-level statements that belong to no funcdef slice are discarded as junk
+        boolean[] covered = new boolean[statements.size];
+        for(int[] slice : slices){
+            Arrays.fill(covered, slice[0], slice[1] + 1, true);
+        }
+        int strayCount = 0;
+        for(int i = 0; i < statements.size; i++){
+            if(!covered[i] && !(statements.get(i) instanceof FuncDefStatement)) strayCount++;
+        }
+        if(strayCount > 0){
+            warnings.add("top-level statement(s) outside any function were discarded");
+        }
+
+        // salvage each slice independently: build the function body without requiring its
+        // callees to exist yet (cross-function call validation happens below); duplicates
+        // keep the last definition
+        Map<String, Function> survivors = new LinkedHashMap<>();
+        Map<String, int[]> survivorSlices = new LinkedHashMap<>();
+        for(int[] slice : slices){
+            String name;
+            Function function;
+            try{
+                StringBuilder copyText = new StringBuilder();
+                copySlice(statements, slice[0], slice[1], copyText, 0);
+                Seq<LStatement> single = readLibrary(copyText.toString(), true);
+                if(single.size != slice[1] - slice[0] + 1){
+                    throw new IllegalArgumentException("slice round-trip changed the statement count");
+                }
+                function = buildFunction(single, 0, single.size - 1, true);
+                prepBody(function);
+                name = function.name;
+            }catch(RuntimeException e){
+                warnings.add("funcdef at statement " + slice[0] + " is damaged and was skipped (" + e.getMessage() + ")");
+                continue;
+            }
+            if(survivors.containsKey(name)){
+                warnings.add("duplicate function name '" + name + "'; keeping the last definition (statement " + slice[0] + ")");
+            }
+            survivors.put(name, function);
+            survivorSlices.put(name, slice);
+        }
+
+        // survivors whose in-library calls no longer resolve are removed (fixpoint)
+        removeInvalidCallers(survivors, survivorSlices, warnings);
+
+        // recursion among survivors would invalidate the whole library; drop the cycle members
+        Set<String> cycles = cycleMembers(survivors);
+        if(!cycles.isEmpty()){
+            warnings.add("library recursion was detected; the functions " + cycles + " were removed");
+            for(String name : cycles){
+                survivors.remove(name);
+                survivorSlices.remove(name);
+            }
+            removeInvalidCallers(survivors, survivorSlices, warnings);
+        }
+
+        // re-serialize the survivors and prove the result re-validates (safety net: the
+        // sanitizer must never hand back a text that buildLibrary would reject)
+        String output = serializeSlices(statements, survivorSlices.values());
+        LibraryIndex index = new LibraryIndex();
+        while(true){
+            try{
+                index = buildLibrary(readLibrary(output, true));
+                break;
+            }catch(IllegalArgumentException e){
+                if(survivorSlices.isEmpty()){
+                    warnings.add("the damaged library could not be salvaged; it was emptied (" + e.getMessage() + ")");
+                    break;
+                }
+                String last = null;
+                for(String name : survivorSlices.keySet()) last = name;
+                warnings.add("library function '" + last + "' was removed because the salvaged library still failed validation (" + e.getMessage() + ")");
+                survivors.remove(last);
+                survivorSlices.remove(last);
+                output = serializeSlices(statements, survivorSlices.values());
+            }
+        }
+        if(index.functions.isEmpty() && !warnings.isEmpty()){
+            warnings.add("no usable functions could be recovered from the damaged library");
+        }
+        index.damaged = true;
+        index.warnings = new ArrayList<>(warnings);
+        return new SanitizedLibrary(output, index, warnings, true);
+    }
+
+    /** Removes survivors whose body calls do not resolve within the survivor set. */
+    private static void removeInvalidCallers(Map<String, Function> survivors, Map<String, int[]> survivorSlices, List<String> warnings){
+        boolean changed;
+        do{
+            changed = false;
+            for(String name : new ArrayList<>(survivors.keySet())){
+                if(!libraryBodyValid(survivors.get(name), survivors)){
+                    warnings.add("library function '" + name
+                        + "' was removed because it calls an undefined or invalid library function");
+                    survivors.remove(name);
+                    survivorSlices.remove(name);
+                    changed = true;
+                }
+            }
+        }while(changed);
+    }
+
+    /** Whether a salvaged function's body is self-contained and its calls resolve within the
+     *  survivor set (mirrors buildLibrary's per-function call rules); also rebuilds the
+     *  function's resolved callee set so recursion detection sees real edges. */
+    private static boolean libraryBodyValid(Function function, Map<String, Function> survivors){
+        int[] switchOwner = switchOwners(function.body);
+        int[] breakOwner = breakOwners(function.body);
+        boolean[] defaultBad = defaultViolations(function.body, switchOwner);
+        function.callees.clear();
+        for(int i = 0; i < function.body.size; i++){
+            LStatement statement = function.body.get(i);
+            if(statement instanceof CaseStatement && switchOwner[i] < 0) return false;
+            if(defaultBad[i]) return false;
+            if(statement instanceof BreakStatement && breakOwner[i] < 0) return false;
+            if(statement instanceof FuncCallStatement call){
+                Function target = survivors.get(call.name);
+                if(target == null) return false;
+                if(splitArgs(call.args).size() != target.params.size()) return false;
+                if(!call.result.isEmpty() && !target.hasValueReturn) return false;
+                function.callees.add(call.name);
+            }
+        }
+        return true;
+    }
+
+    /** Serializes the given funcdef slices into one library text (source order, concatenated). */
+    private static String serializeSlices(Seq<LStatement> statements, Collection<int[]> slices){
+        StringBuilder out = new StringBuilder();
+        int appended = 0;
+        for(int[] slice : slices){
+            appended += copySlice(statements, slice[0], slice[1], out, appended);
+        }
+        return out.toString();
+    }
+
+    /** Names that take part in at least one call cycle. */
+    private static Set<String> cycleMembers(Map<String, Function> all){
+        Set<String> inCycle = new HashSet<>();
+        Map<String, Integer> state = new HashMap<>();
+        Deque<String> stack = new ArrayDeque<>();
+        for(String name : all.keySet()){
+            if(state.get(name) == null) visitCycle(name, all, state, stack, inCycle);
+        }
+        return inCycle;
+    }
+
+    private static void visitCycle(String name, Map<String, Function> all, Map<String, Integer> state,
+                                   Deque<String> stack, Set<String> inCycle){
+        state.put(name, 1);
+        stack.push(name);
+        Function function = all.get(name);
+        if(function != null){
+            for(String callee : function.callees){
+                if(!all.containsKey(callee)) continue;
+                Integer seen = state.get(callee);
+                if(seen == null){
+                    visitCycle(callee, all, state, stack, inCycle);
+                }else if(seen == 1){
+                    for(String node : stack){
+                        inCycle.add(node);
+                        if(node.equals(callee)) break;
+                    }
+                }
+            }
+        }
+        stack.pop();
+        state.put(name, 2);
+    }
+
+    /** Splits a comma-separated parameter declaration list; empty entries are dropped. */
+    static List<String> parseParams(String raw){
+        List<String> result = new ArrayList<>();
+        if(raw == null || raw.isEmpty()) return result;
+        for(String part : raw.split(",", -1)){
+            String param = part.trim();
+            if(!param.isEmpty()) result.add(param);
+        }
+        return result;
+    }
+
+    /**
+     * Looks up the parameter names of a function by name: local {@code func} definitions
+     * shadow the library (same resolution order as {@link #analyze}). Returns {@code null}
+     * when the function is not found or takes no parameters.
+     */
+    public static List<String> paramsOf(String name, Seq<LStatement> localStatements){
+        if(localStatements != null){
+            for(LStatement statement : localStatements){
+                if(statement instanceof FuncDefStatement def && def.name.equals(name)){
+                    List<String> params = parseParams(def.params);
+                    return params.isEmpty() ? null : params;
+                }
+            }
+        }
+        LibraryIndex library = library();
+        if(library != null){
+            Function function = library.functions.get(name);
+            if(function != null){
+                return function.params.isEmpty() ? null : function.params;
+            }
+        }
+        // F2: injected builtin functions (visible to editor hints, never in the user library)
+        List<String> builtin = DataModules.builtinParams(name);
+        if(builtin != null){
+            return builtin.isEmpty() ? null : builtin;
+        }
+        return null;
+    }
+
+    /** Extracts one function definition and remaps its body into body-relative space.
+     *  REMAP IS IN PLACE: begin/jump indices inside the body statements are rewritten, and the
+     *  statements are aliased into {@code function.body}, so the input Seq must not be analyzed
+     *  again (sanitizedLibrary re-reads it after a failed buildLibrary for exactly this reason). */
+    private static Function buildFunction(Seq<LStatement> statements, int s, int e, boolean library){
+        return buildFunction(statements, s, e, library, false);
+    }
+
+    /** @param allowReserved admits {@code __ls_*} function/parameter names (injected builtins). */
+    private static Function buildFunction(Seq<LStatement> statements, int s, int e, boolean library, boolean allowReserved){
+        FuncDefStatement def = (FuncDefStatement)statements.get(s);
+        Function function = new Function(def.name, library);
+        String problem = funcDefDeclarationProblem(def, allowReserved);
+        if(problem != null) throw error("funcdef", s, problem);
+        String declared = def.declaredReturns() ? def.returns.trim() : "";
+        function.declaredVoid = "~".equals(declared);
+        for(String param : parseParams(def.params)){
+            function.params.add(param);
+        }
+        for(int k = s + 1; k < e; k++){
+            LStatement statement = statements.get(k);
+            if(statement instanceof FuncDefStatement){
+                throw error("funcdef", k, "must be at the top level; nested function definitions are not supported");
+            }
+            if(statement instanceof ReturnStatement ret && !ret.expr.isEmpty()){
+                if(function.declaredVoid){
+                    throw error("return", k, "returns a value from '" + def.name
+                        + "', which is declared void (~)");
+                }
+                function.hasValueReturn = true;
+            }
+            if(statement instanceof BeginStatement begin){
+                begin.destIndex -= (s + 1);
+            }else if(statement instanceof JumpStatement jump){
+                if(jump.destIndex == e){
+                    jump.destIndex = exitTarget;
+                }else{
+                    jump.destIndex -= (s + 1);
+                }
+            }
+            function.body.add(statement);
+        }
+        if("value".equals(declared) && !function.hasValueReturn){
+            throw error("funcdef", s, "function '" + def.name
+                + "' is declared to return a value but never returns one");
+        }
+        return function;
+    }
+
+    /** Validates a call site and records the resolved callee. */
+    private static void resolveCall(FuncCallStatement call, Function owner, FunctionSet set, int index){
+        Function target = set.resolve(call.name);
+        if(target == null){
+            String hint = libraryProblemHint(set.library);
+            if(owner != null && owner.library){
+                throw error("funccall", index, "in library function '" + owner.name
+                    + "' calls undefined library function '" + call.name + "' (library functions can only call other library functions)" + hint);
+            }
+            throw error("funccall", index, "calls undefined function '" + call.name + "'" + hint);
+        }
+        if(owner != null && owner.library && !target.library){
+            throw error("funccall", index, "in library function '" + owner.name
+                + "' calls undefined library function '" + call.name + "' (library functions can only call other library functions)");
+        }
+        int argc = splitArgs(call.args).size();
+        if(argc != target.params.size()){
+            throw error("funccall", index, "calls '" + call.name + "' with " + argc
+                + " argument(s) but it expects " + target.params.size());
+        }
+        if(!call.result.isEmpty() && !target.hasValueReturn){
+            throw error("funccall", index, "requests a result from '" + call.name + "' but "
+                + (target.declaredVoid ? "it is declared void (~)" : "its body never returns a value"));
+        }
+        (owner == null ? set.mainCalls : owner.callees).add(call.name);
+    }
+
+    /**
+     * 登记语句文本（return 表达式 / funccall 实参 / 条件表达式）里的函数调用。
+     * 这些调用藏在表达式文本中，只有 resolveCall 收集的显式 funccall 语句是看不到的——
+     * 不登记会导致：normal 模式漏 hoist（函数体缺失）、隐式递归检测不到（return foo(x)
+     * 自调用在展开时无限循环）、参数个数错误到运行期才暴露。
+     */
+    private static void resolveStatementExprCalls(LStatement statement, Function owner, FunctionSet set, int index){
+        if(statement instanceof ReturnStatement ret){
+            registerExprCalls(ret.expr, owner, set, index);
+        }else if(statement instanceof FuncCallStatement call){
+            // 嵌套调用：g(foo(x)) —— foo 也要进调用图
+            registerExprCalls(call.args, owner, set, index);
+        }else if(statement instanceof DataCallStatement call){
+            registerDataCallExprCalls(call, owner, set, index);
+        }else if(statement instanceof IfBeginStatement ifBegin && ifBegin.expressionMode){
+            registerExprCalls(ifBegin.conditionExpr, owner, set, index);
+        }else if(statement instanceof ElseIfStatement elseIf && elseIf.expressionMode){
+            registerExprCalls(elseIf.conditionExpr, owner, set, index);
+        }else if(statement instanceof WhileBeginStatement whileBegin && whileBegin.expressionMode){
+            registerExprCalls(whileBegin.conditionExpr, owner, set, index);
+        }else if(statement instanceof ForBeginStatement forBegin && forBegin.expressionMode){
+            registerExprCalls(forBegin.conditionExpr, owner, set, index);
+        }
+    }
+
+    /**
+     * Registers a data card's fixed root intrinsic separately from calls nested in its
+     * arguments. A same-named user function must not replace the card operation, while a
+     * user function used by an argument must still participate in validation/reachability.
+     */
+    private static void registerDataCallExprCalls(DataCallStatement call, Function owner,
+                                                   FunctionSet set, int index){
+        // 旧名卡片（v5.1 载体）按规范新名分析：与菜单卡片完全同一条解析路径
+        String operation = call.canonicalOperation();
+        String expression = operation + "(" + (call.arguments == null ? "" : call.arguments) + ")";
+        List<ExprCompiler.CallSite> sites = ExprCompiler.collectCalls(expression, operation);
+        boolean root = true;
+        for(ExprCompiler.CallSite site : sites){
+            int argc = splitArgs(site.args).size();
+            // 方法/下标糖解析出的 root intrinsic：必须按 intrinsic 登记 callee，
+            // 即使存在同名用户函数也不能走用户调用路径（与 lower 阶段的解析一致）。
+            if(site.intrinsic){
+                for(String callee : ExprIntrinsics.calleesOfRoot(site.name, argc)){
+                    if(set.resolve(callee) != null){
+                        (owner == null ? set.mainCalls : owner.callees).add(callee);
+                    }
+                }
+                continue;
+            }
+            if(root && site.name.equalsIgnoreCase(operation)){
+                for(String callee : ExprIntrinsics.calleesOfRoot(site.name, argc)){
+                    if(set.resolve(callee) != null){
+                        (owner == null ? set.mainCalls : owner.callees).add(callee);
+                    }
+                }
+                root = false;
+                continue;
+            }
+            FuncCallStatement stmt = new FuncCallStatement();
+            stmt.name = site.name;
+            stmt.args = site.args;
+            stmt.result = "_";
+            resolveCall(stmt, owner, set, index);
+        }
+    }
+
+    private static void registerExprCalls(String expr, Function owner, FunctionSet set, int index){
+        for(ExprCompiler.CallSite site : ExprCompiler.collectCalls(expr)){
+            int argc = splitArgs(site.args).size();
+            // 方法/下标糖解析出的 root intrinsic：按 intrinsic 登记 callee，绕过用户函数遮蔽。
+            if(site.intrinsic){
+                for(String callee : ExprIntrinsics.calleesOfRoot(site.name, argc)){
+                    if(set.resolve(callee) != null){
+                        (owner == null ? set.mainCalls : owner.callees).add(callee);
+                    }
+                }
+                continue;
+            }
+            // F2: intrinsic call sites are not user calls. Register the injected builtin
+            // functions they will expand to (during lowering, too late for reachability), so
+            // NORMAL mode hoists exactly the bodies that are actually used. A user function of
+            // the same name resolves above and takes the normal path.
+            if(set.resolve(site.name) == null && ExprIntrinsics.isIntrinsic(site.name)){
+                for(String callee : ExprIntrinsics.calleesOf(site.name, argc)){
+                    if(set.resolve(callee) != null){
+                        (owner == null ? set.mainCalls : owner.callees).add(callee);
+                    }
+                }
+                continue;
+            }
+            FuncCallStatement stmt = new FuncCallStatement();
+            stmt.name = site.name;
+            stmt.args = site.args;
+            stmt.result = "_"; // 表达式里的调用必须能返回一个值
+            resolveCall(stmt, owner, set, index);
+        }
+    }
+
+    /** Localizes an "undefined function" error when the library state explains the miss.
+     *  An otherwise-valid library keeps the plain message (a function really does not
+     *  exist); a missing or damaged library points the user at the repair path. */
+    private static String libraryProblemHint(LibraryIndex library){
+        if(library == null || library.userMissing){
+            return ". The global function library is unavailable; check Settings -> Function Library";
+        }
+        if(library.damaged){
+            String first = library.warnings.isEmpty() ? "the file needs repair" : library.warnings.get(0);
+            return ". Note: the function library has errors (" + first + "); fix it in Settings -> Function Library";
+        }
+        return "";
+    }
+
+    private static void validateName(String name, String kind){
+        validateName(name, kind, false);
+    }
+
+    /**
+     * The funcdef signature problem (function name, parameters, return declaration) or null when
+     * the declaration is valid. Body-dependent rules — {@code value} must return one, {@code ~}
+     * must not — stay in {@link #buildFunction}; everything that can be judged from the header is
+     * here so the compile path (which throws this message) and the editor's red marking
+     * ({@code SugarCompiler.invalidStatements}) cannot disagree: a card that is accepted at save
+     * time is never marked red, and a card that fails to save is always visible in red.
+     *
+     * <p>An unknown return declaration fails here on purpose. It used to be accepted silently
+     * (anything but {@code ~} behaved like {@code value}) while the parser rejected it, which made
+     * the card's own saved line unreadable — the editor then could not reopen its draft.
+     */
+    public static String funcDefDeclarationProblem(FuncDefStatement def, boolean allowReserved){
+        try{
+            validateName(def.name, "function", allowReserved);
+        }catch(IllegalArgumentException e){
+            return e.getMessage();
+        }
+        List<String> params = new ArrayList<>();
+        for(String param : parseParams(def.params)){
+            try{
+                validateName(param, "parameter", allowReserved);
+            }catch(IllegalArgumentException e){
+                return e.getMessage();
+            }
+            if(params.contains(param)){
+                return "duplicate parameter '" + param + "' in function '" + def.name + "'";
+            }
+            params.add(param);
+        }
+        String declared = def.declaredReturns() ? def.returns.trim() : "";
+        if(!declared.isEmpty() && !"~".equals(declared) && !"value".equals(declared)){
+            return "invalid return declaration '" + declared
+                + "' (expected ~ for void or value for a value return)";
+        }
+        return null;
+    }
+
+    private static void validateName(String name, String kind, boolean allowReserved){
+        if(!isIdentifier(name)){
+            throw new IllegalArgumentException("'" + name + "' is not a valid " + kind + " name (letters, digits and underscores only)");
+        }
+        if(!allowReserved && name.startsWith(reservedPrefix)){
+            throw new IllegalArgumentException("'" + name + "' uses the reserved '" + reservedPrefix + "' prefix");
+        }
+    }
+
+    private static boolean isIdentifier(String name){
+        if(name == null || name.isEmpty()) return false;
+        char first = name.charAt(0);
+        if(!(Character.isLetter(first) || first == '_')) return false;
+        for(int i = 1; i < name.length(); i++){
+            char c = name.charAt(i);
+            if(!(Character.isLetterOrDigit(c) || c == '_')) return false;
+        }
+        return true;
+    }
+
+    private static String funcName(Seq<LStatement> statements, int funcdefIndex){
+        return ((FuncDefStatement)statements.get(funcdefIndex)).name;
+    }
+
+    /**
+     * Splits a comma-separated argument list, respecting parentheses **and string literals**.
+     *
+     * <p>Quotes matter: a comma or an unbalanced bracket inside {@code "..."} is text, not structure.
+     * Ignoring them used to merge arguments - {@code array_replace [buf, "a(b", 5]} split into two
+     * segments instead of three, because the {@code (} inside the literal left the depth at 1 and the
+     * following comma stopped splitting - and every consumer that rebuilds the list from its segments
+     * (the fixed-slot card UI) then silently rewrote the call signature.</p>
+     */
+    public static List<String> splitArgs(String args){
+        List<String> result = new ArrayList<>();
+        if(args == null || args.trim().isEmpty()) return result;
+        int depth = 0, start = 0;
+        boolean quoted = false, escaped = false;
+        for(int i = 0; i < args.length(); i++){
+            char c = args.charAt(i);
+            if(escaped){
+                escaped = false;
+            }else if(quoted && c == '\\'){
+                escaped = true;
+            }else if(c == '"'){
+                quoted = !quoted;
+            }else if(!quoted && c == '('){
+                depth++;
+            }else if(!quoted && c == ')'){
+                depth--;
+            }else if(!quoted && c == ',' && depth == 0){
+                result.add(args.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        result.add(args.substring(start).trim());
+        return result;
+    }
+
+    /**
+     * Like {@link #splitArgs}, but **tolerant of a list that is not finished yet**: a bracket or
+     * quote that never gets closed does not swallow the separators after it.
+     *
+     * <p>This exists for the fixed-slot operation card, which shows one box per parameter and must
+     * therefore decide the box boundaries from the raw argument text <em>while the user is
+     * typing</em>. Typing {@code (} to start a nested call - or {@code "} to start a string
+     * literal - leaves the whole list unbalanced until the call is finished, and that is the normal
+     * state of the text for as long as it takes to type the rest. A strict split reads an unclosed
+     * {@code (} as "everything after me is nested", so it returns the whole list as a single
+     * segment: the first box then absorbs everything and the remaining boxes come up empty (the
+     * text the user already typed appears to jump out of its box, and reopening the card cannot
+     * recover the layout because the split is derived from the stored text alone).</p>
+     *
+     * <p>Only the brackets that actually pair up are allowed to nest, and only the quotes that pair
+     * up are allowed to quote - a trailing unpaired one is inert. For a well-formed list every
+     * bracket and quote pairs, so the result is <b>identical to {@link #splitArgs}</b>; the two can
+     * only disagree on input that fails to compile, where the card's job is to keep showing the user
+     * what they typed. The compiler keeps calling {@link #splitArgs}: an unbalanced list is refused
+     * by {@code DataModules.callShapeInvalid} and by the trial compile, with a message about the
+     * unfinished expression.</p>
+     *
+     * <p>Escape handling mirrors {@link #splitArgs} (a backslash escapes the next character inside a
+     * quote). An unpaired quote can legitimately change which bracket positions were treated as
+     * quoting during the first pass, so on malformed input this is best-effort - it is a layout
+     * decision for text that has no valid reading at all.</p>
+     */
+    public static List<String> splitArgsLenient(String args){
+        List<String> result = new ArrayList<>();
+        if(args == null || args.trim().isEmpty()) return result;
+        int n = args.length();
+        boolean[] openMatched = new boolean[n], closeMatched = new boolean[n];
+        int[] stack = new int[n];
+        int top = 0, quoteCount = 0;
+        boolean quoted = false, escaped = false;
+
+        // Pass 1: collect the bracket pairs (ignoring what is inside quotes) and count the quotes.
+        for(int i = 0; i < n; i++){
+            char c = args.charAt(i);
+            if(escaped){
+                escaped = false;
+            }else if(quoted && c == '\\'){
+                escaped = true;
+            }else if(c == '"'){
+                quoteCount++;
+                quoted = !quoted;
+            }else if(!quoted){
+                if(c == '('){
+                    stack[top++] = i;
+                }else if(c == ')' && top > 0){
+                    openMatched[stack[--top]] = true;
+                    closeMatched[i] = true;
+                }
+            }
+        }
+
+        // Only paired quotes may quote: a trailing unpaired one would otherwise turn every later
+        // separator into quoted text, which is the quote-shaped version of the same defect.
+        int pairedQuotes = quoteCount - (quoteCount & 1);
+
+        // Pass 2: split at the commas that are at depth 0. Depth moves only for matched brackets,
+        // so an unclosed '(' leaves the separators after it visible to this pass.
+        int depth = 0, start = 0, seenQuotes = 0;
+        quoted = false;
+        escaped = false;
+        for(int i = 0; i < n; i++){
+            char c = args.charAt(i);
+            if(escaped){
+                escaped = false;
+            }else if(quoted && c == '\\'){
+                escaped = true;
+            }else if(c == '"'){
+                if(seenQuotes < pairedQuotes) quoted = !quoted;
+                seenQuotes++;
+            }else if(!quoted){
+                if(c == '(' && openMatched[i]){
+                    depth++;
+                }else if(c == ')' && closeMatched[i]){
+                    depth--;
+                }else if(c == ',' && depth == 0){
+                    result.add(args.substring(start, i).trim());
+                    start = i + 1;
+                }
+            }
+        }
+        result.add(args.substring(start).trim());
+        return result;
+    }
+
+    /**
+     * Whether {@code args} is a well-formed argument list: every {@code (} matched, every string
+     * literal closed, no stray {@code )}.
+     *
+     * <p>This answers "is this a complete expression list" - a <em>validity</em> question. It is
+     * not what splitting needs: {@link #splitArgs} only ever cuts at top-level commas, so the
+     * segment boundaries are just as clear while the user is midway through typing {@code f(a,}.
+     * The fixed-slot card therefore does <em>not</em> refuse an unbalanced list - it used to, and
+     * the cost was that every keystroke after the {@code (} was dropped and the card collapsed to
+     * a single field on reopen. The invalid-list decision belongs to
+     * {@code DataModules.callShapeInvalid} (red marking) and to the trial compile; see
+     * {@code DataCallStatement.argumentSlots()}.</p>
+     */
+    public static boolean balancedArgs(String args){
+        if(args == null) return true;
+        int depth = 0;
+        boolean quoted = false, escaped = false;
+        for(int i = 0; i < args.length(); i++){
+            char c = args.charAt(i);
+            if(escaped){
+                escaped = false;
+            }else if(quoted && c == '\\'){
+                escaped = true;
+            }else if(c == '"'){
+                quoted = !quoted;
+            }else if(!quoted && c == '('){
+                depth++;
+            }else if(!quoted && c == ')'){
+                if(--depth < 0) return false;
+            }
+        }
+        return depth == 0 && !quoted;
+    }
+
+    // ===== body preparation ===============================================================
+
+    /**
+     * Renames compiler temporaries (so inlined bodies cannot clobber live caller temps) and,
+     * for library functions, mangles every name the body writes plus its parameters.
+     */
+    private static void prepBody(Function function){
+        Map<String, String> map = new HashMap<>();
+        for(LStatement statement : function.body){
+            collectTemps(statement, function, map);
+        }
+        if(function.library){
+            Set<String> written = writtenNames(function);
+            for(String name : written){
+                if(!isExempt(name)){
+                    map.putIfAbsent(name, "__ls_func_" + function.name + "_" + name);
+                }
+            }
+            function.mangle.putAll(map);
+        }
+        function.body = rewriteBody(function, map);
+    }
+
+    /** Collects {@code _<digits>} temporary names from a statement's serialized text. */
+    private static void collectTemps(LStatement statement, Function function, Map<String, String> map){
+        StringBuilder text = new StringBuilder();
+        statement.write(text);
+        for(String token : text.toString().split("\\s+")){
+            collectTempToken(token, function, map);
+        }
+        if(statement instanceof FuncCallStatement call){
+            collectTempToken(call.args, function, map);
+        }else if(statement instanceof DataCallStatement call){
+            collectTempToken(call.destination, function, map);
+            collectTempToken(call.arguments, function, map);
+        }else if(statement instanceof ReturnStatement ret){
+            collectTempToken(ret.expr, function, map);
+        }
+    }
+
+    private static void collectTempToken(String token, Function function, Map<String, String> map){
+        if(isTempToken(token) && !map.containsKey(token)){
+            map.put(token, "__ls_f_" + function.name + "_" + token.substring(1));
+        }
+    }
+
+    private static boolean isTempToken(String token){
+        if(token.length() < 2 || token.charAt(0) != '_') return false;
+        for(int i = 1; i < token.length(); i++){
+            if(!Character.isDigit(token.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    /** Names the body writes (dest positions) plus parameters; these become function-local. */
+    private static Set<String> writtenNames(Function function){
+        Set<String> result = new HashSet<>(function.params);
+        for(LStatement statement : function.body){
+            if(statement instanceof SetStatement set){
+                result.add(set.to);
+            }else if(statement instanceof OperationStatement op){
+                result.add(op.dest);
+            }else if(statement instanceof SensorStatement sensor){
+                result.add(sensor.to);
+            }else if(statement instanceof ReadStatement read){
+                result.add(read.output);
+            }else if(statement instanceof GetLinkStatement getlink){
+                result.add(getlink.output);
+            }else if(statement instanceof PackColorStatement packcolor){
+                result.add(packcolor.result);
+            }else if(statement instanceof FuncCallStatement call){
+                if(!call.result.isEmpty()) result.add(call.result);
+            }else if(statement instanceof DataCallStatement call){
+                if(!call.destination.isEmpty()) result.add(call.destination);
+            }else if(statement instanceof ForBeginStatement forBegin){
+                result.add(forBegin.variable);
+            }else if(statement instanceof UnitBindStatement bind){
+                result.add(bind.variable);
+            }else if(statement instanceof UnitNextStatement next){
+                result.add(next.variable);
+            }else if(statement instanceof UnitForBeginStatement loop){
+                result.add(loop.variable);
+            }else if(statement instanceof UnitFreeStatement free){
+                result.add(free.variable);
+            }
+        }
+        return result;
+    }
+
+    private static boolean isExempt(String name){
+        if(name.isEmpty()) return true;
+        if(name.charAt(0) == '@') return true;
+        if(name.startsWith(reservedPrefix)) return true;
+        // storage devices: cell1/bank1/memory1 (and bare cell/bank/memory forms)
+        if(name.startsWith("cell") || name.startsWith("bank") || name.startsWith("memory")){
+            // the digit run starts at the end of the device prefix: memory is 6 chars, cell/bank 4
+            int prefixLen = name.startsWith("memory") ? 6 : 4;
+            for(int i = prefixLen; i < name.length(); i++){
+                if(!Character.isDigit(name.charAt(i))) return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** Rebuilds the body with renamed names. Text-level rewrite: only exact identifier tokens change. */
+    private static Seq<LStatement> rewriteBody(Function function, Map<String, String> map){
+        if(map.isEmpty()) return function.body;
+        Seq<LStatement> rewritten = new Seq<>();
+        for(LStatement statement : function.body){
+            if(statement instanceof FuncCallStatement call){
+                FuncCallStatement copy = new FuncCallStatement();
+                copy.name = call.name;
+                copy.args = rewriteExpression(call.args, map);
+                copy.result = map.getOrDefault(call.result, call.result);
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof DataCallStatement call){
+                DataCallStatement copy = new DataCallStatement();
+                copy.operation = call.operation;
+                copy.destination = rewriteTokens(call.destination, map);
+                copy.arguments = rewriteExpression(call.arguments, map);
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof ReturnStatement ret){
+                ReturnStatement copy = new ReturnStatement();
+                copy.expr = rewriteExpression(ret.expr, map);
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof IfBeginStatement ifBegin && ifBegin.expressionMode){
+                IfBeginStatement copy = new IfBeginStatement();
+                copy.value = ifBegin.value;
+                copy.compare = ifBegin.compare;
+                copy.op = ifBegin.op;
+                copy.expressionMode = true;
+                copy.shortCircuitMode = ifBegin.shortCircuitMode;
+                copy.conditionExpr = rewriteExpression(ifBegin.conditionExpr, map);
+                copy.destIndex = ifBegin.destIndex;
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof ElseIfStatement elseIf && elseIf.expressionMode){
+                ElseIfStatement copy = new ElseIfStatement();
+                copy.value = elseIf.value;
+                copy.compare = elseIf.compare;
+                copy.op = elseIf.op;
+                copy.expressionMode = true;
+                copy.shortCircuitMode = elseIf.shortCircuitMode;
+                copy.conditionExpr = rewriteExpression(elseIf.conditionExpr, map);
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof WhileBeginStatement whileBegin && whileBegin.expressionMode){
+                WhileBeginStatement copy = new WhileBeginStatement();
+                copy.value = whileBegin.value;
+                copy.compare = whileBegin.compare;
+                copy.op = whileBegin.op;
+                copy.expressionMode = true;
+                copy.shortCircuitMode = whileBegin.shortCircuitMode;
+                copy.conditionExpr = rewriteExpression(whileBegin.conditionExpr, map);
+                copy.destIndex = whileBegin.destIndex;
+                rewritten.add(copy);
+                continue;
+            }
+            if(statement instanceof ForBeginStatement forBegin && forBegin.expressionMode){
+                ForBeginStatement copy = new ForBeginStatement();
+                copy.variable = forBegin.variable;
+                copy.initial = forBegin.initial;
+                copy.step = forBegin.step;
+                copy.compare = forBegin.compare;
+                copy.op = forBegin.op;
+                copy.expressionMode = true;
+                copy.shortCircuitMode = forBegin.shortCircuitMode;
+                copy.conditionExpr = rewriteExpression(forBegin.conditionExpr, map);
+                copy.destIndex = forBegin.destIndex;
+                rewritten.add(copy);
+                continue;
+            }
+            StringBuilder text = new StringBuilder();
+            statement.write(text);
+            String rewrittenText = rewriteTokens(text.toString(), map);
+            Seq<LStatement> parsed = LAssembler.read(rewrittenText, true);
+            if(parsed.size != 1 || parsed.get(0) instanceof InvalidStatement){
+                throw new IllegalArgumentException("internal error: failed to rewrite statement inside function '" + function.name + "'");
+            }
+            rewritten.add(parsed.get(0));
+        }
+        return rewritten;
+    }
+
+    private static String rewriteTokens(String text, Map<String, String> map){
+        StringBuilder out = new StringBuilder(text.length() + 16);
+        int i = 0;
+        while(i < text.length()){
+            char c = text.charAt(i);
+            if(c == '"'){
+                // string literals are copied verbatim: identifiers and whitespace inside them
+                // must not be rewritten or collapsed (e.g. print "cost _1 credits")
+                int end = text.indexOf('"', i + 1);
+                if(end == -1){ // unterminated quote: copy the rest as-is
+                    out.append(text, i, text.length());
+                    break;
+                }
+                out.append(text, i, end + 1);
+                i = end + 1;
+            }else if(c == ' ' || c == '\t' || c == '\n' || c == '\r'){
+                out.append(c);
+                i++;
+            }else{
+                int start = i;
+                while(i < text.length() && text.charAt(i) != ' ' && text.charAt(i) != '\t' && text.charAt(i) != '\n' && text.charAt(i) != '\r' && text.charAt(i) != '"') i++;
+                String token = text.substring(start, i);
+                out.append(map.getOrDefault(token, token));
+            }
+        }
+        return out.toString();
+    }
+
+    /** Rewrites identifiers inside an expression string, preserving all other characters. */
+    public static String rewriteExpression(String expr, Map<String, String> map){
+        if(expr == null || expr.isEmpty() || map.isEmpty()) return expr;
+        StringBuilder out = new StringBuilder(expr.length());
+        int i = 0;
+        while(i < expr.length()){
+            char c = expr.charAt(i);
+            if(c == '"'){
+                // string literals are copied verbatim: identifiers inside them must not be rewritten
+                int end = expr.indexOf('"', i + 1);
+                if(end == -1){
+                    out.append(expr, i, expr.length());
+                    break;
+                }
+                out.append(expr, i, end + 1);
+                i = end + 1;
+            }else if(c == '@'){
+                int start = i++;
+                while(i < expr.length() && (Character.isLetterOrDigit(expr.charAt(i)) || expr.charAt(i) == '_')) i++;
+                out.append(expr, start, i);
+            }else if(Character.isLetter(c) || c == '_'){
+                int start = i;
+                while(i < expr.length() && (Character.isLetterOrDigit(expr.charAt(i)) || expr.charAt(i) == '_')) i++;
+                String token = expr.substring(start, i);
+                out.append(map.getOrDefault(token, token));
+            }else{
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    // ===== recursion detection ============================================================
+
+    private static void checkRecursion(FunctionSet set){
+        Map<String, Function> all = new LinkedHashMap<>(set.functions);
+        if(set.library != null){
+            for(Map.Entry<String, Function> entry : set.library.functions.entrySet()){
+                all.putIfAbsent(entry.getKey(), entry.getValue());
+            }
+        }
+        checkRecursion(all);
+    }
+
+    private static void checkRecursion(Map<String, Function> all){
+        Map<String, Integer> state = new HashMap<>();
+        Deque<String> stack = new ArrayDeque<>();
+        for(String name : all.keySet()){
+            if(state.get(name) == null) visit(name, all, state, stack);
+        }
+    }
+
+    private static void visit(String name, Map<String, Function> all, Map<String, Integer> state, Deque<String> stack){
+        state.put(name, 1);
+        stack.push(name);
+        Function function = all.get(name);
+        if(function != null){
+            for(String callee : function.callees){
+                Integer seen = state.get(callee);
+                if(seen == null){
+                    visit(callee, all, state, stack);
+                }else if(seen == 1){
+                    StringBuilder path = new StringBuilder();
+                    Deque<String> reversed = new ArrayDeque<>();
+                    for(String node : stack){
+                        reversed.push(node);
+                        if(node.equals(callee)) break;
+                    }
+                    for(String node : reversed){
+                        if(path.length() > 0) path.append(" -> ");
+                        path.append(node);
+                    }
+                    path.append(" -> ").append(callee);
+                    throw new IllegalArgumentException("recursion is not supported: " + path);
+                }
+            }
+        }
+        stack.pop();
+        state.put(name, 2);
+    }
+
+    // ===== lowering =======================================================================
+
+    /**
+     * Emits vanilla mlog for a statement list. The list is either the main program
+     * (prefix "") or a prepared function body (prefix {@code __ls_func_<name>_} in NORMAL
+     * mode, {@code __ls_i_<id>_} per inline copy). Call sites expand recursively.
+     */
+    public static void lower(Seq<LStatement> statements, String prefix, FunctionSet functions, FuncMode mode,
+                             StringBuilder out, CallIds ids, String funcName, SugarCompiler.SwitchStrategy strategy,
+                             SugarCompiler.AssertEmit assertEmit){
+        int[] switchOwner = switchOwners(statements);
+        int[] breakOwner = breakOwners(statements);
+        int[] continueOwner = continueOwners(statements);
+        int[] ifOwner = ifOwners(statements);
+        int[] nextBranch = nextBranch(statements, ifOwner);
+        boolean[] statementLabels = statementLabels(statements, breakOwner);
+        String[] optimizedOperations = optimizeOperations(statements, statementLabels);
+
+        boolean[] ifBad = ifChainViolations(statements, ifOwner);
+        for(int i = 0; i < statements.size; i++){
+            if(ifBad[i]){
+                LStatement statement = statements.get(i);
+                throw error(statement instanceof ElseStatement ? "else" : "elif", i,
+                    "appears after else (or is a duplicate else) in the same if chain");
+            }
+        }
+        boolean[] defaultBad = defaultViolations(statements, switchOwner);
+        for(int i = 0; i < statements.size; i++){
+            if(defaultBad[i]){
+                throw error("default", i, "is outside a switch or is a second default of the same switch");
+            }
+        }
+
+        for(int i = 0; i < statements.size; i++){
+            if(statementLabels[i]) out.append(label(prefix, "stmt_", i)).append(":\n");
+            if(optimizedOperations[i] != null){
+                out.append(optimizedOperations[i]);
+                continue;
+            }
+            LStatement statement = statements.get(i);
+
+            if(statement instanceof UnitBindStatement bind){
+                emitUnitBind(bind, prefix, i, out);
+            }else if(statement instanceof UnitNextStatement next){
+                emitUnitNext(next, prefix, i, out);
+            }else if(statement instanceof UnitForBeginStatement begin){
+                emitUnitFor(begin, prefix, i, out);
+            }else if(statement instanceof UnitFreeStatement free){
+                emitUnitFree(free, prefix, i, out);
+            }else if(statement instanceof ForBeginStatement begin){
+                if(!begin.initial.isEmpty()) out.append("set ").append(begin.variable).append(' ').append(begin.initial).append('\n');
+                out.append(label(prefix, "for_check_", i)).append(":\n");
+                if(begin.expressionMode){
+                    String bodyLabel = label(prefix, "for_body_", i);
+                    String exitLabel = label(prefix, "stmt_", begin.destIndex + 1);
+                    if(begin.shortCircuitMode){
+                        emitShortCircuitCondition(begin.conditionExpr, prefix, i, bodyLabel, exitLabel, out);
+                        out.append(bodyLabel).append(":\n");
+                    }else{
+                        String condition = emitConditionExpression(begin.conditionExpr, prefix, i, out, functions, mode, ids, strategy, assertEmit);
+                        out.append("jump ").append(bodyLabel).append(" notEqual ").append(condition).append(" 0\n");
+                    }
+                }else{
+                    out.append("jump ").append(label(prefix, "for_body_", i)).append(' ').append(begin.op.name()).append(' ')
+                        .append(begin.variable).append(' ').append(begin.compare).append('\n');
+                }
+                if(!begin.shortCircuitMode || !begin.expressionMode){
+                    out.append("jump ").append(label(prefix, "stmt_", begin.destIndex + 1)).append(" always x false\n");
+                    out.append(label(prefix, "for_body_", i)).append(":\n");
+                }
+            }else if(statement instanceof WhileBeginStatement begin){
+                if(begin.expressionMode){
+                    String bodyLabel = label(prefix, "while_body_", i);
+                    String exitLabel = label(prefix, "stmt_", begin.destIndex + 1);
+                    if(begin.shortCircuitMode){
+                        emitShortCircuitCondition(begin.conditionExpr, prefix, i, bodyLabel, exitLabel, out);
+                        out.append(bodyLabel).append(":\n");
+                    }else{
+                        String condition = emitConditionExpression(begin.conditionExpr, prefix, i, out, functions, mode, ids, strategy, assertEmit);
+                        out.append("jump ").append(bodyLabel).append(" notEqual ").append(condition).append(" 0\n");
+                        out.append("jump ").append(exitLabel).append(" always x false\n");
+                        out.append(bodyLabel).append(":\n");
+                    }
+                }else{
+                    out.append("jump ").append(label(prefix, "while_body_", i)).append(' ').append(begin.op.name()).append(' ')
+                        .append(begin.value).append(' ').append(begin.compare).append('\n');
+                    out.append("jump ").append(label(prefix, "stmt_", begin.destIndex + 1)).append(" always x false\n");
+                    out.append(label(prefix, "while_body_", i)).append(":\n");
+                }
+            }else if(statement instanceof SwitchBeginStatement begin){
+                emitSwitch(statements, i, begin, switchOwner, prefix, strategy, out);
+            }else if(statement instanceof CaseStatement){
+                if(switchOwner[i] < 0) throw error("case", i, "is outside a switch");
+                out.append(label(prefix, "case_", i)).append(":\n");
+            }else if(statement instanceof SugarStatements.DefaultStatement){
+                if(switchOwner[i] < 0) throw error("default", i, "is outside a switch");
+                out.append(label(prefix, "default_", i)).append(":\n");
+            }else if(statement instanceof IfBeginStatement begin){
+                String target = nextBranch[i] >= 0
+                    ? label(prefix, "if_branch_", nextBranch[i])
+                    : label(prefix, "stmt_", begin.destIndex + 1);
+                if(begin.expressionMode){
+                    if(begin.shortCircuitMode){
+                        String bodyLabel = label(prefix, "if_body_", i);
+                        emitShortCircuitCondition(begin.conditionExpr, prefix, i, bodyLabel, target, out);
+                        out.append(bodyLabel).append(":\n");
+                    }else{
+                        String condition = emitConditionExpression(begin.conditionExpr, prefix, i, out, functions, mode, ids, strategy, assertEmit);
+                        out.append("jump ").append(target).append(" equal ").append(condition).append(" 0\n");
+                    }
+                }else{
+                    emitComparisonSkip(begin.op, begin.value, begin.compare, target, label(prefix, "if_body_", i), out);
+                }
+            }else if(statement instanceof ElseIfStatement item){
+                int owner = ifOwner[i];
+                if(owner < 0) throw error("elif", i, "is outside an if");
+                int end = ((BeginStatement)statements.get(owner)).destIndex;
+                out.append("jump ").append(label(prefix, "stmt_", end + 1)).append(" always x false\n");
+                out.append(label(prefix, "if_branch_", i)).append(":\n");
+                String target = nextBranch[i] >= 0
+                    ? label(prefix, "if_branch_", nextBranch[i])
+                    : label(prefix, "stmt_", end + 1);
+                if(item.expressionMode){
+                    if(item.shortCircuitMode){
+                        String bodyLabel = label(prefix, "if_body_", i);
+                        emitShortCircuitCondition(item.conditionExpr, prefix, i, bodyLabel, target, out);
+                        out.append(bodyLabel).append(":\n");
+                    }else{
+                        String condition = emitConditionExpression(item.conditionExpr, prefix, i, out, functions, mode, ids, strategy, assertEmit);
+                        out.append("jump ").append(target).append(" equal ").append(condition).append(" 0\n");
+                    }
+                }else{
+                    emitComparisonSkip(item.op, item.value, item.compare, target, label(prefix, "if_body_", i), out);
+                }
+            }else if(statement instanceof ElseStatement){
+                int owner = ifOwner[i];
+                if(owner < 0) throw error("else", i, "is outside an if");
+                int end = ((BeginStatement)statements.get(owner)).destIndex;
+                out.append("jump ").append(label(prefix, "stmt_", end + 1)).append(" always x false\n");
+                out.append(label(prefix, "if_branch_", i)).append(":\n");
+            }else if(statement instanceof BreakStatement){
+                if(breakOwner[i] < 0) throw error("break", i, "is outside a loop or switch");
+                BeginStatement owner = (BeginStatement)statements.get(breakOwner[i]);
+                out.append("jump ").append(label(prefix, "stmt_", owner.destIndex + 1)).append(" always x false\n");
+            }else if(statement instanceof ContinueStatement){
+                int owner = continueOwner[i];
+                if(owner < 0) throw error("continue", i, "is outside a loop");
+                LStatement ownerStmt = statements.get(owner);
+                if(ownerStmt instanceof ForBeginStatement){
+                    out.append("jump ").append(label(prefix, "for_continue_", owner)).append(" always x false\n");
+                }else if(ownerStmt instanceof UnitForBeginStatement){
+                    out.append("jump ").append(label(prefix, "ub_step_", owner)).append(" always x false\n");
+                }else if(ownerStmt instanceof WhileBeginStatement){
+                    out.append("jump ").append(label(prefix, "stmt_", owner)).append(" always x false\n");
+                }
+            }else if(statement instanceof BlockEndStatement){
+                int beginIndex = findOwner(statements, i);
+                LStatement owner = statements.get(beginIndex);
+                if(owner instanceof ForBeginStatement begin){
+                    // The continue label is a jump location. Vanilla LParser allows 500 of those,
+                    // so a loop with no continue does not spend one on an unreferenced label.
+                    if(loopHasContinue(statements, beginIndex, continueOwner)){
+                        out.append(label(prefix, "for_continue_", beginIndex)).append(":\n");
+                    }
+                    if(!begin.step.isEmpty()) out.append("op add ").append(begin.variable).append(' ').append(begin.variable).append(' ').append(begin.step).append('\n');
+                    out.append("jump ").append(label(prefix, "for_check_", beginIndex)).append(" always x false\n");
+                }else if(owner instanceof UnitForBeginStatement){
+                    if(loopHasContinue(statements, beginIndex, continueOwner)){
+                        out.append(label(prefix, "ub_step_", beginIndex)).append(":\n");
+                    }
+                    out.append("op add ").append(ub(prefix, "n", beginIndex)).append(' ')
+                        .append(ub(prefix, "n", beginIndex)).append(" 1\n");
+                    out.append("jump ").append(label(prefix, "ub_scan_", beginIndex)).append(" always x false\n");
+                }else if(owner instanceof WhileBeginStatement){
+                    out.append("jump ").append(label(prefix, "stmt_", beginIndex)).append(" always x false\n");
+                }
+            }else if(statement instanceof JumpStatement jump){
+                if(jump.destIndex == exitTarget){
+                    out.append("jump __ls_").append(prefix).append("exit").append(' ').append(jump.op.name()).append(' ')
+                        .append(jump.value).append(' ').append(jump.compare).append('\n');
+                }else if(jump.destIndex < 0 || jump.destIndex > statements.size){
+                    throw error("jump", i, "has no valid destination");
+                }else{
+                    out.append("jump ").append(label(prefix, "stmt_", jump.destIndex)).append(' ').append(jump.op.name()).append(' ')
+                        .append(jump.value).append(' ').append(jump.compare).append('\n');
+                }
+            }else if(statement instanceof FuncCallStatement call){
+                expandCall(call, functions, mode, out, ids, strategy, assertEmit);
+            }else if(statement instanceof DataCallStatement call){
+                emitDataCall(call, prefix, functions, mode, out, ids, strategy, assertEmit);
+            }else if(statement instanceof ReturnStatement){
+                if(funcName == null) throw error("return", i, "is outside a function");
+                emitReturn((ReturnStatement)statement, prefix, mode, out, funcName, functions, ids, strategy, assertEmit);
+            }else if(statement instanceof FuncDefStatement){
+                throw error("funcdef", i, "cannot be lowered; function definitions are expanded at call sites");
+            }else if(statement instanceof SugarStatements.ArrayStatement){
+                // 数组声明卡是纯编译期元数据：不产出任何 mlog 行（产物保持纯原版指令，
+                // 无 LogicSugar 的 customParsers 的客户端也能解析）。注册表元数据已由
+                // SugarCompiler.compile 在 lower 前登记，指向声明位置的 jump 仍会得到
+                // 前置的 stmt_ 标签，等于落到下一条语句。
+            }else if(statement instanceof SugarStatements.MatrixStatement){
+                // 矩阵声明卡同理：纯编译期元数据，不产出指令（m[i][j] 由表达式层换算）
+            }else if(statement instanceof SugarStatements.ArrayInitStatement init){
+                // 数组初始化卡：卡片位置即初始化位置，只发射原版 write 行（~ 槽跳过）
+                emitArrayInit(init, out);
+            }else if(statement instanceof logicsugar.assist.data.DataDeclaration){
+                // F2: 数据子系统的声明卡（record/stack/queue/...）是纯编译期元数据：
+                // 不产出任何 mlog 行，注册表元数据由 DataModules.collectAll 在 lower 前建立
+            }else if(statement instanceof SugarStatements.SpanStatement){
+                // span 声明卡同样不产指令。读写在下面的 read/write 分支和表达式发射点展开。
+            }else if(statement instanceof ReadStatement read && SpanAccess.isSpan(read.target)){
+                SpanAccess.appendRead(out, read.output, read.target, read.address);
+            }else if(statement instanceof WriteStatement write && SpanAccess.isSpan(write.target)){
+                SpanAccess.appendWrite(out, write.input, write.target, write.address);
+            }else if(SugarDebugLines.isDebugStatement(statement)){
+                // Debug builds (emit) pass MDT's assert/log/… lines through as text; the
+                // default (strip) compiles them away so the saved mlog stays vanilla-parseable
+                // — the sugar lives in the persistence carrier. The test is the written text,
+                // so it also catches MDT's own statement classes (MDT removes our parsers and
+                // owns the opcodes whenever it is installed). Nothing runs here: runtime
+                // behaviour is Mlog Dev Tools' job.
+                if(assertEmit == SugarCompiler.AssertEmit.emit){
+                    if(!SugarDebugLines.writeDebugStatement(statement, out)){
+                        // write() failed (it already logged); keep the old failure direction:
+                        // the normal write path runs and reports it exactly as before.
+                        statement.write(out);
+                    }
+                    out.append('\n');
+                }
+            }else{
+                statement.write(out);
+                out.append('\n');
+            }
+        }
+        // 收尾标签属于"块结束之前的那段结构"，不是编译器凭空产生的指令，所以先打完它：
+        // 此后从本方法返回的控制流（hoist 前导跳、函数体、返回跳板）一律由调用方自己收尾。
+        if(statementLabels[statements.size]) out.append(label(prefix, "stmt_", statements.size)).append(":\n");
+    }
+
+    /** Lowers one persistent intrinsic card through the normal expression provider chain. */
+    private static void emitDataCall(DataCallStatement call, String prefix, FunctionSet functions, FuncMode mode,
+                                     StringBuilder out, CallIds ids, SugarCompiler.SwitchStrategy strategy,
+                                     SugarCompiler.AssertEmit assertEmit){
+        DataModule.PaletteCall spec = DataModules.paletteCall(call.operation);
+        // 卡片文本/提示/载体都只写规范新名（旧载体重开即归一化，见 DataCallStatement）
+        String operation = call.canonicalOperation();
+        if(spec == null) throw new IllegalArgumentException("unknown data intrinsic '" + operation + "'");
+        // The expression compiler always needs a concrete result operand so the last
+        // intrinsic line can be optimized safely.  Void cards discard that legacy
+        // sentinel into a private, per-function reserved variable; it never becomes a
+        // user-visible `result = ...` assignment and cannot collide with user names.
+        boolean hasDestination = call.destination != null && !call.destination.trim().isEmpty();
+        // v5 API: result-less operations do not require a destination. A card that still carries
+        // one (pre-v5 saves) keeps writing the intrinsic result there, so the emitted stream is
+        // unchanged and old saves still pass the restore verification gate; only a new `~` card
+        // falls back to the private discard variable.
+        String destination = hasDestination ? call.destination
+            : "__ls_" + (prefix == null ? "" : prefix.replace('-', '_')) + "datacall_discard";
+        if(spec.returnsValue && !hasDestination){
+            throw new IllegalArgumentException("data call '" + operation + "' requires a destination variable");
+        }
+        String args = call.arguments == null ? "" : call.arguments;
+        // Arity is part of the shape, and the one-box-per-parameter card makes "the last box was left
+        // empty" the most common mistake. Without this the call falls through to the expression
+        // compiler, which can only answer "unknown function" - a message that says nothing about the
+        // argument count. Saving must refuse either direction.
+        //
+        // The editor paints both red, through different layers: DataModules.callShapeInvalid flags
+        // "more arguments than parameters", while "fewer arguments than parameters" is left to the
+        // trial compile in the second layer. Red is about the mistake, not about the card's shape:
+        // the card keeps its fixed slots either way - extras are merged into the last slot, and a
+        // short list keeps its empty boxes under the parameter-name placeholders, which is exactly
+        // how it shows what is still missing
+        // (DataCallTest.argumentSlotsAreFixedAndLossless pins that padding).
+        int expectedArgs = DataModules.paletteParams(operation).size();
+        if(expectedArgs > 0){
+            int actualArgs = splitArgs(args).size();
+            if(actualArgs != expectedArgs){
+                throw new IllegalArgumentException("data call '" + operation + "' takes " + expectedArgs
+                    + " argument(s) but got " + actualArgs + ": \"" + args + "\"");
+            }
+        }
+        List<ExprCompiler.Line> lines;
+        try{
+            lines = ExprCompiler.compileForcedIntrinsic(destination, operation, args,
+                assertEmit == SugarCompiler.AssertEmit.emit);
+        }catch(Exception e){
+            throw new IllegalArgumentException("Invalid data call '" + operation + "': " + e.getMessage());
+        }
+        for(ExprCompiler.Line line : lines){
+            if(line instanceof ExprCompiler.CallLine nested){
+                ExprCompiler.CallLine renamed = new ExprCompiler.CallLine(nested.name,
+                    renameDataArgs(nested.args, prefix), renameDataTemp(nested.dest, prefix));
+                expandCallLine(renamed, functions, mode, out, ids, strategy, assertEmit);
+            }else if(line instanceof ExprCompiler.AssertBoundsLine bounds){
+                out.append(bounds.withValue(renameDataTemp(bounds.value, prefix)).toText()).append('\n');
+            }else if(line instanceof ExprCompiler.CopyLine copy){
+                out.append("set ").append(renameDataTemp(copy.dest, prefix)).append(' ')
+                    .append(renameDataTemp(copy.src, prefix)).append('\n');
+            }else if(line instanceof ExprCompiler.SelectLine sel){
+                out.append(sel.rename(token -> renameDataTemp(token, prefix)).toText()).append('\n');
+            }else if(line instanceof ExprCompiler.RawLine raw){
+                out.append(raw.toText()).append('\n');
+            }else if(line instanceof ExprCompiler.SensorLine sensor){
+                out.append("sensor ").append(renameDataTemp(sensor.dest, prefix)).append(' ')
+                    .append(renameDataTemp(sensor.a, prefix)).append(' ')
+                    .append(renameDataTemp(sensor.b, prefix)).append('\n');
+            }else if(line instanceof ExprCompiler.ReadLine read){
+                SpanAccess.appendRead(out, renameDataTemp(read.dest, prefix),
+                    renameDataTemp(read.a, prefix), renameDataTemp(read.b, prefix));
+            }else if(line instanceof ExprCompiler.WriteLine write){
+                SpanAccess.appendWrite(out, renameDataTemp(write.value, prefix),
+                    renameDataTemp(write.memory, prefix), renameDataTemp(write.address, prefix));
+            }else{
+                ExprCompiler.OpLine op = (ExprCompiler.OpLine)line;
+                out.append("op ").append(op.op).append(' ')
+                    .append(renameDataTemp(op.dest, prefix)).append(' ')
+                    .append(renameDataTemp(op.a, prefix)).append(' ')
+                    .append(renameDataTemp(op.b, prefix)).append('\n');
+            }
+        }
+    }
+
+    private static String renameDataArgs(String args, String prefix){
+        StringBuilder out = new StringBuilder();
+        for(String value : ExprCompiler.splitValues(args)){
+            if(out.length() > 0) out.append(", ");
+            out.append(renameDataTemp(value, prefix));
+        }
+        return out.toString();
+    }
+
+    private static String renameDataTemp(String value, String prefix){
+        if(value == null || !ExprCompiler.isTemp(value) || prefix == null || prefix.isEmpty()) return value;
+        return "__ls_" + prefix.replace('-', '_') + "dc" + value.substring(1);
+    }
+
+    /** 数组初始化卡（{@code arrayinit}）lowering：卡片位置发射 write <v> <memory> <base+k>，
+     *  空槽跳过。严格校验（数组已声明、槽位不越界、值必须是数字字面量）已在
+     *  {@link ArrayRegistry#compileRegistry} 完成，这里只做防御性兜底。 */
+    private static void emitArrayInit(SugarStatements.ArrayInitStatement init, StringBuilder out){
+        ArrayRegistry registry = ArrayRegistry.active();
+        ArrayRegistry.ArrayInfo info = registry == null ? null : registry.get(init.array);
+        if(info == null){
+            throw new IllegalArgumentException("arrayinit references undeclared array '" + init.array + "'");
+        }
+        for(int k = 0; k < init.values.length; k++){
+            String value = init.values[k];
+            if(value == null || value.isEmpty() || value.equals("~")) continue;
+            SpanAccess.appendWrite(out, value, info.memory, Long.toString((long)info.base + k));
+        }
+    }
+
+    /** Emits a short-circuit predicate without materializing an eager land/or temporary. */
+    private static void emitShortCircuitCondition(String expression, String prefix, int statementIndex,
+                                                  String trueLabel, String falseLabel, StringBuilder out){
+        ShortCircuitCompiler.Predicate predicate;
+        try{
+            predicate = ShortCircuitCompiler.parse(expression);
+        }catch(RuntimeException exception){
+            throw new IllegalArgumentException("Invalid short-circuit condition expression '" + expression + "': " + exception.getMessage());
+        }
+        String labelPrefix = "__ls_" + prefix.replace('-', '_') + "sc_" + statementIndex + "_";
+        ShortCircuitCompiler.emitPredicate(predicate, trueLabel, falseLabel, out,
+            ShortCircuitCompiler.labels(labelPrefix));
+    }
+
+    /** Compiles an if/elif expression into a compiler-private boolean temporary. */
+    private static String emitConditionExpression(String expression, String prefix, int statementIndex, StringBuilder out,
+                                                  FunctionSet functions, FuncMode mode, CallIds ids,
+                                                  SugarCompiler.SwitchStrategy strategy, SugarCompiler.AssertEmit assertEmit){
+        List<ExprCompiler.Line> ops;
+        String base = "__ls_cond_" + prefix.replace('-', '_') + statementIndex;
+        String dest = base;
+        try{
+            ops = ExprCompiler.compile(dest, expression, null, assertEmit == SugarCompiler.AssertEmit.emit);
+        }catch(Exception e){
+            throw new IllegalArgumentException("Invalid condition expression '" + expression + "': " + e.getMessage());
+        }
+        for(ExprCompiler.Line line : ops){
+            if(line instanceof ExprCompiler.SensorLine sensor){
+                String a = renameConditionTemp(sensor.a, prefix, statementIndex);
+                String b = renameConditionTemp(sensor.b, prefix, statementIndex);
+                String d = renameConditionTemp(sensor.dest, prefix, statementIndex);
+                out.append("sensor ").append(d).append(' ').append(a).append(' ').append(b).append('\n');
+            }else if(line instanceof ExprCompiler.ReadLine read){
+                // 数组下标读：read 是 3 操作数指令（不是 op），dest 与地址里的 temp
+                // 都要进入条件命名空间（memory 变量名不重命名）。span 在改名之后展开。
+                String a = renameConditionTemp(read.a, prefix, statementIndex);
+                String b = renameConditionTemp(read.b, prefix, statementIndex);
+                String d = renameConditionTemp(read.dest, prefix, statementIndex);
+                SpanAccess.appendRead(out, d, a, b);
+            }else if(line instanceof ExprCompiler.SelectLine sel){
+                out.append(sel.rename(token -> renameConditionTemp(token, prefix, statementIndex)).toText()).append('\n');
+            }else if(line instanceof ExprCompiler.CallLine call){
+                // 函数调用展开：实参与结果 temp 都要进入条件命名空间
+                FuncCallStatement stmt = new FuncCallStatement();
+                stmt.name = call.name;
+                StringBuilder args = new StringBuilder();
+                for(String value : ExprCompiler.splitValues(call.args)){
+                    if(args.length() > 0) args.append(", ");
+                    args.append(renameConditionTemp(value, prefix, statementIndex));
+                }
+                stmt.args = args.toString();
+                stmt.result = renameConditionTemp(call.dest, prefix, statementIndex);
+                expandCall(stmt, functions, mode, out, ids, strategy, assertEmit);
+            }else if(line instanceof ExprCompiler.AssertBoundsLine bounds){
+                // emit 调试构建的数组/矩阵越界断言：断言操作数也要进入条件命名空间，
+                // 否则断言检查的是其它表达式链留下的裸 _0
+                out.append(bounds.withValue(renameConditionTemp(bounds.value, prefix, statementIndex)).toText()).append('\n');
+            }else if(line instanceof ExprCompiler.CopyLine copy){
+                // 值拷贝 `set dest src`：dest/src 可能是临时变量，必须一起进入条件命名空间
+                out.append("set ").append(renameConditionTemp(copy.dest, prefix, statementIndex)).append(' ')
+                    .append(renameConditionTemp(copy.src, prefix, statementIndex)).append('\n');
+            }else if(line instanceof ExprCompiler.RawLine raw){
+                out.append(raw.toText()).append('\n');
+            }else{
+                ExprCompiler.OpLine op = (ExprCompiler.OpLine)line;
+                String a = renameConditionTemp(op.a, prefix, statementIndex);
+                String b = renameConditionTemp(op.b, prefix, statementIndex);
+                String d = renameConditionTemp(op.dest, prefix, statementIndex);
+                out.append("op ").append(op.op).append(' ').append(d).append(' ').append(a).append(' ').append(b).append('\n');
+            }
+        }
+        return dest;
+    }
+
+    private static String renameConditionTemp(String value, String prefix, int statementIndex){
+        if(!ExprCompiler.isTemp(value)) return value;
+        // ExprCompiler may reuse the destination temporary as an operand; preserve the
+        // generated condition's base name and append the temporary suffix only for _0+.
+        return "__ls_cond_" + prefix.replace('-', '_') + statementIndex
+            + ("_0".equals(value) ? "" : value.substring(1));
+    }
+
+    private static void emitReturn(ReturnStatement ret, String prefix, FuncMode mode, StringBuilder out, String funcName,
+                                   FunctionSet functions, CallIds ids, SugarCompiler.SwitchStrategy strategy, SugarCompiler.AssertEmit assertEmit){
+        if(!ret.expr.isEmpty()){
+            try{
+                List<ExprCompiler.Line> ops = ExprCompiler.compile("__ls_func_" + funcName + "_result", ret.expr,
+                    null, assertEmit == SugarCompiler.AssertEmit.emit);
+                for(ExprCompiler.Line line : ops){
+                    if(line instanceof ExprCompiler.CallLine call){
+                        FuncCallStatement stmt = new FuncCallStatement();
+                        stmt.name = call.name;
+                        StringBuilder args = new StringBuilder();
+                        for(String value : ExprCompiler.splitValues(call.args)){
+                            if(args.length() > 0) args.append(", ");
+                            args.append(renameReturnTemp(value, funcName));
+                        }
+                        stmt.args = args.toString();
+                        stmt.result = renameReturnTemp(call.dest, funcName);
+                        expandCall(stmt, functions, mode, out, ids, strategy, assertEmit);
+                    }else if(line instanceof ExprCompiler.SensorLine sensor){
+                        out.append("sensor ").append(renameReturnTemp(sensor.dest, funcName)).append(' ')
+                            .append(renameReturnTemp(sensor.a, funcName)).append(' ')
+                            .append(renameReturnTemp(sensor.b, funcName)).append('\n');
+                    }else if(line instanceof ExprCompiler.ReadLine read){
+                        // 数组下标读是 3 操作数指令（不是 op）：dest/地址 temp 进入函数命名空间
+                        SpanAccess.appendRead(out, renameReturnTemp(read.dest, funcName),
+                            renameReturnTemp(read.a, funcName), renameReturnTemp(read.b, funcName));
+                    }else if(line instanceof ExprCompiler.SelectLine sel){
+                        out.append(sel.rename(token -> renameReturnTemp(token, funcName)).toText()).append('\n');
+                    }else if(line instanceof ExprCompiler.AssertBoundsLine bounds){
+                        // emit 调试构建的越界断言：断言操作数同样进入函数临时变量命名空间
+                        out.append(bounds.withValue(renameReturnTemp(bounds.value, funcName)).toText()).append('\n');
+                    }else if(line instanceof ExprCompiler.CopyLine copy){
+                        // 值拷贝 `set dest src`：dest/src 可能是临时变量，必须一起进入函数命名空间
+                        out.append("set ").append(renameReturnTemp(copy.dest, funcName)).append(' ')
+                            .append(renameReturnTemp(copy.src, funcName)).append('\n');
+                    }else if(line instanceof ExprCompiler.RawLine raw){
+                        out.append(raw.toText()).append('\n');
+                    }else{
+                        ExprCompiler.OpLine op = (ExprCompiler.OpLine)line;
+                        out.append("op ").append(op.op).append(' ')
+                            .append(renameReturnTemp(op.dest, funcName)).append(' ')
+                            .append(renameReturnTemp(op.a, funcName)).append(' ')
+                            .append(renameReturnTemp(op.b, funcName)).append('\n');
+                    }
+                }
+            }catch(Exception e){
+                throw new IllegalArgumentException("Invalid return expression '" + ret.expr + "': " + e.getMessage());
+            }
+        }
+        if(mode == FuncMode.inline){
+            // value returns jump to the ret label (result copy runs), void returns jump past it
+            out.append("jump __ls_").append(prefix).append(ret.expr.isEmpty() ? "exit" : "ret").append(" always x false\n");
+        }else{
+            out.append("set @counter __ls_func_").append(funcName).append("_ret\n");
+        }
+    }
+
+    /**
+     * return 表达式编译生成的临时变量进入函数命名空间（__ls_rt_&lt;func&gt;_&lt;n&gt;）。
+     * 修复上游 bug：表达式 temp 在 lower 阶段现场生成，analyze 阶段的 prepBody 来不及改名，
+     * 裸 _0 会与调用者表达式链中"跨调用存活"的 _0 冲突（函数体覆盖链 temp → 结果错值）。
+     * 前缀与 prepBody 的 __ls_f_&lt;func&gt;_&lt;n&gt; 错开，避免函数体内已有语句的 mangle 编号冲突。
+     */
+    private static String renameReturnTemp(String value, String funcName){
+        if(!ExprCompiler.isTemp(value)) return value;
+        return "__ls_rt_" + funcName + "_" + value.substring(1);
+    }
+
+    /** Expands one call site. */
+    private static void expandCall(FuncCallStatement call, FunctionSet functions, FuncMode mode, StringBuilder out, CallIds ids,
+                                   SugarCompiler.SwitchStrategy strategy, SugarCompiler.AssertEmit assertEmit){
+        Function target = functions.resolve(call.name);
+        if(target == null){
+            throw new IllegalArgumentException("call to undefined function '" + call.name + "'");
+        }
+        List<String> args = splitArgs(call.args);
+        rejectSpanBuiltin(call.name, args);
+        if(mode == FuncMode.inline){
+            int id = ids.next();
+            String prefix = "i_" + id + "_";
+            for(int k = 0; k < args.size(); k++){
+                emitArg(out, args.get(k), target.bindingName(k), functions, mode, ids, strategy, assertEmit);
+            }
+            lower(target.body, prefix, functions, mode, out, ids, target.name, strategy, assertEmit);
+            // Value returns jump here so the caller-side result copy still runs;
+            // void returns and jumps to the function end skip it via the exit label.
+            out.append("__ls_").append(prefix).append("ret:\n");
+            if(!call.result.isEmpty() && target.hasValueReturn){
+                out.append("set ").append(call.result).append(' ').append(target.resultName()).append('\n');
+            }
+            out.append("__ls_").append(prefix).append("exit:\n");
+        }else{
+            for(int k = 0; k < args.size(); k++){
+                emitArg(out, args.get(k), target.bindingName(k), functions, mode, ids, strategy, assertEmit);
+            }
+            out.append("set ").append(target.retName()).append(" @counter\n");
+            out.append("op add ").append(target.retName()).append(' ').append(target.retName()).append(" 2\n");
+            out.append("jump ").append(target.entryName()).append(" always x false\n");
+            // A void callee never writes its result variable, so copying it would expose a
+            // stale value; only value-returning functions hand something back.
+            if(!call.result.isEmpty() && target.hasValueReturn){
+                out.append("set ").append(call.result).append(' ').append(target.resultName()).append('\n');
+            }
+        }
+    }
+
+    /**
+     * 旧内置函数体只对一块内存做 read/write。参数里出现 span 名时不能静默打到第一格。
+     * spanread/spanwrite 自己就是跨格展开，不在此列。
+     */
+    private static void rejectSpanBuiltin(String name, List<String> args){
+        if(name == null || !name.startsWith("__ls_builtin_") || SpanAccess.isSpanBuiltin(name)) return;
+        if(args == null) return;
+        for(String arg : args){
+            if(arg == null) continue;
+            String token = arg.trim();
+            if(SpanAccess.isSpan(token)){
+                throw new IllegalArgumentException("builtin '" + name
+                    + "' would read only the first cell of span '" + token + "'");
+            }
+        }
+    }
+
+    /** 展开表达式链中的一行函数调用（CallLine 的实参已是编译后的值名）。 */
+    private static void expandCallLine(ExprCompiler.CallLine call, FunctionSet functions, FuncMode mode, StringBuilder out, CallIds ids,
+                                       SugarCompiler.SwitchStrategy strategy, SugarCompiler.AssertEmit assertEmit){
+        FuncCallStatement stmt = new FuncCallStatement();
+        stmt.name = call.name;
+        stmt.args = call.args;
+        stmt.result = call.dest;
+        expandCall(stmt, functions, mode, out, ids, strategy, assertEmit);
+    }
+
+    /** Compiles one argument expression and binds it to the parameter. */
+    private static void emitArg(StringBuilder out, String arg, String param, FunctionSet functions, FuncMode mode, CallIds ids,
+                                SugarCompiler.SwitchStrategy strategy, SugarCompiler.AssertEmit assertEmit){
+        List<ExprCompiler.Line> ops;
+        try{
+            ops = ExprCompiler.compile("_0", arg, null, assertEmit == SugarCompiler.AssertEmit.emit);
+        }catch(Exception e){
+            throw new IllegalArgumentException("Invalid argument expression '" + arg + "': " + e.getMessage());
+        }
+        // 简单值（变量 / 字面量 / 链接名）直接绑定到形参，不落到临时变量：既省一条指令，
+        // 也避免后面的实参把承载前一个实参的临时变量覆盖掉（实参按顺序物化进同一个 _0）。
+        if(ops.size() == 1 && ops.get(0) instanceof ExprCompiler.CopyLine copy
+            && copy.dest.equals("_0")){
+            out.append("set ").append(param).append(' ').append(copy.src).append('\n');
+            return;
+        }
+        if(ops.size() == 1 && ops.get(0) instanceof ExprCompiler.OpLine op
+            && op.op.equals("add") && op.b.equals("0")){
+            out.append("set ").append(param).append(' ').append(op.a).append('\n');
+            return;
+        }
+        for(ExprCompiler.Line line : ops){
+            if(line instanceof ExprCompiler.CallLine call){
+                expandCallLine(call, functions, mode, out, ids, strategy, assertEmit);
+            }else if(line instanceof ExprCompiler.ReadLine read){
+                SpanAccess.appendRead(out, read.dest, read.a, read.b);
+            }else if(line instanceof ExprCompiler.WriteLine write){
+                SpanAccess.appendWrite(out, write.value, write.memory, write.address);
+            }else{
+                out.append(line.toText()).append('\n');
+            }
+        }
+        out.append("set ").append(param).append(" _0\n");
+    }
+
+    // ===== switch dispatch: comparison chain vs @counter jump table =======================
+
+    /** Hard cap on the jump-table slot span; wider integer ranges keep the comparison chain. */
+    static final int MAX_TABLE_SPAN = 255;
+
+    /** One direct-child {@code case} of a switch under lowering. */
+    private static final class SwitchCase{
+        final int index;
+        final String text;
+        final Double value; // null when the case value is not an integer constant
+
+        SwitchCase(int index, String text, Double value){
+            this.index = index;
+            this.text = text;
+            this.value = value;
+        }
+    }
+
+    /** A qualified jump table: slot space and each slot's case statement (-1 = hole). */
+    private static final class SwitchTable{
+        final double min;
+        final int[] slots;
+
+        SwitchTable(double min, int[] slots){
+            this.min = min;
+            this.slots = slots;
+        }
+
+        int span(){ return slots.length; }
+
+        int cost(){
+            return guardedJumpTableCost(min != 0, slots.length);
+        }
+    }
+
+    /**
+     * Instruction count of a guarded jump table: optional {@code op sub}, the equal-tolerance
+     * snap, two bounds guards, the {@code @counter} dispatch, and one row per slot.
+     * The decompiler reinserts duplicate cases until this cost still wins, so the two stay equal.
+     */
+    static int guardedJumpTableCost(boolean normalized, int span){
+        return (normalized ? 1 : 0) + GUARDED_TABLE_FIXED + span;
+    }
+
+    /** floor/sub/jumps that snap to an integer, plus the two bounds guards and the dispatch. */
+    private static final int GUARDED_TABLE_FIXED = 10;
+
+    /** {@code ConditionOp.equal} is {@code abs(a-b) < 1e-6}. The snap uses the same cutoff. */
+    private static final String EQUAL_TOLERANCE = "0.000001";
+
+    /**
+     * Emits the switch dispatch header. Two shapes (labels are free; only real instructions
+     * cost, mirroring Bang's is_solid cost model):
+     * <ul>
+     *   <li>comparison chain — one {@code jump equal} per case plus the default jump: N+1;</li>
+     *   <li>{@code @counter} jump table — [op sub] + two bounds guards + dispatch +
+     *       span unconditional slot rows.</li>
+     * </ul>
+     * The table deduplicates repeated case values into single slots, so duplication-heavy
+     * switches win on cost. Equal lengths prefer the table. A table requires every case
+     * value to be an integer constant with span <= {@link #MAX_TABLE_SPAN}; anything else,
+     * or the {@code chainOnly} strategy, keeps the chain (byte-identical to pre-2.3.1).
+     * Case labels and bodies still come from the case path in declaration order, so
+     * fall-through, break, nesting and in-function semantics are unchanged.
+     */
+    private static void emitSwitch(Seq<LStatement> statements, int index, SwitchBeginStatement begin,
+                                   int[] switchOwner, String prefix, SugarCompiler.SwitchStrategy strategy, StringBuilder out){
+        List<SwitchCase> cases = new ArrayList<>();
+        for(int at = index + 1; at < begin.destIndex; at++){
+            if(switchOwner[at] == index && statements.get(at) instanceof CaseStatement item){
+                cases.add(new SwitchCase(at, item.value, finiteNumber(item.value)));
+            }
+        }
+
+        // A stride table is a property of the program, like the raw table: the bodies are the
+        // slots, and the dispatch is the mul/add sequence hand-written mlog actually uses.
+        if(begin.stride > 0){
+            emitStrideDispatch(statements, index, begin, cases, out);
+            return;
+        }
+
+        SwitchTable table = switchTable(cases);
+        // Where a slot with no case goes: the switch's own default case when it declares one,
+        // otherwise the exit (the statement after the blockend).
+        String defaultLabel = defaultLabel(statements, index, begin, switchOwner, prefix);
+
+        // A raw-table switch is a property of the program, not a strategy choice: it is only
+        // ever produced by recovering a hand-written table, and it must keep that exact shape.
+        if(begin.rawTable){
+            if(table == null){
+                throw error("switchbegin", index, "is marked as a raw jump table, which needs integer "
+                    + "case values spanning at most " + MAX_TABLE_SPAN + " slots; use a plain switch instead");
+            }
+            emitTableRows(index, begin, table, prefix, out, defaultLabel, false);
+            return;
+        }
+
+        int chainCost = cases.size() + 1;
+        if(strategy == SugarCompiler.SwitchStrategy.chainOnly || table == null || table.cost() > chainCost){
+            for(SwitchCase item : cases){
+                out.append("jump ").append(label(prefix, "case_", item.index)).append(" equal ")
+                    .append(begin.value).append(' ').append(item.text).append('\n');
+            }
+            out.append("jump ").append(defaultLabel).append(" always x false\n");
+            return;
+        }
+
+        emitTableRows(index, begin, table, prefix, out, defaultLabel, true);
+    }
+
+    /**
+     * Emits the {@code @counter} jump-table dispatch and its slot rows.
+     *
+     * <p>{@code guarded} adds the two bounds guards (and the {@code op sub} normalization when the
+     * case span does not start at 0) that keep an out-of-range value on the default path. A raw
+     * table emits neither: the dispatch is exactly {@code op add @counter @counter <value>} and the
+     * rows follow it immediately, so the value indexes the table directly. Every slot without a
+     * case — a hole inside the span, and (guarded only) an out-of-range value — lands on
+     * {@code defaultLabel}.</p>
+     */
+    private static void emitTableRows(int index, SwitchBeginStatement begin, SwitchTable table, String prefix,
+                                      StringBuilder out, String defaultLabel, boolean guarded){
+        int span = table.span();
+        String idxVar;
+        if(table.min != 0){
+            idxVar = "__ls_sw_" + prefix + index;
+            out.append("op sub ").append(idxVar).append(' ').append(begin.value).append(' ')
+                .append(formatNumber(table.min)).append('\n');
+        }else{
+            idxVar = begin.value; // min == 0: the source value indexes the table directly
+        }
+        if(guarded){
+            // Snap onto the one integer inside ConditionOp.equal's tolerance, otherwise default.
+            // A raw @counter add truncates, so 0.5 would enter slot 0 while the comparison
+            // chain (jump equal) would take default.
+            String id = prefix + index;
+            String fl = "__ls_sw_fl_" + id;
+            String df = "__ls_sw_df_" + id;
+            String dc = "__ls_sw_dc_" + id;
+            String ceilLabel = "__ls_sw_ceil_" + id;
+            String boundsLabel = "__ls_sw_bounds_" + id;
+            out.append("op floor ").append(fl).append(' ').append(idxVar).append(" 0\n");
+            out.append("op sub ").append(df).append(' ').append(idxVar).append(' ').append(fl).append('\n');
+            out.append("jump ").append(boundsLabel).append(" lessThan ").append(df).append(' ').append(EQUAL_TOLERANCE).append('\n');
+            out.append("op sub ").append(dc).append(" 1 ").append(df).append('\n');
+            out.append("jump ").append(ceilLabel).append(" lessThan ").append(dc).append(' ').append(EQUAL_TOLERANCE).append('\n');
+            out.append("jump ").append(defaultLabel).append(" always x false\n");
+            out.append(ceilLabel).append(":\n");
+            out.append("op add ").append(fl).append(' ').append(fl).append(" 1\n");
+            out.append(boundsLabel).append(":\n");
+            idxVar = fl;
+            out.append("jump ").append(defaultLabel).append(" lessThan ").append(idxVar).append(" 0\n");
+            out.append("jump ").append(defaultLabel).append(" greaterThan ").append(idxVar).append(' ').append(span - 1).append('\n');
+        }
+        out.append("op add @counter @counter ").append(idxVar).append('\n');
+        for(int slot = 0; slot < span; slot++){
+            int caseIndex = table.slots[slot];
+            out.append("jump ").append(caseIndex < 0 ? defaultLabel : label(prefix, "case_", caseIndex))
+                .append(" always x false\n");
+        }
+    }
+
+    /**
+     * Emits the packed-stride dispatch and nothing else. Case bodies follow in source order
+     * from the normal statement walk, so each case must already be exactly {@code stride}
+     * instructions (the last case may be shorter). The absolute form's constant is the
+     * instruction index of the first body minus {@code firstCase * stride}, recomputed from
+     * what has already been emitted so a prefix of a different length still lands on case 1's
+     * slot. The relative form's offset is {@code 1 - firstCase * stride}, which is what makes
+     * case {@code firstCase} the instruction immediately after the three-op dispatch.
+     */
+    private static void emitStrideDispatch(Seq<LStatement> statements, int index, SwitchBeginStatement begin,
+                                           List<SwitchCase> cases, StringBuilder out){
+        if(begin.stride < 1 || begin.stride > MAX_TABLE_SPAN){
+            throw error("switchbegin", index, "stride must be an integer from 1 to " + MAX_TABLE_SPAN);
+        }
+        if(begin.strideTemp == null || begin.strideTemp.isEmpty() || begin.strideTemp.charAt(0) == '@'
+            || begin.strideTemp.indexOf(' ') >= 0){
+            throw error("switchbegin", index, "stride table needs a scratch variable that is not @counter");
+        }
+        if(cases.size() < 2){
+            throw error("switchbegin", index, "stride table needs at least two cases");
+        }
+        long first = strideCaseValue(cases.get(0));
+        for(int i = 0; i < cases.size(); i++){
+            SwitchCase item = cases.get(i);
+            long value = strideCaseValue(item);
+            if(value != first + i){
+                throw error("case", item.index, "stride cases must be the consecutive integers "
+                    + first + ".." + (first + cases.size() - 1));
+            }
+            int from = item.index + 1;
+            int to = i + 1 < cases.size() ? cases.get(i + 1).index : begin.destIndex;
+            int solid = 0;
+            for(int j = from; j < to; j++){
+                if(strideWeight(statements.get(j)) < 0){
+                    throw error("case", item.index, "a stride case can only hold flat instructions");
+                }
+                solid++;
+            }
+            boolean last = i + 1 == cases.size();
+            if(solid < 1 || solid > begin.stride || (!last && solid != begin.stride)){
+                throw error("case", item.index, "must be exactly " + begin.stride
+                    + " instructions so the next case stays on its slot");
+            }
+        }
+        String tmp = begin.strideTemp;
+        if(begin.strideRelative){
+            long signed = 1 - first * begin.stride;
+            out.append("op mul ").append(tmp).append(' ').append(begin.value).append(' ').append(begin.stride).append('\n');
+            out.append("op add ").append(tmp).append(" @counter ").append(tmp).append('\n');
+            if(signed >= 0){
+                out.append("op add @counter ").append(tmp).append(' ').append(signed).append('\n');
+            }else{
+                out.append("op sub @counter ").append(tmp).append(' ').append(-signed).append('\n');
+            }
+        }else{
+            long constant = countInstructions(out) + 2L - first * begin.stride;
+            out.append("op mul ").append(tmp).append(' ').append(begin.value).append(' ').append(begin.stride).append('\n');
+            out.append("op add @counter ").append(tmp).append(' ').append(constant).append('\n');
+        }
+    }
+
+    /** Integral case value, or a compile error when the stride table cannot index by it. */
+    private static long strideCaseValue(SwitchCase item){
+        Double value = item.value;
+        if(value == null || value != Math.rint(value) || Math.abs(value) > 9007199254740992d){
+            throw error("case", item.index, "a stride table only accepts integer case values");
+        }
+        return (long)(double)value;
+    }
+
+    /** 1 when the statement lowers to one instruction, -1 when it lowers to anything else. */
+    private static int strideWeight(LStatement statement){
+        if(statement instanceof BreakStatement) return 1;
+        if(statement instanceof SugarStatements.SugarStatement) return -1;
+        if(statement instanceof logicsugar.assist.expr.ExprStatement) return -1;
+        return 1;
+    }
+
+    /** Executable instructions in {@code text}: label lines ({@code name:}) do not count. */
+    static int countInstructions(CharSequence text){
+        int total = 0;
+        int start = 0;
+        int n = text.length();
+        for(int i = 0; i <= n; i++){
+            if(i != n && text.charAt(i) != '\n') continue;
+            if(i > start && text.charAt(i - 1) != ':') total++;
+            start = i + 1;
+        }
+        return total;
+    }
+
+    /** The label a slot with no case jumps to, and the target of the chain lowering's trailing
+     *  jump: the {@code default} case declared directly inside this switch, else the exit label
+     *  ({@code label("stmt_", destIndex + 1)}). At most one default is accepted, so the first one
+     *  found is the only one ({@link #lower} rejects a second). */
+    private static String defaultLabel(Seq<LStatement> statements, int index, SwitchBeginStatement begin,
+                                       int[] switchOwner, String prefix){
+        for(int at = index + 1; at < begin.destIndex; at++){
+            if(switchOwner[at] == index && statements.get(at) instanceof SugarStatements.DefaultStatement){
+                return label(prefix, "default_", at);
+            }
+        }
+        return label(prefix, "stmt_", begin.destIndex + 1);
+    }
+
+    /**
+     * Plans a jump table for the given cases, or null when none qualifies: every value must
+     * be an integer constant and (max-min)+1 must fit {@link #MAX_TABLE_SPAN}. Slot k holds
+     * the statement index of the first declared case owning value min+k, or -1 for a hole
+     * (that slot falls to the switch exit at runtime).
+     */
+    private static SwitchTable switchTable(List<SwitchCase> cases){
+        if(cases.isEmpty()) return null;
+        double min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY;
+        for(SwitchCase item : cases){
+            Double value = item.value;
+            if(value == null || value != Math.rint(value) || Math.abs(value) > 9007199254740992d) return null;
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
+        long low = (long)min, high = (long)max;
+        long spanL = high - low + 1;
+        if(spanL < 1 || spanL > MAX_TABLE_SPAN) return null;
+        int[] slots = new int[(int)spanL];
+        java.util.Arrays.fill(slots, -1);
+        for(SwitchCase item : cases){
+            int slot = (int)((long)(double)item.value - low); // integral by the rint check above
+            if(slots[slot] < 0) slots[slot] = item.index;     // repeated values hit the first label
+        }
+        return new SwitchTable(low, slots);
+    }
+
+    private static String label(String prefix, String kind, int id){
+        return "__ls_" + prefix + kind + id;
+    }
+
+    // ===== structure helpers (moved from SugarCompiler, parameterized by prefix) ==========
+
+    private static int[] switchOwners(Seq<LStatement> statements){
+        int[] result = new int[statements.size];
+        Arrays.fill(result, -1);
+        Deque<Integer> stack = new ArrayDeque<>();
+        for(int i = 0; i < statements.size; i++){
+            while(!stack.isEmpty() && ((SwitchBeginStatement)statements.get(stack.peek())).destIndex < i) stack.pop();
+            if(!stack.isEmpty()) result[i] = stack.peek();
+            if(statements.get(i) instanceof SwitchBeginStatement) stack.push(i);
+        }
+        return result;
+    }
+
+    /** Returns the innermost enclosing if block index for each statement. */
+    private static int[] ifOwners(Seq<LStatement> statements){
+        int[] result = new int[statements.size];
+        Arrays.fill(result, -1);
+        Deque<Integer> stack = new ArrayDeque<>();
+        for(int i = 0; i < statements.size; i++){
+            while(!stack.isEmpty() && ((IfBeginStatement)statements.get(stack.peek())).destIndex < i) stack.pop();
+            if(!stack.isEmpty()) result[i] = stack.peek();
+            if(statements.get(i) instanceof IfBeginStatement) stack.push(i);
+        }
+        return result;
+    }
+
+    /** Marks each elif/else that violates the chain rule: an if chain may have at most one
+     *  {@code else}, and no {@code elif} may follow it (it would be silently dead code).
+     *  This is the single source of truth for the rule, shared by canvas highlighting
+     *  (SugarCompiler.invalidStatements), the compile path ({@link #lower}) and the library
+     *  builder ({@link #buildLibrary}), so text-sourced and library programs are rejected the
+     *  same way as the canvas. */
+    static boolean[] ifChainViolations(Seq<LStatement> statements, int[] ifOwner){
+        boolean[] bad = new boolean[statements.size];
+        for(int i = 0; i < statements.size; i++){
+            if(!(statements.get(i) instanceof IfBeginStatement begin)) continue;
+            boolean seenElse = false;
+            for(int at = i + 1; at < begin.destIndex; at++){
+                if(ifOwner[at] != i) continue;
+                LStatement statement = statements.get(at);
+                if(statement instanceof ElseIfStatement){
+                    if(seenElse) bad[at] = true;
+                }else if(statement instanceof ElseStatement){
+                    if(seenElse) bad[at] = true;
+                    seenElse = true;
+                }
+            }
+        }
+        return bad;
+    }
+
+    /** Marks each {@code default} that cannot be lowered: one outside a switch, and every
+     *  default after the first of the same switch (the later body would be dead code — the
+     *  slot rows and the chain's trailing jump can only name one default). Shared by the compile
+     *  path, the editor's red marking and the library builder, so all three reject alike. */
+    static boolean[] defaultViolations(Seq<LStatement> statements, int[] switchOwner){
+        boolean[] bad = new boolean[statements.size];
+        Set<Integer> seen = new HashSet<>();
+        for(int i = 0; i < statements.size; i++){
+            if(!(statements.get(i) instanceof SugarStatements.DefaultStatement)) continue;
+            int owner = switchOwner[i];
+            if(owner < 0 || !seen.add(owner)) bad[i] = true;
+        }
+        return bad;
+    }
+
+    /** For each if-begin and elif, the index of the next elif/else in the same chain, or -1. */
+    private static int[] nextBranch(Seq<LStatement> statements, int[] ifOwner){
+        int[] next = new int[statements.size];
+        Arrays.fill(next, -1);
+        for(int i = 0; i < statements.size; i++){
+            if(!(statements.get(i) instanceof IfBeginStatement begin)) continue;
+            int prev = i;
+            for(int at = i + 1; at < begin.destIndex; at++){
+                LStatement statement = statements.get(at);
+                if(ifOwner[at] == i && (statement instanceof ElseIfStatement || statement instanceof ElseStatement)){
+                    next[prev] = at;
+                    prev = at;
+                }
+            }
+        }
+        return next;
+    }
+
+    /**
+     * Skips {@code skipTarget} when {@code op} is false. Comparisons with an exact inverse become
+     * one negated jump. {@code strictEqual} has none: {@code notEqual} uses a 1e-6 tolerance and
+     * treats every non-null object's {@code num()} as 1, so {@code "hello" strictEqual 1} would
+     * enter the branch. That case jumps into the body on strictEqual and skips with always.
+     */
+    private static void emitComparisonSkip(ConditionOp op, String value, String compare,
+                                           String skipTarget, String bodyLabel, StringBuilder out){
+        if(op == ConditionOp.strictEqual){
+            out.append("jump ").append(bodyLabel).append(" strictEqual ")
+                .append(value).append(' ').append(compare).append('\n');
+            out.append("jump ").append(skipTarget).append(" always x false\n");
+            out.append(bodyLabel).append(":\n");
+            return;
+        }
+        ConditionOp negated = negate(op);
+        if(negated != null){
+            out.append("jump ").append(skipTarget).append(' ').append(negated.name()).append(' ')
+                .append(value).append(' ').append(compare).append('\n');
+        }
+    }
+
+    /** Returns the op whose truth is the negation of {@code op}, or null when vanilla has no exact inverse. */
+    private static ConditionOp negate(ConditionOp op){
+        switch(op){
+            case equal: return ConditionOp.notEqual;
+            case notEqual: return ConditionOp.equal;
+            case lessThan: return ConditionOp.greaterThanEq;
+            case lessThanEq: return ConditionOp.greaterThan;
+            case greaterThan: return ConditionOp.lessThanEq;
+            case greaterThanEq: return ConditionOp.lessThan;
+            default: return null; // always, strictEqual
+        }
+    }
+
+    private static boolean loopHasContinue(Seq<LStatement> statements, int beginIndex, int[] continueOwner){
+        for(int i = 0; i < statements.size; i++){
+            if(statements.get(i) instanceof ContinueStatement && continueOwner[i] == beginIndex) return true;
+        }
+        return false;
+    }
+
+    /** Returns the innermost enclosing structure that accepts a break statement. */
+    private static int[] breakOwners(Seq<LStatement> statements){
+        int[] result = new int[statements.size];
+        Arrays.fill(result, -1);
+        Deque<Integer> stack = new ArrayDeque<>();
+        for(int i = 0; i < statements.size; i++){
+            while(!stack.isEmpty() && ((BeginStatement)statements.get(stack.peek())).destIndex < i) stack.pop();
+            if(!stack.isEmpty()) result[i] = stack.peek();
+            if(isBreakable(statements.get(i))) stack.push(i);
+        }
+        return result;
+    }
+
+    /** Returns the innermost enclosing loop that accepts a continue statement. */
+    private static int[] continueOwners(Seq<LStatement> statements){
+        int[] result = new int[statements.size];
+        Arrays.fill(result, -1);
+        Deque<Integer> stack = new ArrayDeque<>();
+        for(int i = 0; i < statements.size; i++){
+            while(!stack.isEmpty() && ((BeginStatement)statements.get(stack.peek())).destIndex < i) stack.pop();
+            if(!stack.isEmpty()) result[i] = stack.peek();
+            if(statements.get(i) instanceof ForBeginStatement || statements.get(i) instanceof WhileBeginStatement
+                || statements.get(i) instanceof UnitForBeginStatement) stack.push(i);
+        }
+        return result;
+    }
+
+    private static boolean isBreakable(LStatement statement){
+        return statement instanceof ForBeginStatement || statement instanceof WhileBeginStatement
+            || statement instanceof UnitForBeginStatement || statement instanceof SwitchBeginStatement;
+    }
+
+    /** Marks only labels that are actual jump destinations; the remaining labels add no control-flow value. */
+    private static boolean[] statementLabels(Seq<LStatement> statements, int[] breakOwner){
+        boolean[] result = new boolean[statements.size + 1];
+        for(int i = 0; i < statements.size; i++){
+            LStatement statement = statements.get(i);
+            if(statement instanceof JumpStatement jump){
+                if(jump.destIndex == exitTarget) continue;
+                if(jump.destIndex >= 0 && jump.destIndex <= statements.size) result[jump.destIndex] = true;
+            }else if(statement instanceof BeginStatement begin){
+                result[begin.destIndex + 1] = true;
+            }else if(statement instanceof BreakStatement && breakOwner[i] >= 0){
+                BeginStatement owner = (BeginStatement)statements.get(breakOwner[i]);
+                result[owner.destIndex + 1] = true;
+            }else if(statement instanceof BlockEndStatement){
+                int owner = findOwner(statements, i);
+                if(statements.get(owner) instanceof WhileBeginStatement) result[owner] = true;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Optimizes only straight runs of ordinary op statements. A run is cut at every possible
+     * statement-label entry, so constants are never propagated across a jump target. Explicit
+     * @counter reads/writes are also hard barriers: the instruction pointer is observable in
+     * mlog, so treating it like an ordinary data-flow variable can change control flow.
+     */
+    private static String[] optimizeOperations(Seq<LStatement> statements, boolean[] statementLabels){
+        String[] result = new String[statements.size];
+        Map<String, Integer> remainingReferences = temporaryReferenceCounts(statements);
+        for(int start = 0; start < statements.size; ){
+            if(!(statements.get(start) instanceof OperationStatement) || statementLabels[start]){
+                removeTemporaryReferences(remainingReferences, statements.get(start));
+                start++;
+                continue;
+            }
+
+            if(touchesCounter((OperationStatement)statements.get(start))){
+                result[start] = originalOperationText((OperationStatement)statements.get(start));
+                removeTemporaryReferences(remainingReferences, statements.get(start));
+                start++;
+                continue;
+            }
+
+            int end = start + 1;
+            while(end < statements.size && statements.get(end) instanceof OperationStatement
+                && !statementLabels[end] && !touchesCounter((OperationStatement)statements.get(end))) end++;
+            for(int i = start; i < end; i++) removeTemporaryReferences(remainingReferences, statements.get(i));
+            List<OptimizedOperation> operations = new ArrayList<>();
+            Map<String, String> constants = new HashMap<>();
+            for(int i = start; i < end; i++){
+                OperationStatement operation = (OperationStatement)statements.get(i);
+                String a = constants.getOrDefault(operation.a, operation.a);
+                String b = constants.getOrDefault(operation.b, operation.b);
+                String value = constantValue(operation, a, b);
+                if(value != null){
+                    operations.add(new OptimizedOperation("set " + operation.dest + " " + value, operation.dest, true));
+                    constants.put(operation.dest, value);
+                }else{
+                    operations.add(new OptimizedOperation("op " + operation.op.name() + " " + operation.dest + " " + a + " " + b,
+                        operation.dest, operation.op != LogicOp.rand));
+                    constants.remove(operation.dest);
+                }
+            }
+
+            // Earlier writes to a compiler temporary can disappear when their value was folded
+            // into a later operation. Keep the final value of each temporary conservatively.
+            Set<String> live = new HashSet<>(remainingReferences.keySet());
+            for(int i = operations.size() - 1; i >= 0; i--){
+                OptimizedOperation operation = operations.get(i);
+                if(isTemporary(operation.dest)){
+                    if(!live.remove(operation.dest) && operation.removable){
+                        operation.remove = true;
+                        continue;
+                    }
+                }
+                addTemporaryOperands(live, operation.text);
+            }
+
+            StringBuilder lowered = new StringBuilder();
+            for(OptimizedOperation operation : operations){
+                if(!operation.remove) lowered.append(operation.text).append('\n');
+            }
+            result[start] = lowered.toString();
+            for(int i = start + 1; i < end; i++) result[i] = "";
+            start = end;
+        }
+        return result;
+    }
+
+    /** Returns true when an operation observes or changes the processor instruction pointer. */
+    private static boolean touchesCounter(OperationStatement operation){
+        return "@counter".equals(operation.dest) || "@counter".equals(operation.a)
+            || "@counter".equals(operation.b);
+    }
+
+    /** Serializes a counter-touching operation without data-flow rewrites. */
+    private static String originalOperationText(OperationStatement operation){
+        StringBuilder out = new StringBuilder();
+        operation.write(out);
+        return out.append('\n').toString();
+    }
+
+    private static String constantValue(OperationStatement operation, String a, String b){
+        Double left = finiteNumber(a);
+        Double right = finiteNumber(b);
+        if(left == null || right == null) return null;
+        Double value = constantOperation(operation.op, left, right);
+        return value != null && Double.isFinite(value) ? formatNumber(value) : null;
+    }
+
+    // LogicOp stores its lambdas in package-private nested interfaces. Mods use a separate
+    // class loader, so invoking those fields causes IllegalAccessError at runtime.
+    private static Double constantOperation(LogicOp op, double a, double b){
+        switch(op){
+            case add: return a + b;
+            case sub: return a - b;
+            case mul: return a * b;
+            case div: return a / b;
+            case idiv: return Math.floor(a / b);
+            case mod: return a % b;
+            case emod: return ((a % b) + b) % b;
+            case pow: return Math.pow(a, b);
+            case max: return Math.max(a, b);
+            case min: return Math.min(a, b);
+            case abs: return Math.abs(a);
+            case sign: return Math.signum(a);
+            case log: return Math.log(a);
+            case logn: return Math.log(a) / Math.log(b);
+            case log10: return Math.log10(a);
+            case floor: return Math.floor(a);
+            case ceil: return Math.ceil(a);
+            case round: return (double)Math.round(a);
+            case sqrt: return Math.sqrt(a);
+            default: return null;
+        }
+    }
+
+    private static Double finiteNumber(String value){
+        try{
+            double result = Double.parseDouble(value);
+            return Double.isFinite(result) ? result : null;
+        }catch(NumberFormatException ignored){
+            return null;
+        }
+    }
+
+    private static String formatNumber(double value){
+        if(value != 0d && value == Math.rint(value) && Math.abs(value) <= Long.MAX_VALUE){
+            return Long.toString((long)value);
+        }
+        return Double.toString(value);
+    }
+
+    private static boolean isTemporary(String value){
+        if(value.length() < 2 || value.charAt(0) != '_') return false;
+        for(int i = 1; i < value.length(); i++){
+            if(!Character.isDigit(value.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    private static void addTemporaryOperands(Set<String> live, String text){
+        String[] tokens = text.split(" ");
+        int offset = tokens[0].equals("op") ? 3 : 2;
+        for(int i = offset; i < tokens.length; i++){
+            if(isTemporary(tokens[i])) live.add(tokens[i]);
+        }
+    }
+
+    private static Map<String, Integer> temporaryReferenceCounts(Seq<LStatement> statements){
+        Map<String, Integer> result = new HashMap<>();
+        for(LStatement statement : statements) addTemporaryReferences(result, statement, 1);
+        return result;
+    }
+
+    private static void removeTemporaryReferences(Map<String, Integer> counts, LStatement statement){
+        addTemporaryReferences(counts, statement, -1);
+    }
+
+    private static void addTemporaryReferences(Map<String, Integer> counts, LStatement statement, int amount){
+        StringBuilder text = new StringBuilder();
+        statement.write(text);
+        for(String token : text.toString().split("\\s+")){
+            if(!isTemporary(token)) continue;
+            int count = counts.getOrDefault(token, 0) + amount;
+            if(count <= 0) counts.remove(token);
+            else counts.put(token, count);
+        }
+        // funccall 实参在 write() 文本里是带引号的 token（"_0"），isTemporary 匹配不到；
+        // 实参里的 temp 必须计数，否则优化器会把实参求值 op 当死代码删除
+        if(statement instanceof FuncCallStatement call){
+            for(String token : call.args.split("[,\\s]+")){
+                if(!isTemporary(token)) continue;
+                int count = counts.getOrDefault(token, 0) + amount;
+                if(count <= 0) counts.remove(token);
+                else counts.put(token, count);
+            }
+        }
+    }
+
+    private static final class OptimizedOperation{
+        final String text;
+        final String dest;
+        final boolean removable;
+        boolean remove;
+
+        OptimizedOperation(String text, String dest, boolean removable){
+            this.text = text;
+            this.dest = dest;
+            this.removable = removable;
+        }
+    }
+
+    /**
+     * Processor-owned unit flag: tile position, never 0, exact in a double.
+     * Every unit-control card on one processor shares this value, so they are one fleet.
+     */
+    private static void emitUnitId(StringBuilder out){
+        out.append("op mul __ls_ub_uid @thisx 100000\n");
+        out.append("op add __ls_ub_uid __ls_ub_uid @thisy\n");
+        out.append("op add __ls_ub_uid __ls_ub_uid 1\n");
+    }
+
+    /**
+     * Yields long enough that a peer processor which observed flag 0 just before our write
+     * still performs its own write before we read the flag back. {@code ipt} may be 1, so
+     * each {@code end} is one tick of every other processor. The gap matches the instructions
+     * between a fresh flag read and {@code ucontrol flag} in {@link #emitClaim}.
+     */
+    private static void emitClaimYield(StringBuilder out){
+        out.append("end\nend\nend\nend\n");
+    }
+
+    private static String ub(String prefix, String kind, int index){
+        return "__ls_ub_" + kind + "_" + prefix + index;
+    }
+
+    /** Writes the flag, ends the pass, and jumps to {@code reject} unless the flag is still ours. */
+    private static void emitClaim(String prefix, int index, String reject, StringBuilder out){
+        String hold = ub(prefix, "h", index);
+        String flag = ub(prefix, "f", index);
+        out.append("set ").append(hold).append(" @unit\n");
+        out.append("ucontrol flag __ls_ub_uid 0 0 0 0\n");
+        emitClaimYield(out);
+        out.append("ubind ").append(hold).append('\n');
+        out.append("jump ").append(reject).append(" equal @unit null\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(reject).append(" notEqual ").append(flag).append(" __ls_ub_uid\n");
+    }
+
+    private static void emitUnitBind(UnitBindStatement bind, String prefix, int index, StringBuilder out){
+        String hold = ub(prefix, "h", index);
+        String flag = ub(prefix, "f", index);
+        String dead = ub(prefix, "d", index);
+        String ctrl = ub(prefix, "c", index);
+        String anchor = ub(prefix, "a", index);
+        String steps = ub(prefix, "s", index);
+        String scan = label(prefix, "ub_scan_", index);
+        String keep = label(prefix, "ub_keep_", index);
+        String take = label(prefix, "ub_take_", index);
+        String lost = label(prefix, "ub_lost_", index);
+        String fail = label(prefix, "ub_fail_", index);
+        String ok = label(prefix, "ub_ok_", index);
+        emitUnitId(out);
+        out.append("jump ").append(scan).append(" equal ").append(hold).append(" null\n");
+        out.append("ubind ").append(hold).append('\n');
+        out.append("jump ").append(lost).append(" equal @unit null\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(lost).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(take).append(" equal ").append(flag).append(" __ls_ub_uid\n");
+        out.append(lost).append(":\n");
+        out.append("set ").append(hold).append(" null\n");
+        out.append(scan).append(":\n");
+        out.append("set ").append(steps).append(" 0\n");
+        out.append("set ").append(anchor).append(" null\n");
+        out.append(label(prefix, "ub_loop_", index)).append(":\n");
+        out.append("op add ").append(steps).append(' ').append(steps).append(" 1\n");
+        out.append("jump ").append(fail).append(" greaterThan ").append(steps).append(" 8192\n");
+        out.append("ubind ").append(bind.type).append('\n');
+        out.append("jump ").append(fail).append(" equal @unit null\n");
+        out.append("jump ").append(fail).append(" equal @unit ").append(anchor).append('\n');
+        out.append("jump ").append(keep).append(" notEqual ").append(anchor).append(" null\n");
+        out.append("set ").append(anchor).append(" @unit\n");
+        out.append(keep).append(":\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(label(prefix, "ub_loop_", index)).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(take).append(" equal ").append(flag).append(" __ls_ub_uid\n");
+        out.append("jump ").append(label(prefix, "ub_loop_", index)).append(" notEqual ").append(flag).append(" 0\n");
+        out.append("sensor ").append(ctrl).append(" @unit @controlled\n");
+        out.append("jump ").append(label(prefix, "ub_loop_", index)).append(" notEqual ").append(ctrl).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(label(prefix, "ub_loop_", index)).append(" notEqual ").append(flag).append(" 0\n");
+        emitClaim(prefix, index, label(prefix, "ub_loop_", index), out);
+        out.append(take).append(":\n");
+        out.append("set ").append(bind.variable).append(" @unit\n");
+        out.append("set ").append(hold).append(" @unit\n");
+        out.append("jump ").append(ok).append(" always x false\n");
+        out.append(fail).append(":\n");
+        out.append("set ").append(bind.variable).append(" null\n");
+        out.append("set ").append(hold).append(" null\n");
+        out.append(ok).append(":\n");
+    }
+
+    private static void emitUnitNext(UnitNextStatement next, String prefix, int index, StringBuilder out){
+        String hold = ub(prefix, "h", index);
+        String flag = ub(prefix, "f", index);
+        String dead = ub(prefix, "d", index);
+        String ctrl = ub(prefix, "c", index);
+        String anchor = ub(prefix, "a", index);
+        String steps = ub(prefix, "s", index);
+        String scan = label(prefix, "ub_scan_", index);
+        String take = label(prefix, "ub_take_", index);
+        String lost = label(prefix, "ub_lost_", index);
+        String loop = label(prefix, "ub_loop_", index);
+        String keep = label(prefix, "ub_keep_", index);
+        String fail = label(prefix, "ub_fail_", index);
+        String ok = label(prefix, "ub_ok_", index);
+        emitUnitId(out);
+        // Confirm the unit claimed on the previous entry. `held` is one-shot here: `take`
+        // clears it, so the next call scans for the next idle unit instead of sticking to
+        // this one (that is `unitbind`'s job).
+        out.append("jump ").append(scan).append(" equal ").append(hold).append(" null\n");
+        out.append("ubind ").append(hold).append('\n');
+        out.append("jump ").append(lost).append(" equal @unit null\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(lost).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(take).append(" equal ").append(flag).append(" __ls_ub_uid\n");
+        out.append(lost).append(":\n");
+        out.append("set ").append(hold).append(" null\n");
+        out.append(scan).append(":\n");
+        out.append("set ").append(steps).append(" 0\n");
+        out.append("set ").append(anchor).append(" null\n");
+        out.append(loop).append(":\n");
+        out.append("op add ").append(steps).append(' ').append(steps).append(" 1\n");
+        out.append("jump ").append(fail).append(" greaterThan ").append(steps).append(" 8192\n");
+        out.append("ubind ").append(next.type).append('\n');
+        out.append("jump ").append(fail).append(" equal @unit null\n");
+        out.append("jump ").append(fail).append(" equal @unit ").append(anchor).append('\n');
+        out.append("jump ").append(keep).append(" notEqual ").append(anchor).append(" null\n");
+        out.append("set ").append(anchor).append(" @unit\n");
+        out.append(keep).append(":\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(loop).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(loop).append(" notEqual ").append(flag).append(" 0\n");
+        out.append("sensor ").append(ctrl).append(" @unit @controlled\n");
+        out.append("jump ").append(loop).append(" notEqual ").append(ctrl).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(loop).append(" notEqual ").append(flag).append(" 0\n");
+        emitClaim(prefix, index, loop, out);
+        out.append(take).append(":\n");
+        out.append("set ").append(next.variable).append(" @unit\n");
+        out.append("set ").append(hold).append(" null\n");
+        out.append("jump ").append(ok).append(" always x false\n");
+        out.append(fail).append(":\n");
+        out.append("set ").append(next.variable).append(" null\n");
+        out.append("set ").append(hold).append(" null\n");
+        out.append(ok).append(":\n");
+    }
+
+    private static void emitUnitFree(UnitFreeStatement free, String prefix, int index, StringBuilder out){
+        String skip = label(prefix, "ub_free_", index);
+        String dead = ub(prefix, "d", index);
+        String flag = ub(prefix, "f", index);
+        emitUnitId(out);
+        out.append("ubind ").append(free.variable).append('\n');
+        out.append("jump ").append(skip).append(" equal @unit null\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(skip).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(skip).append(" notEqual ").append(flag).append(" __ls_ub_uid\n");
+        out.append("ucontrol flag 0 0 0 0 0\n");
+        out.append("ucontrol unbind 0 0 0 0 0\n");
+        out.append("set ").append(free.variable).append(" null\n");
+        out.append(skip).append(":\n");
+    }
+
+    private static void emitUnitFor(UnitForBeginStatement begin, String prefix, int index, StringBuilder out){
+        String seen = ub(prefix, "n", index);
+        String phase = ub(prefix, "p", index);
+        String owned = ub(prefix, "o", index);
+        String room = ub(prefix, "r", index);
+        String anchor = ub(prefix, "a", index);
+        String steps = ub(prefix, "s", index);
+        String flag = ub(prefix, "f", index);
+        String dead = ub(prefix, "d", index);
+        String ctrl = ub(prefix, "c", index);
+        String scan = label(prefix, "ub_scan_", index);
+        String keep = label(prefix, "ub_keep_", index);
+        String ours = label(prefix, "ub_ours_", index);
+        String deliver = label(prefix, "ub_give_", index);
+        String wrap = label(prefix, "ub_wrap_", index);
+        String after = label(prefix, "stmt_", begin.destIndex + 1);
+        emitUnitId(out);
+        out.append("set ").append(seen).append(" 0\n");
+        out.append("set ").append(phase).append(" 0\n");
+        out.append("set ").append(owned).append(" 0\n");
+        out.append("set ").append(anchor).append(" null\n");
+        out.append("set ").append(steps).append(" 0\n");
+        out.append(scan).append(":\n");
+        out.append("op add ").append(steps).append(' ').append(steps).append(" 1\n");
+        out.append("jump ").append(after).append(" greaterThan ").append(steps).append(" 8192\n");
+        out.append("ubind ").append(begin.type).append('\n');
+        out.append("jump ").append(wrap).append(" equal @unit null\n");
+        out.append("jump ").append(label(prefix, "ub_mark_", index)).append(" equal ").append(anchor).append(" null\n");
+        out.append("jump ").append(wrap).append(" equal @unit ").append(anchor).append('\n');
+        out.append("jump ").append(keep).append(" always x false\n");
+        out.append(label(prefix, "ub_mark_", index)).append(":\n");
+        out.append("set ").append(anchor).append(" @unit\n");
+        out.append(keep).append(":\n");
+        out.append("sensor ").append(dead).append(" @unit @dead\n");
+        out.append("jump ").append(scan).append(" notEqual ").append(dead).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(ours).append(" equal ").append(flag).append(" __ls_ub_uid\n");
+        out.append("jump ").append(scan).append(" equal ").append(phase).append(" 0\n");
+        out.append("jump ").append(scan).append(" notEqual ").append(flag).append(" 0\n");
+        out.append("sensor ").append(ctrl).append(" @unit @controlled\n");
+        out.append("jump ").append(scan).append(" notEqual ").append(ctrl).append(" 0\n");
+        out.append("sensor ").append(flag).append(" @unit @flag\n");
+        out.append("jump ").append(scan).append(" notEqual ").append(flag).append(" 0\n");
+        out.append("jump ").append(scan).append(" greaterThanEq ").append(seen).append(' ').append(begin.count).append('\n');
+        out.append("jump ").append(scan).append(" lessThanEq ").append(room).append(" 0\n");
+        emitClaim(prefix, index, scan, out);
+        out.append("op sub ").append(room).append(' ').append(room).append(" 1\n");
+        out.append("jump ").append(deliver).append(" always x false\n");
+        out.append(ours).append(":\n");
+        out.append("jump ").append(label(prefix, "ub_count_", index)).append(" equal ").append(phase).append(" 0\n");
+        out.append("jump ").append(scan).append(" greaterThanEq ").append(seen).append(' ').append(begin.count).append('\n');
+        out.append("jump ").append(deliver).append(" always x false\n");
+        out.append(label(prefix, "ub_count_", index)).append(":\n");
+        out.append("op add ").append(owned).append(' ').append(owned).append(" 1\n");
+        out.append("jump ").append(scan).append(" always x false\n");
+        out.append(wrap).append(":\n");
+        out.append("jump ").append(after).append(" notEqual ").append(phase).append(" 0\n");
+        out.append("set ").append(phase).append(" 1\n");
+        out.append("set ").append(seen).append(" 0\n");
+        out.append("set ").append(steps).append(" 0\n");
+        out.append("op sub ").append(room).append(' ').append(begin.count).append(' ').append(owned).append('\n');
+        out.append("jump ").append(scan).append(" equal @unit null\n");
+        out.append("jump ").append(keep).append(" always x false\n");
+        out.append(deliver).append(":\n");
+        out.append("set ").append(begin.variable).append(" @unit\n");
+    }
+
+    private static int findOwner(Seq<LStatement> statements, int end){
+        for(int i = end - 1; i >= 0; i--){
+            LStatement statement = statements.get(i);
+            if(statement instanceof BeginStatement begin && begin.destIndex == end) return i;
+        }
+        throw error("end", end, "has no matching begin block");
+    }
+
+    private static IllegalArgumentException error(String block, int index, String detail){
+        return new IllegalArgumentException(block + " at statement " + index + " " + detail + ".");
+    }
+}

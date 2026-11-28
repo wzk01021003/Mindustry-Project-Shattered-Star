@@ -1,0 +1,1064 @@
+package mindustry.logic;
+
+import arc.Core;
+import arc.graphics.Color;
+import arc.graphics.g2d.Draw;
+import arc.graphics.g2d.Lines;
+import arc.math.geom.Rect;
+import arc.math.geom.Vec2;
+import arc.scene.Element;
+import arc.scene.Group;
+import arc.scene.event.Touchable;
+import arc.scene.style.BaseDrawable;
+import arc.scene.style.Drawable;
+import arc.scene.ui.ImageButton;
+import arc.scene.ui.Label;
+import arc.scene.ui.TextField;
+import arc.scene.ui.layout.Scl;
+import arc.scene.ui.layout.WidgetGroup;
+import arc.struct.Seq;
+import arc.struct.SnapshotSeq;
+import arc.util.Tmp;
+import mindustry.Vars;
+import mindustry.gen.Icon;
+import mindustry.gen.Tex;
+import mindustry.ui.Styles;
+import mindustry.logic.LStatements.InvalidStatement;
+import mindustry.logic.LStatements.JumpStatement;
+import mindustry.logic.LStatements.PrintStatement;
+import mindustry.logic.SugarStatements.BeginStatement;
+import mindustry.logic.SugarStatements.BlockEndStatement;
+import mindustry.logic.SugarStatements.CaseStatement;
+import mindustry.logic.SugarStatements.ElseIfStatement;
+import mindustry.logic.SugarStatements.ElseStatement;
+import mindustry.logic.SugarStatements.IfBeginStatement;
+import mindustry.logic.SugarStatements.SwitchBeginStatement;
+import logicsugar.assist.BoxSelect;
+import logicsugar.assist.JumpLineColor;
+import logicsugar.assist.EscapePreview;
+import logicsugar.assist.expr.ExprCompiler;
+import logicsugar.assist.expr.ExprHook;
+import logicsugar.assist.expr.ExprStatement;
+import logicsugar.assist.expr.ExprTextImport;
+
+import java.util.IdentityHashMap;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayDeque;
+import java.util.Deque;
+
+public class SugarCanvas extends LCanvas{
+    private static final Color[] guideColors = {
+        Color.valueOf("66c2ff"), Color.valueOf("ffb45c"), Color.valueOf("79d98b"),
+        Color.valueOf("d58cff"), Color.valueOf("ffe066"), Color.valueOf("ff7f91")
+    };
+
+    final StructureController structure = new StructureController();
+    private StructureGuideLayer guideLayer;
+    private Group jumpLayer;
+    // Feature fields are optional: when upstream renames one, that feature degrades instead of
+    // killing the whole editor with an ExceptionInInitializerError.
+    private static final Field draggingField = optionalField(LCanvas.class, "dragging");
+    private static final Field privilegedField = optionalField(LCanvas.class, "privileged");
+    private static final Field spaceField = optionalField(LCanvas.DragLayout.class, "space");
+    private static final Field layoutJumpsField = optionalField(LCanvas.DragLayout.class, "jumps");
+    private static final Field canvasJumpsField = optionalField(LCanvas.class, "jumps");
+    private static final Field updateJumpHeightsField = optionalField(LCanvas.DragLayout.class, "updateJumpHeights");
+    private static final Method recalculateMethod = optionalMethod(LCanvas.class, "recalculate");
+    private static final Method compactMethod = optionalMethod(LCanvas.class, "isCompact");
+    private static final Method legacyRowsMethod = optionalMethod(LCanvas.class, "useRows");
+    private static final Field addressLabelField = optionalField(LCanvas.StatementElem.class, "addressLabel");
+    private static final Field needsLayoutField = optionalField(WidgetGroup.class, "needsLayout");
+    private final EscapePreview escapePreview = new EscapePreview();
+
+    public Runnable afterMutate;
+    /** 为 true 时 {@link #add}/{@link #addAt} 不通知历史（{@link #load} 期间）。 */
+    public boolean suppressHistory;
+    /** True while this canvas shows the global function library (executor == null session):
+     *  the library file may exceed the processor instruction cap, so {@link #load} parses it
+     *  with the raised library limit. {@link SugarLogicDialog} sets it on every show. */
+    public boolean librarySession;
+
+    public SugarCanvas(){
+        super();
+        setLayoutSpace();
+        update(() -> {
+            structure.normalizeElements();
+            if(isDragging()) structure.expandAll();
+            structure.refresh();
+            escapePreview.update(this);
+        });
+    }
+
+    @Override
+    public void load(String asm){
+        boolean previous = suppressHistory;
+        suppressHistory = true;
+        try{
+            BoxSelect.canvasWillChange(this);
+            // 文本导入的表达式语句（README 承诺的 `result = (a + b) * 2` / `x = buf[3]` /
+            // `buf[i] = 5`）在这里补上文本形态：原版 LParser 只按首 token 查表，认不出赋值行，
+            // 会静默变成 InvalidStatement(noop)。plan() 把这行一对一换成哨兵 set 语句
+            // （语句条数不变，因此 jump 下标与标签解析完全不受影响），加载完成后换回卡片。
+            //
+            // 单行表达式卡靠自描述标记还原，而标记在存档产物里只以注释标记块的形式存在
+            // （`# @logic-sugar-line # @ls-expr-card …`），plan() 只认紧跟在语句下面的独立标记行。
+            // 先把标记提到它展开成的那条语句下面（只在语句逐字存在时采用，见 attachCardMarkers）。
+            String text = ExprTextImport.attachCardMarkers(asm, asm);
+            ExprTextImport.Plan importPlan = ExprTextImport.plan(text);
+            if(librarySession){
+                // The function library may hold far more statements than a processor program;
+                // vanilla LCanvas.load parses through LParser, which stops at the processor cap.
+                SugarFunctions.withLibraryLimit(() -> loadSuper(importPlan.text()));
+            }else{
+                super.load(importPlan.text());
+            }
+            ExprTextImport.applyToCanvas(this, importPlan);
+            BoxSelect.canvasDidChange(this);
+            // super.load() 先清空了 jumpLayer（statements.jumps.clear()），结构引导线层
+            // 随之被移除；installGuideLayer 只在 rebuild() 里调用（重开才触发），所以
+            // 这里必须重装，否则粘贴导入后所有结构竖线消失且新增/删除语句都无法恢复。
+            installGuideLayer();
+            ExprHook.foldAll(this);
+        }finally{
+            suppressHistory = previous;
+        }
+    }
+
+    /** {@code super.load} behind a method reference so the library-limit wrapper can call it. */
+    private void loadSuper(String asm){
+        super.load(asm);
+    }
+
+    /**
+     * 交出自己的<b>展开态程序文本</b>（原版 consumer 拿到的那段 mlog/sugar 源码）。
+     *
+     * <p>这里是<b>纯读取</b>：{@code ExprHook.unfoldedText} 在文本层展开多行表达式卡，并把
+     * jump/begin 记下的画布语句下标换算到展开后的下标，一个积木元素都不动。旧实现是
+     * {@code unfoldAll() → super.save() → foldAll()}，每次调用都会 remove/addAt 积木并重建
+     * {@code StatementElem}；只要有人周期性调 save()（本对话框的指令预算横幅每 24 帧一次、
+     * 共存档里第三方编辑器每帧一次），正在编辑的 Expression 卡就会被拆掉重建，文本框在下一帧
+     * 因为元素已脱离而失焦（2026-10 报告：“点进编辑区域马上丢焦点、卡片每帧抖动”），而若
+     * {@code foldAll} 这次刚好因外部读取等原因拒绝折回，卡片还会被永久退化成裸 op 积木。</p>
+     *
+     * <p>展开态的写法与旧路径逐字一致（同一批 {@code ExprHook.toStatements} 展开、同一套
+     * 单行卡/不可映射行的保留判定），所以载体、{@code verifyRestore} 与重新解析都对得上。</p>
+     */
+    @Override
+    public String save(){
+        structure.refresh();
+        return ExprHook.unfoldedText(this);
+    }
+
+    /** Reads {@code LCanvas.privileged} via reflection: it is package-private and the mod class
+     *  loader cannot access it directly (IllegalAccessError) even though the package names match.
+     *  Unreadable degrades to non-privileged, so a privileged statement is refused rather than
+     *  silently allowed. */
+    protected boolean editingPrivileged(){
+        if(privilegedField == null) return false;
+        try{
+            return privilegedField.getBoolean(this);
+        }catch(IllegalAccessException e){
+            return false;
+        }
+    }
+
+    @Override
+    public void act(float delta){
+        super.act(delta);
+        updateMlogAddresses();
+    }
+
+    @Override
+    public void draw(){
+        if(BoxSelect.isDragging()) BoxSelect.drawInsertIndicatorUnder(this);
+        hideFoldedJumpCurves();
+        super.draw();
+        JumpLineColor.patchAllCurves(this);
+        if(!BoxSelect.isSelecting() && !BoxSelect.isDragging()){
+            arc.math.Mat oldTrans = new arc.math.Mat().set(Draw.trans());
+            Draw.trans().idt();
+            BoxSelect.drawHighlights(this);
+            BoxSelect.drawColorScrollbar(this);
+            Draw.trans(oldTrans);
+        }
+    }
+
+    /** 折叠块内部的语句被塌陷隐藏（visible=false）后，其 jump 跳转线的 JumpCurve 仍留在
+     *  jumps 层，且 JumpCurve.act() 每帧按塌陷后错乱的坐标重算 height != 0，导致跳转曲线
+     *  横穿整个屏幕。此处把"起点或终点不可见"的跳转线压平 height=0，让 JumpCurve.draw()
+     *  的 if(height == 0) return 生效，折叠时不再绘制这些横穿的跳转线。
+     *  在 super.draw() 之前调用（act 先于 draw，draw 里设 height=0 后 super.draw 才读到）。
+     *  注意：不能访问 game 侧 LCanvas$JumpButton.to（跨 classloader 非 public 字段，
+     *  抛 IllegalAccessError），须经 public 的 JumpStatement.dest 取目标。 */
+    private void hideFoldedJumpCurves(){
+        if(statements == null) return;
+        Group jumps = getJumpLayer(this);
+        if(jumps == null) return;
+        for(Element child : jumps.getChildren()){
+            if(!(child instanceof LCanvas.JumpCurve curve)) continue;
+            LCanvas.JumpButton button = curve.button;
+            if(button == null) continue;
+            LCanvas.StatementElem src = button.elem;
+            if(src == null) continue;
+            // 目标：JumpStatement.dest 是 public，可跨 classloader 访问；Begin 结构走
+            // StructureJumpCurve（target!=null 时不画），无需处理。
+            LCanvas.StatementElem dst = null;
+            if(src.st instanceof JumpStatement jump){
+                dst = jump.dest;
+            }
+            // 起点或终点任一处于折叠隐藏态（visible=false）→ 该线不绘制
+            if(!src.visible || (dst != null && !dst.visible)){
+                // height 是 Element 的 protected 字段，不能直接写；用 public setSize(0,0)
+                // 把 width/height 压为 0，JumpCurve.draw() 的 if(height == 0) return 生效。
+                curve.setSize(0, 0);
+            }
+        }
+    }
+
+    private void updateMlogAddresses(){
+        if(statements == null || addressLabelField == null) return;
+        Seq<Element> children = statements.getChildren();
+        if(children.isEmpty()) return;
+
+        // 先问“有哪张标签不是我们要的文本”：全部对得上就直接返回。标签文本一变就会
+        // invalidateHierarchy（整条父链重排），而本方法每帧跑一次。
+        boolean changed = false;
+        int mlogLine = 0;
+        for(Element child : children){
+            if(!(child instanceof LCanvas.StatementElem elem)) continue;
+
+            int lineCount = mlogLineCount(elem);
+            Label label = addressLabel(elem);
+            if(label != null && !mlogAddressText(mlogLine, lineCount).equals(label.getText().toString())){
+                changed = true;
+                break;
+            }
+            mlogLine += lineCount;
+        }
+        if(!changed) return;
+
+        // 顺序不能颠倒：原版 layout 会把标签改回“语句下标”（updateAddress），
+        // 所以必须先把 layout 跑完、再写我们的下标文本；而 setText() 会再次
+        // invalidateHierarchy（Draw 里的 validate 会因此重跑 layout 把文本改回下标），
+        // 因此在写完以后把 needsLayout 清掉。早期版本把顺序写反了：每帧在
+        // "1" 与 "1->2" 之间来回一次（行号也从未真正显示），标签宽度变化表现为
+        // 卡片头部左右抖动，还让整个语句列表每帧重排一次（2026-10 报告）。
+        statements.invalidate();
+        statements.validate();
+
+        mlogLine = 0;
+        for(Element child : children){
+            if(!(child instanceof LCanvas.StatementElem elem)) continue;
+
+            int lineCount = mlogLineCount(elem);
+            setLabelText(elem, mlogAddressText(mlogLine, lineCount));
+            mlogLine += lineCount;
+        }
+
+        // setText() 把 needsLayout 又立起来了；不清掉，Draw 里的 validate 就会再跑一次
+        // layout、把文本改回下标，下一帧再改回来——永远抖动。
+        clearStatementLayoutFlag();
+    }
+
+    /** 该积木发射的指令数：多行表达式卡按行数算，其余一条。 */
+    private static int mlogLineCount(LCanvas.StatementElem elem){
+        if(elem.st instanceof ExprStatement expression){
+            if(expression.lastOps == null){
+                try{
+                    expression.lastOps = ExprCompiler.compile(expression.dest, expression.expr);
+                }catch(Exception ignored){
+                    // 编辑中不完整的表达式：按一条指令计，不改变标签文本就不抖动
+                }
+            }
+            if(expression.lastOps != null) return expression.lastOps.size();
+        }
+        return 1;
+    }
+
+    /** 标签文本：多行卡写指令区间，其余写首条指令下标（与原版行号同一列）。 */
+    private static String mlogAddressText(int mlogLine, int lineCount){
+        return lineCount > 1 ? mlogLine + "->" + (mlogLine + lineCount - 1) : Integer.toString(mlogLine);
+    }
+
+    private void setLabelText(LCanvas.StatementElem elem, String text){
+        Label label = addressLabel(elem);
+        if(label != null && !label.getText().toString().equals(text)) label.setText(text);
+    }
+
+    private Label addressLabel(LCanvas.StatementElem elem){
+        if(addressLabelField == null) return null;
+        try{
+            return (Label)addressLabelField.get(elem);
+        }catch(IllegalAccessException ignored){
+            return null;
+        }
+    }
+
+    /** 清掉 statements 的 needsLayout（反射，旧版字段名变动时退化为多跑一次 layout，不影响文本）。 */
+    private void clearStatementLayoutFlag(){
+        if(needsLayoutField == null) return;
+        try{
+            needsLayoutField.setBoolean(statements, false);
+        }catch(IllegalAccessException ignored){
+        }
+    }
+
+    @Override
+    public void rebuild(){
+        BoxSelect.canvasWillChange(this);
+        super.rebuild();
+        BoxSelect.canvasDidChange(this);
+        setLayoutSpace();
+        installGuideLayer();
+    }
+
+    /** Settings key for the compact card layout toggle. */
+    public static final String settingCompactCards = "logicsugar.compactCards";
+
+    /** Statement gap in design units used by the vanilla (non-compact) layout. */
+    private static final float vanillaSpace = 10f;
+
+    /** Whether the compact card layout is enabled. Defaults to on (preserves prior behavior). */
+    public static boolean compactCards(){
+        try{
+            return Core.settings.getBool(settingCompactCards, true);
+        }catch(Throwable t){
+            return true;
+        }
+    }
+
+    /** 当前闲置（未拖拽）时的积木间距来源：紧凑开关开启时 0f，关闭时恢复原版 Scl.scl(10f)。
+     *  单一真相源，供 setLayoutSpace 与 BoxSelect.idleLayoutSpace 复用，避免改一处漏一处。 */
+    public static float currentIdleSpace(){
+        return compactCards() ? 0f : Scl.scl(vanillaSpace);
+    }
+
+    /** Re-applies the fold-height compensation to every statement in the active Sugar canvas.
+     *  The value is per element rather than static so separate canvas instances cannot overwrite
+     *  one another's layout state. */
+    public static void syncFoldHiddenSpace(LCanvas canvas, float space){
+        if(!(canvas instanceof SugarCanvas sugar) || sugar.statements == null) return;
+        float compensation = -space;
+        for(Element child : sugar.statements.getChildren()){
+            if(child instanceof SugarStatementElem elem){
+                elem.foldHiddenSpace = compensation;
+            }
+        }
+    }
+
+    private void setLayoutSpace(){
+        if(statements == null || spaceField == null) return;
+        try{
+            // Compact removes the gap between statement cards entirely; non-compact restores
+            // the vanilla 10-unit spacing so cards read as separate blocks.
+            float space = currentIdleSpace();
+            spaceField.setFloat(statements, space);
+            // 让每个折叠隐藏元素使用与当前 DragLayout 相同的 space 抵消值。
+            syncFoldHiddenSpace(this, space);
+        }catch(IllegalAccessException exception){
+            throw new RuntimeException("Unable to configure Logic Sugar layout", exception);
+        }
+    }
+
+    /** Re-applies the compact/non-compact spacing to the currently open canvas, live. */
+    public static void refreshLayoutSpace(){
+        SugarCanvas canvas = current();
+        if(canvas == null) return;
+        canvas.setLayoutSpace();
+        SugarCanvas.markJumpHeightsDirty(canvas);
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+        SugarCanvas.refreshJumpLayer(canvas);
+    }
+
+    private boolean isDragging(){
+        if(draggingField == null) return false;
+        try{
+            return draggingField.get(this) != null;
+        }catch(IllegalAccessException exception){
+            return false;
+        }
+    }
+
+    private static Field field(Class<?> type, String name){
+        try{
+            Field result = type.getDeclaredField(name);
+            result.setAccessible(true);
+            return result;
+        }catch(ReflectiveOperationException exception){
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    private static Field optionalField(Class<?> type, String name){
+        try{
+            Field result = type.getDeclaredField(name);
+            result.setAccessible(true);
+            return result;
+        }catch(ReflectiveOperationException exception){
+            return null;
+        }
+    }
+
+    private static Method optionalMethod(Class<?> type, String name, Class<?>... parameterTypes){
+        try{
+            Method result = type.getDeclaredMethod(name, parameterTypes);
+            result.setAccessible(true);
+            return result;
+        }catch(ReflectiveOperationException exception){
+            return null;
+        }
+    }
+
+    /** Width-mode compatibility across early v160 ({@code useRows}) and current v160
+     *  ({@code isCompact}). This intentionally has no direct linkage to either method. */
+    public static boolean compactStatementLayout(){
+        Method method = compactMethod != null ? compactMethod : legacyRowsMethod;
+        if(method != null){
+            try{
+                return (boolean)method.invoke(null);
+            }catch(ReflectiveOperationException | ClassCastException ignored){}
+        }
+        // Keep the same width threshold as both upstream implementations when reflection is
+        // unavailable (e.g. a fork hides the helper).  Portrait-only fallback misclassifies a
+        // narrow desktop window and can put the For card's growX condition beside its prefix.
+        return Core.graphics != null && Core.graphics.getWidth() < Scl.scl(900f) * 1.2f;
+    }
+
+    private void installGuideLayer(){
+        jumpLayer = resolveJumpLayer(this);
+        if(jumpLayer == null) return;
+        // 防重：load() 会清空 jumpLayer 再重装；rebuild() 也可能重复调用
+        if(guideLayer != null && guideLayer.parent == jumpLayer) return;
+        guideLayer = new StructureGuideLayer();
+        guideLayer.touchable = Touchable.disabled;
+        guideLayer.fillParent = true;
+        guideLayer.cullable = false;
+        jumpLayer.addChildAt(0, guideLayer);
+    }
+
+    /** Returns the jump overlay for both modern and legacy LCanvas layouts. */
+    public static Group getJumpLayer(LCanvas canvas){
+        if(canvas instanceof SugarCanvas sugar && sugar.jumpLayer != null){
+            return sugar.jumpLayer;
+        }
+        return resolveJumpLayer(canvas);
+    }
+
+    private static Group resolveJumpLayer(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return null;
+
+        Field field = layoutJumpsField;
+        Object owner = canvas.statements;
+        if(field == null){
+            field = canvasJumpsField;
+            owner = canvas;
+        }
+        if(field == null) return null;
+
+        try{
+            return (Group)field.get(owner);
+        }catch(IllegalAccessException | ClassCastException exception){
+            return null;
+        }
+    }
+
+    /**
+     * {@code LStatement.saveUI()} is not null-safe for jumps: the vanilla implementation does
+     * {@code dest.parent.getChildren()} and throws when the jump target element is detached
+     * (removed or not yet re-added during a structural refresh). Drop such stale targets before
+     * rebuilding indices, and keep a stray throw from reaching the render loop.
+     */
+    public static void normalizeJumpUI(LStatement statement){
+        if(statement == null) return;
+        if(statement instanceof JumpStatement jump && jump.dest != null && jump.dest.parent == null){
+            jump.dest = null;
+            jump.destIndex = -1;
+        }
+        try{
+            statement.saveUI();
+        }catch(RuntimeException ignored){
+            // A detached target is already handled above; never let stale jump bookkeeping crash the UI.
+        }
+    }
+
+    /** Marks jump heights dirty on modern clients and recalculates them on legacy clients. */
+    public static void markJumpHeightsDirty(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+
+        if(updateJumpHeightsField != null){
+            try{
+                updateJumpHeightsField.setBoolean(canvas.statements, true);
+                return;
+            }catch(IllegalAccessException ignored){}
+        }
+
+        recalculateLegacyJumps(canvas);
+    }
+
+    /** Refreshes legacy jump metrics and updates the jump overlay after a layout change. */
+    public static void refreshJumpLayer(LCanvas canvas){
+        recalculateLegacyJumps(canvas);
+        Group jumps = getJumpLayer(canvas);
+        if(jumps != null) jumps.act(0f);
+    }
+
+    private static void recalculateLegacyJumps(LCanvas canvas){
+        if(updateJumpHeightsField != null || recalculateMethod == null) return;
+        try{
+            recalculateMethod.invoke(canvas);
+        }catch(ReflectiveOperationException ignored){}
+    }
+
+    @Override
+    public void add(LStatement statement){
+        statements.addChild(new SugarStatementElem(statement));
+        notifyMutate();
+    }
+
+    @Override
+    public void addAt(int at, LStatement statement){
+        SugarStatementElem added = new SugarStatementElem(statement);
+        statements.addChildAt(at, added);
+
+        if(statement instanceof BeginStatement begin && begin.destIndex < 0){
+            SugarStatementElem end = new SugarStatementElem(new BlockEndStatement());
+            statements.addChildAt(at + 1, end);
+            begin.dest = end;
+            begin.destIndex = at + 1;
+            markJumpHeightsDirty(this);
+        }
+        structure.refresh();
+        notifyMutate();
+    }
+
+    private void notifyMutate(){
+        if(suppressHistory || afterMutate == null) return;
+        afterMutate.run();
+    }
+
+    public static void refreshCurrent(){
+        SugarCanvas canvas = current();
+        if(canvas != null) canvas.refreshStructureLayout();
+    }
+
+    /** Rebuild structure-dependent presentation immediately after an external statement reorder. */
+    public void refreshStructureLayout(){
+        if(statements == null) return;
+        structure.refresh();
+        markJumpHeightsDirty(this);
+        statements.invalidate();
+        statements.validate();
+        refreshJumpLayer(this);
+    }
+
+    public static boolean canLink(BeginStatement begin, StatementElem target){
+        SugarCanvas canvas = current();
+        return canvas != null && canvas.structure.canLink(begin, target);
+    }
+
+    public static boolean isValidLink(BeginStatement begin, StatementElem target){
+        SugarCanvas canvas = current();
+        return canvas != null && canvas.structure.isValid(begin, target);
+    }
+
+    public static SugarCanvas current(){
+        if(Vars.ui != null && Vars.ui.logic != null && Vars.ui.logic.canvas instanceof SugarCanvas canvas) return canvas;
+        return null;
+    }
+
+    public class SugarStatementElem extends StatementElem{
+        int structureDepth = -1;
+        boolean foldedHidden;
+        boolean structureInvalid;
+        float inset;
+        float foldHiddenSpace;
+
+        SugarStatementElem(LStatement statement){
+            super(statement);
+            foldHiddenSpace = -currentIdleSpace();
+            background(new InsetDrawable(this, Tex.whitePane));
+            update(this::refreshInset);
+            if(statement instanceof BlockEndStatement && getCells().size > 1){
+                getCells().peek().height(0f).minHeight(0f).pad(0f);
+                getChildren().peek().visible = false;
+            }
+            fixActionIconHitBounds();
+        }
+
+        /**
+         * 修复高 UI 缩放（200% 等）下新增/复制/删除按钮的点击判定区偏左。
+         *
+         * 根因（已从字节码确认）：ImageButton(Drawable, ImageButtonStyle) 构造时会把传入
+         * 的 style 拷贝一份（new ImageButtonStyle(style)）再 setStyle，因此
+         * getStyle() == Styles.logici 的引用比较永远为 false——必须改用图标引用比较。
+         * Icon 是静态单例（imageUp 字段直接引用 Icon.add/copy/cancel 等实例，不被拷贝），
+         * 引用比较可靠。Icon 字体图标按 Scl.scl() 放大后 prefWidth 远大于 24f 父按钮，
+         * 子 Image 命中区重叠 → 命中判定偏左。resizeImage(24f) = imageCell().size(24f)
+         * （min/max=scl(24f)），布局时 Image 被 clamp 到与父按钮一致，命中区对齐。
+         */
+        private void fixActionIconHitBounds(){
+            fixIconButtons(this);
+        }
+
+        /** 原版/MindustryX 的语句动作按钮（均在内层白色 Table 中，经 table(...) 创建）。 */
+        private static boolean isActionButton(ImageButton button){
+            Drawable icon = button.getStyle().imageUp;
+            return icon == Icon.add || icon == Icon.copy || icon == Icon.cancel
+                || icon == Icon.fileText || icon == Icon.pencil;
+        }
+
+        private static void fixIconButtons(Group group){
+            for(Element child : group.getChildren()){
+                if(child instanceof ImageButton button && isActionButton(button)){
+                    button.resizeImage(24f);
+                    button.invalidateHierarchy();
+                }
+                if(child instanceof Group sub){
+                    fixIconButtons(sub);
+                }
+            }
+        }
+
+        void applyStructure(int depth, boolean hidden, boolean invalid){
+            if(structureDepth != depth || foldedHidden != hidden || structureInvalid != invalid){
+                structureDepth = depth;
+                foldedHidden = hidden;
+                structureInvalid = invalid;
+                visible = !hidden;
+                setColor(invalid ? mindustry.graphics.Pal.remove : st.category().color);
+                invalidateHierarchy();
+            }
+            refreshInset();
+        }
+
+        private void refreshInset(){
+            // marginLeft() applies Scl.scl() itself, so inset must stay in design units here;
+            // pre-scaling it would double-scale (visible at 200% UI scale).
+            float unit = Core.graphics.isPortrait() ? 17f : 24f;
+            // Keep enough room for the condition row and the trailing mode/fold controls even
+            // in deeply nested cards; the inset must not consume that control area.
+            float minContentWidth = 360f;
+            float designWidth = getWidth() / Scl.scl(1f);
+            float maxInset = Math.max(0f, designWidth - minContentWidth);
+            float depthInset = Math.max(0, structureDepth) * unit;
+            float nextInset = Math.min(depthInset, maxInset);
+            if(Math.abs(inset - nextInset) > 0.1f){
+                inset = nextInset;
+                marginLeft(inset);
+                marginBottom(7f);
+                invalidateHierarchy();
+            }
+        }
+
+        @Override
+        public float getPrefHeight(){
+            // 折叠隐藏语句：返回 -space 抵消布局里的 space，使 getPrefHeight()+space=0，
+            // 消除折叠块内部空隙（否则非紧凑模式下 Begin 与 end 之间会撑开一段可框选的空白）。
+            return foldedHidden ? foldHiddenSpace : super.getPrefHeight();
+        }
+
+        @Override
+        public void copy(){
+            normalizeJumpUI(st);
+            LStatement copied = st.copy();
+            if(copied == null) return;
+
+            if(copied instanceof JumpStatement jump && jump.destIndex != -1){
+                int index = statements.getChildren().indexOf(this);
+                if(index != -1 && index < jump.destIndex) jump.destIndex++;
+            }
+
+            int index = statements.getChildren().indexOf(this);
+            SugarCanvas.this.addAt(index + 1, copied);
+            copied.setupUI();
+            markJumpHeightsDirty(SugarCanvas.this);
+        }
+
+        /**
+         * Toggles this statement between its block form and a raw-text {@code print} form.
+         * This is a runtime override of MindustryX's {@code StatementElem#toggleComment}
+         * (identical signature): the original serializes via the generated {@code LogicIO.write},
+         * which only knows {@code @RegisterStatement} statements and silently emits nothing for
+         * Neon's custom-parser statements, dropping their code. This uses {@code LStatement.write},
+         * which every statement (including Neon's) implements, and a lossless single-token encoding
+         * ({@link SugarStatements#encodeStatementText}/{@link SugarStatements#decodeStatementText})
+         * so identifiers containing {@code _} and other special characters round-trip unchanged.
+         */
+        public void toggleComment(){
+            StatementElem newElem;
+            if(st instanceof PrintStatement pst && !pst.value.isEmpty()){ //print -> block
+                String code = SugarStatements.decodeStatementText(pst.value);
+                LStatement stNew;
+                try{
+                    stNew = LAssembler.read(code, isPrivileged()).first();
+                }catch(Exception e){
+                    showConvertError();
+                    return;
+                }
+                if(stNew instanceof InvalidStatement){
+                    showConvertError();
+                    return;
+                }
+                newElem = new SugarStatementElem(stNew);
+            }else{ //block -> print
+                normalizeJumpUI(st);
+                StringBuilder thisText = new StringBuilder();
+                st.write(thisText);
+                PrintStatement stNew = new PrintStatement();
+                stNew.value = SugarStatements.encodeStatementText(thisText.toString());
+                newElem = new SugarStatementElem(stNew);
+            }
+
+            //preserve jump destinations that referenced this element
+            for(Element c : statements.getChildren()){
+                if(c instanceof StatementElem ste && ste.st instanceof JumpStatement jst && (jst.dest == null || jst.dest == st.elem)){
+                    if(jst.destIndex < 0 || jst.destIndex >= statements.getChildren().size) continue;
+                    normalizeJumpUI(jst);
+                }
+            }
+            statements.addChildBefore(this, newElem);
+            remove();
+            for(Element c : statements.getChildren()){
+                if(c instanceof StatementElem ste && ste.st instanceof JumpStatement jst && (jst.dest == null || jst.dest == st.elem)){
+                    if(jst.destIndex < 0 || jst.destIndex >= statements.getChildren().size) continue;
+                    jst.setupUI();
+                }
+            }
+            newElem.st.setupUI();
+            structure.refresh();
+            markJumpHeightsDirty(SugarCanvas.this);
+        }
+
+        private void showConvertError(){
+            Vars.ui.showInfoFade(Core.bundle.get("logicsugar.textEdit.convertError", "Cannot convert this statement to/from text."));
+        }
+
+        /** The privilege level of the canvas this element belongs to; see
+         *  {@link SugarCanvas#editingPrivileged()}. */
+        private boolean isPrivileged(){
+            return SugarCanvas.this.editingPrivileged();
+        }
+    }
+
+    private static class InsetDrawable extends BaseDrawable{
+        private final SugarStatementElem owner;
+        private final Drawable source;
+
+        InsetDrawable(SugarStatementElem owner, Drawable source){
+            super(source);
+            this.owner = owner;
+            this.source = source;
+        }
+
+        @Override
+        public void draw(float x, float y, float width, float height){
+            float offset = Scl.scl(owner.inset);
+            source.draw(x + offset, y, Math.max(0f, width - offset), height);
+        }
+
+        @Override
+        public void draw(float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation){
+            float offset = Scl.scl(owner.inset);
+            source.draw(x + offset, y, originX, originY, Math.max(0f, width - offset), height, scaleX, scaleY, rotation);
+        }
+    }
+
+    final class StructureController{
+        final Seq<Pair> pairs = new Seq<>();
+        final IdentityHashMap<StatementElem, Integer> indices = new IdentityHashMap<>();
+        boolean[] compilerInvalid = {};
+        private int signature;
+        /** 复用缓冲：refresh() 每帧对每条语句算一次签名，复用可避免每帧等量垃圾。 */
+        private final StringBuilder signatureBuffer = new StringBuilder();
+
+        void refresh(){
+            if(statements == null) return;
+            normalizeElements();
+            SnapshotSeq<Element> children = statements.getChildren();
+            syncStatementIndices(children);
+            int nextSignature = 31 * children.size + Math.round(getWidth()) + Math.round(statements.getWidth()) + (Core.graphics.isPortrait() ? 1 : 0);
+            for(int i = 0; i < children.size; i++){
+                StatementElem elem = (StatementElem)children.get(i);
+                nextSignature = 31 * nextSignature + System.identityHashCode(elem);
+                nextSignature = 31 * nextSignature + Math.round(elem.getWidth());
+                if(elem.st instanceof BeginStatement begin){
+                    nextSignature = 31 * nextSignature + System.identityHashCode(begin.dest);
+                    nextSignature = 31 * nextSignature + (begin.collapsed ? 1 : 0);
+                }
+                // Every editable card field must count, and it does so through the card's own
+                // serialisation. Condition cards used to be hashed field by field right here (op/Expr
+                // mode, short-circuit flag, conditionExpr) - the same enumerate-the-fields pattern that
+                // made declaration cards miss out, so editing an array/record/stack field to an invalid
+                // value left the red marking stale. SugarStatement.invalidSignature() hashes the card's
+                // write() output, which is every field of every current and future card type; adding a
+                // card type must not mean coming back here.
+                if(elem.st instanceof SugarStatements.SugarStatement sugar){
+                    nextSignature = 31 * nextSignature + sugar.invalidSignature(signatureBuffer);
+                }
+            }
+            if(nextSignature == signature) return;
+            signature = nextSignature;
+            rebuildStructure(children);
+        }
+
+        void normalizeElements(){
+            if(statements == null) return;
+            SnapshotSeq<Element> current = statements.getChildren();
+            boolean needsNormalization = false;
+            for(Element child : current){
+                if(!(child instanceof SugarStatementElem)){
+                    needsNormalization = true;
+                    break;
+                }
+            }
+            if(!needsNormalization) return;
+
+            // Preserve index-based links before replacing elements created by an external LCanvas path.
+            for(Element child : current){
+                normalizeJumpUI(((StatementElem)child).st);
+            }
+
+            for(int i = 0; i < statements.getChildren().size; i++){
+                Element child = statements.getChildren().get(i);
+                if(child instanceof SugarStatementElem) continue;
+
+                StatementElem old = (StatementElem)child;
+                LStatement statement = old.st;
+                SugarStatementElem replacement = new SugarStatementElem(statement);
+                statements.addChildAt(i, replacement);
+                old.remove();
+            }
+
+            for(Element child : statements.getChildren()){
+                ((StatementElem)child).st.setupUI();
+            }
+            signature = 0;
+        }
+
+        void expandAll(){
+            boolean changed = false;
+            for(Element child : statements.getChildren()){
+                if(((StatementElem)child).st instanceof BeginStatement begin && begin.collapsed){
+                    begin.collapsed = false;
+                    changed = true;
+                }
+            }
+            if(changed) signature = 0;
+        }
+
+        boolean canLink(BeginStatement begin, StatementElem target){
+            if(target == null) return true;
+            if(!(target.st instanceof BlockEndStatement) || begin.elem == null) return false;
+            refreshIndices();
+            Integer from = indices.get(begin.elem), to = indices.get(target);
+            if(from == null || to == null || to <= from) return false;
+            for(Element child : statements.getChildren()){
+                LStatement statement = ((StatementElem)child).st;
+                if(statement instanceof BeginStatement other && other != begin && other.dest == target) return false;
+            }
+            return !crossesExisting(begin, from, to);
+        }
+
+        boolean isValid(BeginStatement begin, StatementElem target){
+            if(target == null || !(target.st instanceof BlockEndStatement) || begin.elem == null) return false;
+            refreshIndices();
+            Integer from = indices.get(begin.elem), to = indices.get(target);
+            if(from == null || to == null || to <= from) return false;
+            for(Element child : statements.getChildren()){
+                LStatement statement = ((StatementElem)child).st;
+                if(statement instanceof BeginStatement other && other != begin && other.dest == target) return false;
+            }
+            return !crossesExisting(begin, from, to);
+        }
+
+        private boolean crossesExisting(BeginStatement begin, int from, int to){
+            for(Element child : statements.getChildren()){
+                LStatement statement = ((StatementElem)child).st;
+                if(!(statement instanceof BeginStatement other) || other == begin || other.elem == null || other.dest == null) continue;
+                Integer otherFrom = indices.get(other.elem), otherTo = indices.get(other.dest);
+                if(otherFrom == null || otherTo == null || otherTo <= otherFrom) continue;
+                if((from < otherFrom && otherFrom < to && to < otherTo) || (otherFrom < from && from < otherTo && otherTo < to)) return true;
+            }
+            return false;
+        }
+
+        private void rebuildStructure(SnapshotSeq<Element> children){
+            refreshIndices();
+            pairs.clear();
+            IdentityHashMap<StatementElem, Pair> claimed = new IdentityHashMap<>();
+            Seq<LStatement> source = new Seq<>(children.size);
+            for(Element child : children) source.add(((StatementElem)child).st);
+            compilerInvalid = SugarCompiler.invalidStatements(source);
+
+            for(int i = 0; i < children.size; i++){
+                StatementElem elem = (StatementElem)children.get(i);
+                if(elem.st instanceof BeginStatement begin){
+                    Integer end = begin.dest == null ? null : indices.get(begin.dest);
+                    Pair pair = new Pair(begin, elem, begin.dest, i, end == null ? -1 : end);
+                    pair.valid = end != null && end > i && begin.dest.st instanceof BlockEndStatement && !claimed.containsKey(begin.dest);
+                    if(pair.valid){
+                        pair.valid = !crossesExisting(begin, i, end);
+                        if(pair.valid) claimed.put(begin.dest, pair);
+                    }
+                    pairs.add(pair);
+                }
+            }
+
+            for(Element child : children){
+                SugarStatementElem elem = (SugarStatementElem)child;
+                int index = children.indexOf(child, true);
+                elem.applyStructure(0, false, compilerInvalid[index] || elem.st instanceof BlockEndStatement && !claimed.containsKey(elem));
+            }
+            assignRange(0, children.size, 0, false, false, children);
+            statements.invalidateHierarchy();
+            markJumpHeightsDirty(SugarCanvas.this);
+        }
+
+        /** Match each closing block with the nearest still-open structured block. */
+        private void syncStatementIndices(SnapshotSeq<Element> children){
+            Deque<BeginStatement> opens = new ArrayDeque<>();
+            for(Element child : children){
+                StatementElem elem = (StatementElem)child;
+                if(elem.st instanceof BeginStatement begin){
+                    opens.push(begin);
+                }else if(elem.st instanceof BlockEndStatement && !opens.isEmpty()){
+                    BeginStatement begin = opens.pop();
+                    begin.dest = elem;
+                    begin.destIndex = children.indexOf(elem, true);
+                }
+            }
+            while(!opens.isEmpty()){
+                BeginStatement begin = opens.pop();
+                begin.dest = null;
+                begin.destIndex = -1;
+            }
+            for(Element child : children){
+                LStatement statement = ((StatementElem)child).st;
+                if(statement instanceof JumpStatement jump && (jump.dest == null || jump.dest.parent == null)){
+                    jump.dest = null;
+                    jump.destIndex = -1;
+                }
+                normalizeJumpUI(statement);
+            }
+        }
+
+        private void assignRange(int from, int to, int depth, boolean switchBody, boolean ifBody, SnapshotSeq<Element> children){
+            int currentDepth = depth;
+            for(int i = from; i < to; i++){
+                SugarStatementElem elem = (SugarStatementElem)children.get(i);
+                Pair pair = pairAt(i);
+
+                if(switchBody && elem.st instanceof CaseStatement){
+                    elem.applyStructure(depth, false, compilerInvalid[i]);
+                    currentDepth = depth + 1;
+                    continue;
+                }
+
+                if(ifBody && (elem.st instanceof ElseIfStatement || elem.st instanceof ElseStatement)){
+                    //elif/else are siblings of the if-begin, not nested under it: keep them at the if's depth
+                    elem.applyStructure(depth - 1, false, compilerInvalid[i]);
+                    currentDepth = depth;
+                    continue;
+                }
+
+                if(pair != null && pair.valid && pair.endIndex < to){
+                    elem.applyStructure(currentDepth, false, compilerInvalid[i]);
+                    SugarStatementElem end = (SugarStatementElem)children.get(pair.endIndex);
+                    if(pair.begin.collapsed){
+                        for(int at = i + 1; at < pair.endIndex; at++){
+                            ((SugarStatementElem)children.get(at)).applyStructure(currentDepth + 1, true, false);
+                        }
+                    }else{
+                        assignRange(i + 1, pair.endIndex, currentDepth + 1, pair.begin instanceof SwitchBeginStatement, pair.begin instanceof IfBeginStatement, children);
+                    }
+                    end.applyStructure(currentDepth, false, compilerInvalid[pair.endIndex]);
+                    i = pair.endIndex;
+                    continue;
+                }
+
+                boolean invalid = compilerInvalid[i] || elem.st instanceof BeginStatement || (elem.st instanceof BlockEndStatement && !isClaimed(elem));
+                elem.applyStructure(currentDepth, false, invalid);
+            }
+        }
+
+        private Pair pairAt(int beginIndex){
+            for(Pair pair : pairs) if(pair.beginIndex == beginIndex) return pair;
+            return null;
+        }
+
+        private boolean isClaimed(StatementElem end){
+            for(Pair pair : pairs) if(pair.valid && pair.end == end) return true;
+            return false;
+        }
+
+        private void refreshIndices(){
+            indices.clear();
+            SnapshotSeq<Element> children = statements.getChildren();
+            for(int i = 0; i < children.size; i++) indices.put((StatementElem)children.get(i), i);
+        }
+    }
+
+    final class StructureGuideLayer extends Element{
+        @Override
+        public void draw(){
+            // statements and jumps are sibling overlays; use their common parent so scrolling
+            // moves the structure cards and this guide by the same transform.
+            if(parent == null || parent.parent == null) return;
+            Group common = parent.parent;
+            Rect cullingArea = parent.getCullingArea();
+            float visibleBottom = Float.NEGATIVE_INFINITY;
+            float visibleTop = Float.POSITIVE_INFINITY;
+            if(cullingArea != null){
+                Vec2 cullBottom = Tmp.v3.set(0f, cullingArea.y);
+                Vec2 cullTop = Tmp.v4.set(0f, cullingArea.y + cullingArea.height);
+                localToAscendantCoordinates(common, cullBottom);
+                localToAscendantCoordinates(common, cullTop);
+                visibleBottom = Math.min(cullBottom.y, cullTop.y);
+                visibleTop = Math.max(cullBottom.y, cullTop.y);
+            }
+
+            for(Pair pair : structure.pairs){
+                if(!pair.valid || pair.beginElem.foldedHidden || pair.end == null || !pair.end.visible) continue;
+                SugarStatementElem begin = (SugarStatementElem)pair.beginElem;
+                SugarStatementElem end = (SugarStatementElem)pair.end;
+                Color color = guideColors[Math.floorMod(begin.structureDepth, guideColors.length)];
+
+                float guideX = Scl.scl(begin.inset + 6f);
+                Vec2 beginBottom = Tmp.v1.set(guideX, 0f);
+                Vec2 endTop = Tmp.v2.set(guideX, end.getHeight());
+                begin.localToAscendantCoordinates(common, beginBottom);
+                end.localToAscendantCoordinates(common, endTop);
+                // Non-transform groups carry the scroll offset in this layer's live draw position.
+                localToAscendantCoordinates(common, beginBottom);
+                localToAscendantCoordinates(common, endTop);
+
+                float lineBottom = Math.max(Math.min(beginBottom.y, endTop.y), visibleBottom);
+                float lineTop = Math.min(Math.max(beginBottom.y, endTop.y), visibleTop);
+                if(lineTop <= lineBottom) continue;
+
+                Draw.color(color, parentAlpha);
+                Lines.stroke(Scl.scl(2.2f));
+                Lines.line(beginBottom.x, lineBottom, beginBottom.x, lineTop);
+            }
+            Draw.reset();
+        }
+    }
+
+    static final class Pair{
+        final BeginStatement begin;
+        final SugarStatementElem beginElem;
+        final StatementElem end;
+        final int beginIndex, endIndex;
+        boolean valid;
+
+        Pair(BeginStatement begin, StatementElem beginElem, StatementElem end, int beginIndex, int endIndex){
+            this.begin = begin;
+            this.beginElem = (SugarStatementElem)beginElem;
+            this.end = end;
+            this.beginIndex = beginIndex;
+            this.endIndex = endIndex;
+        }
+    }
+}

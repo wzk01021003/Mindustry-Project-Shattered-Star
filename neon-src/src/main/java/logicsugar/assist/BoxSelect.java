@@ -1,0 +1,2524 @@
+package logicsugar.assist;
+
+import arc.*;
+import arc.graphics.*;
+import arc.graphics.g2d.*;
+import arc.math.geom.*;
+import arc.input.*;
+import arc.math.*;
+import arc.math.geom.*;
+import arc.scene.*;
+import arc.scene.event.*;
+import arc.scene.style.*;
+import arc.scene.ui.*;
+import arc.scene.ui.layout.*;
+import arc.struct.*;
+import arc.util.*;
+import arc.util.Align;
+import mindustry.*;
+import mindustry.gen.*;
+import mindustry.graphics.*;
+import mindustry.logic.*;
+import mindustry.logic.LCanvas.*;
+import mindustry.logic.LStatements.*;
+import mindustry.logic.SugarStatements.BeginStatement;
+import mindustry.logic.SugarStatements.BlockEndStatement;
+import mindustry.ui.*;
+import mindustry.ui.dialogs.*;
+
+import logicsugar.assist.expr.ExprHook;
+import logicsugar.assist.expr.ExprTextImport;
+
+import java.lang.reflect.*;
+import java.util.*;
+
+/**
+ * 框选功能 - 批量选择、复制、移动、删除积木（事件驱动架构）。
+ *
+ * 架构：
+ * - 输入层：Core.scene.addCaptureListener 从事件源头拦截，event.stop() 阻止原版 StatementElem
+ *   的 InputListener 收到事件。不再需要 restoreChildrenOrder 等对抗代码。
+ * - 布局层：移动模式 relayoutNonSelected 紧凑非选中积木 + applyInsertShift
+ *   直接修改 child.y 腾位（JumpCurve 基于 child.y 不含 translation）。
+ *   clearDraggingField 防止原版 layout() 跳过错误积木。
+ * - 接管按钮：选中积木后劫持其功能按钮（删除→批量删除，+→批量复制，复制→模式切换）。
+ *
+ * 交互流程：
+ *   1. 空白点击拖动 → 框选积木（蓝=移动模式，绿=复制模式）
+ *   2. 释放 → 选中积木高亮，显示工具栏，积木按钮被接管
+ *   3. 拖动选中积木 → 积木/半透明预览跟随鼠标，显示插入指示器
+ *   4. 松手 → 积木移动/复制到新位置
+ *   5. 普通单积木拖动：位移 ≥ 立即阈值（移动端 Scl.scl(16f)、桌面 8px slop）即可拖动；
+ *      移动端小于该阈值的位移仍需长按 430ms 后超过 8px（精准微调通道）
+ *   6. Ctrl+点击单积木 → 选中并复制拖动
+ *   7. Delete/Backspace → 快速删除选中积木
+ *   8. 右键/Esc → 取消拖动
+ *
+ * ------------------------------------------------------------
+ * 致谢 / Acknowledgements
+ * ------------------------------------------------------------
+ * 拖动移动和跳转索引转换逻辑参考了 MI2-Utilities 项目：
+ *   - 项目地址: https://github.com/BlackDeluxeCat/MI2-Utilities-Java
+ *   - 参考文件: src/mi2u/ui/LogicHelperMindow.java
+ */
+public class BoxSelect{
+
+    // ===== 常量 =====
+    private static final float MIN_DRAG_DIST = BoxSelectDragPolicy.SLOP;
+    private static final float SCROLLBAR_WIDTH = 14f;
+    private static final float AUTOSCROLL_MARGIN = 80f;
+    private static final float AUTOSCROLL_SPEED = 15f;
+    private static final float FILL_ALPHA = 0.15f;
+    private static final float BORDER_ALPHA = 0.8f;
+    private static final float COPY_PREVIEW_ALPHA = 0.5f;
+    private static final float SCROLLBAR_SEG_ALPHA = 0.35f;
+    private static final Mat tmpMat = new Mat();
+    private static final Mat tmpMat2 = new Mat();
+
+    // ===== 设置键 =====
+    public static final String settingCtrlClickCopy = "logicsugar.ctrlClickCopy";
+    public static final String settingCtrlDragCopy = "logicsugar.ctrlDragCopy";
+    /** 拖动时是否把积木间距从 0f 临时扩到 10f。
+     *  开启（默认）：拖起来更宽松、方便观察，但 0f↔10f 切换会牵连视野滚动偏移（历史问题）。
+     *  关闭：拖动全程保持间距不变，无任何空间切换，视野/虚拟块偏移彻底消失；
+     *        缺点是往折叠语句里拖语句时，腾位空间按原间距计算，可能显得"随机放"。 */
+    public static final String settingDragExpandSpacing = "logicsugar.dragExpandSpacing";
+
+    private static boolean ctrlClickCopyEnabled(){
+        return Core.settings.getBool(settingCtrlClickCopy, true);
+    }
+
+    private static boolean ctrlDragCopyEnabled(){
+        return Core.settings.getBool(settingCtrlDragCopy, true);
+    }
+
+    /** 拖动时是否把间距临时扩到 10f（设置「拖动时扩展间距」，默认关闭）。
+     *  开启=0f↔10f 切换；关闭（默认）=跳过切换，根治视野/虚拟块偏移。 */
+    private static boolean dragExpandSpacingEnabled(){
+        return Core.settings.getBool(settingDragExpandSpacing, false);
+    }
+
+// ===== 反射字段（包级私有，缓存 Field；缺失时按可选降级，不阻塞编辑器）=====
+    private static final Field draggingField = optionalField(LCanvas.class, "dragging");
+    private static final Field privilegedField = optionalField(LCanvas.class, "privileged");
+    static final Field needsLayoutField = optionalField(arc.scene.ui.layout.WidgetGroup.class, "needsLayout");
+    private static final Field dragLayoutSpaceField = optionalField(LCanvas.DragLayout.class, "space");
+
+    private static Field optionalField(Class<?> type, String name){
+        try{
+            Field result = type.getDeclaredField(name);
+            result.setAccessible(true);
+            return result;
+        }catch(Exception e){
+            Log.warn("[LogicAssist] Field not found, feature degraded: " + type.getName() + "." + name, e);
+            return null;
+        }
+    }
+
+    /** 读取 DragLayout 当前实际间距。SugarCanvas 会把 space 反射设为 0f（紧凑布局），
+     *  拖拽几何必须与布局几何用同一个值，否则拖动时积木间会凭空多出 10f 间距、
+     *  底部积木被推出可视区而滚动条不变。读取失败时退回原生默认值。 */
+    private static float getLayoutSpace(LCanvas canvas){
+        try{
+            return dragLayoutSpaceField.getFloat(canvas.statements);
+        }catch(Exception e){
+            return Scl.scl(10f);
+        }
+    }
+
+    /** 临时修改 DragLayout.space 并立即重排：拖动期间用 10f 间距把积木分得更开，
+     *  DragLayout 高度随之增大，滚动条范围同步扩大；结束拖动时传 0f 恢复紧凑布局。 */
+    private static void setDragLayoutSpace(LCanvas canvas, float space){
+        try{
+            dragLayoutSpaceField.setFloat(canvas.statements, space);
+            // 同步所有折叠隐藏语句的 space 抵消值，保证 layout() 里 getPrefHeight()+space=0 始终成立
+            SugarCanvas.syncFoldHiddenSpace(canvas, space);
+            // 高度变化需要双重 invalidate+validate（参考 finalizeLayout）：
+            // 第一次 layout 用旧 height 执行并标记父节点，第二次用新 height 真正重排。
+            canvas.statements.invalidate();
+            canvas.statements.validate();
+            canvas.statements.invalidate();
+            canvas.statements.validate();
+        }catch(Exception e){
+            Log.warn("[LogicAssist] Failed to set layout space", e);
+        }
+    }
+
+    /** 闲置（未拖拽）时的积木间距：紧凑开关开启时 0f，关闭时恢复原版 Scl.scl(10f)。
+     *  复用 SugarCanvas.currentIdleSpace 保持单一真相源，避免拖拽结束后打回硬编码 0f，
+     *  导致非紧凑模式关掉开关后拖一下又被重置成紧凑。 */
+    private static float idleLayoutSpace(){
+        return SugarCanvas.currentIdleSpace();
+    }
+
+    // ===== 拖动诊断日志 =====
+
+    /**
+     * 拖动路径上会静默失效的判断，全部留一行可见日志（屏幕上看不见、日志里也没有的失败只能靠猜
+     * ——2026-09 的"重复积木"报告就是这样查了两轮）。每类每场最多一行（按 key 去重，几何类按
+     * 变化后的内容去重），纯 {@code Log.info} 加字符串拼接，不影响拖动行为。
+     */
+    private static final Set<String> reportedDragNotes = new HashSet<>();
+    /** 本次拖动序号：让"每次拖动一次"的日志既每拖都出现，又不至于每帧刷屏。 */
+    private static int dragSequence = 0;
+    /** 本次拖动是否已经报过重绘偏移来源。 */
+    private static boolean dragRedrawSourceReported = false;
+    /** 上一次体检看到的卡结构（元素 → children 数），避免每帧拼字符串。 */
+    private static final Map<StatementElem, Integer> cardShapeCache = new IdentityHashMap<>();
+
+    /** 上一次几何基准（children 数 / 可见数 / getPrefHeight() 之和），见 {@link #reportGeometryChange}。 */
+    private static String dragGeometryBaseline = null;
+
+    private static void dragNoteOnce(String key, String message){
+        if(!reportedDragNotes.add(key)) return;
+        Log.info("[LogicSugar] drag " + message);
+    }
+
+    /** 一个元素的可诊断身份：identity hash（同一场里唯一）+ 可见性 + 是否还挂在画布上 + 偏移。 */
+    private static String describeElement(StatementElem elem, LCanvas canvas){
+        if(elem == null) return "none";
+        boolean attached = canvas != null && canvas.statements != null && elem.parent == canvas.statements;
+        return "#" + Integer.toHexString(System.identityHashCode(elem))
+            + " visible=" + elem.visible
+            + " attached=" + attached
+            + " translation=(" + elem.translation.x + "," + elem.translation.y + ")";
+    }
+
+    /** children 数 / 可见元素数 / getPrefHeight() 之和 —— 拖动期间任何一项变化都说明有人跑了 layout。 */
+    private static String geometrySummary(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        int visible = 0;
+        float heightSum = 0f;
+        for(Element child : children){
+            if(child.visible) visible++;
+            heightSum += child.getPrefHeight();
+        }
+        return "children=" + children.size + " visible=" + visible
+            + " heightSum=" + (Math.round(heightSum * 100f) / 100f);
+    }
+
+    private static void seedGeometryBaseline(LCanvas canvas){
+        dragGeometryBaseline = canvas == null || canvas.statements == null ? null : geometrySummary(canvas);
+    }
+
+    /** (e) 拖动中几何变化：layout 一跑，dragBaseYs 基准就过期了，这是"积木错位/重复"的候选机制。 */
+    private static void reportGeometryChange(LCanvas canvas, String stage){
+        if(canvas == null || canvas.statements == null) return;
+        String now = geometrySummary(canvas);
+        if(now.equals(dragGeometryBaseline)) return;
+        dragNoteOnce("geometry|" + stage + "|" + now, "geometry changed at " + stage + ": "
+            + (dragGeometryBaseline == null ? "(no baseline)" : dragGeometryBaseline) + " -> " + now);
+        dragGeometryBaseline = now;
+    }
+
+    /** (f) 拖动结束的重复检查：children 里的语句元素数 ≠ 不同的语句对象数 ⇒ 真的多了一份元素。 */
+    /**
+     * 卡内部体检：一个 {@code StatementElem} 的内容结构是「卡头表 + 内容表」（MindustryX 的
+     * 构造函数里两次 {@code table(...)}），所以 {@code getChildren().size} 正常就是 2。
+     *
+     * <p>"拖动出现重复积木"在语句层已排除（children/statements/distinctSt 相等、无几何变化、
+     * 偏移来源正常），剩下的可能是卡自己内部多了一套内容（构造路径跑两次）或某个子控件被画两遍
+     * —— 这两种都只在元素树内部，语句层计数天然看不见，所以把真实数字打出来，按结构变化去重。</p>
+     */
+    private static void diagnoseStatementCards(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+        for(Element child : canvas.statements.getChildren()){
+            if(!(child instanceof StatementElem elem) || elem.st == null) continue;
+            int children = elem.getChildren().size;
+            // 每帧只做一次 map 查找与一次装箱（Integer 小值有缓存）——空闲态也要跑，不能有分配。
+            Integer previous = cardShapeCache.put(elem, children);
+            if(previous != null && previous == children) continue;
+            StringBuilder sb = new StringBuilder("card #")
+                .append(Integer.toHexString(System.identityHashCode(elem)))
+                .append(" st=").append(elem.st.getClass().getSimpleName())
+                .append(" children=").append(children)
+                .append(" cells=").append(elem.getCells().size);
+            for(int i = 0; i < elem.getChildren().size; i++){
+                Element sub = elem.getChildren().get(i);
+                sb.append(" | sub").append(i).append('=').append(sub.getClass().getSimpleName());
+                if(sub instanceof Group group) sb.append('(').append(group.getChildren().size).append(')');
+            }
+            Log.info("[LogicSugar] drag " + sb);
+        }
+    }
+
+    private static void reportDuplicateCheck(LCanvas canvas, String stage){
+        if(canvas == null || canvas.statements == null) return;
+        Seq<Element> children = canvas.statements.getChildren();
+        Set<LStatement> distinct = Collections.newSetFromMap(new IdentityHashMap<>());
+        int statements = 0;
+        for(Element child : children){
+            if(child instanceof StatementElem elem){
+                statements++;
+                distinct.add(elem.st);
+            }
+        }
+        String detail = "end " + stage + ": children=" + children.size + " statements=" + statements
+            + " distinctSt=" + distinct.size();
+        if(statements != distinct.size()){
+            // 真重复：同一个语句对象被挂在两个元素上，屏幕上是两张一模一样的积木。
+            Log.warn("[LogicSugar] drag DUPLICATE statement objects detected: " + detail);
+        }else{
+            dragNoteOnce("end|" + stage + "|" + dragSequence, detail);
+        }
+    }
+
+    // ===== 状态 =====
+    private enum State{
+        IDLE, SELECTING, SELECTED, PENDING_SINGLE_DRAG, DRAGGING_MOVE, DRAGGING_COPY
+    }
+    private static State state = State.IDLE;
+
+    // 拖拽模式：移动或复制（替代 Ctrl 键，支持移动端）
+    private enum DragMode{ MOVE, COPY }
+    private static DragMode dragMode = DragMode.MOVE;
+
+    // 框选坐标（stage 坐标系，用于距离判定）
+    private static float selStartX, selStartY;
+    private static float selCurX, selCurY;
+    // 框选坐标（DragLayout 本地坐标系，用于命中判定和绘制）
+    private static float selStartLocalX, selStartLocalY;
+    private static float selCurLocalX, selCurLocalY;
+    private static boolean dragMoved = false;
+
+    // 选中集合（保持插入顺序）
+    private static final LinkedHashSet<StatementElem> selected = new LinkedHashSet<>();
+
+    // 拖动状态
+    private static float dragStartMouseX, dragStartMouseY;
+    private static float dragStartLocalX, dragStartLocalY;
+    private static int dragInsertPos = -1;
+    private static StatementElem pendingSingleDrag;
+    private static float pendingSingleDragX, pendingSingleDragY;
+    private static long pendingSingleDragStartedNanos;
+    private static boolean pendingSingleDragKeepsSelection;
+    private static boolean singleStatementDrag;
+    private static boolean singleStatementDragKeepsSelection;
+    private static int activePointer = -1;
+
+    // 拖动期间保存的原始 child.y（用于恢复 layout() 的修改）
+    private static float[] dragBaseYs = null;
+
+    // 布局切换补偿：startDrag 时把 space 从 0f 切到 10f 会触发 layout 重排，
+    // 所有积木整体上移 10f×(N-i)。记录切换前后的 y 差，拖动时加回 translation，
+    // 保证被拖积木锚定在按下点，避免鼠标相对积木偏移（blockend 等高小的块尤甚）。
+    private static float[] dragYOffsets = null;
+
+    // 批量拖拽统一补偿：取"鼠标按下时所在积木"的 dragYOffsets 作为整组统一补偿量，
+    // 让被拖组内部间距与 dragBaseYs(10f 布局)一致，而非各自锚定 0f 紧凑布局（挤成一团）。
+    // 单积木/非紧凑模式此值为 0（无重排），行为与旧版完全一致。
+    private static float dragAnchorOffset = 0f;
+
+    // 本次拖拽是否切换过布局间距（0f↔10f）。startDrag 依据 dragExpandSpacingEnabled()
+    // 决定是否切换，结束路径依据此字段恢复，避免"开始依据"与"结束依据"不一致
+    // （若拖动期间设置被改动，space 可能停在不该停的值）。
+    private static boolean spaceSwitchedDuringDrag = false;
+
+    // 插入指示器几何位置
+    private static float indicatorX, indicatorY, indicatorW, indicatorH;
+
+    // 复制用剪贴板（用 copy() 保持 ExprStatement 折叠状态，不经过 write+read）
+    private static List<LStatement> clipboardCopies = null;
+    private static int clipboardSize = 0;
+    private static List<StatementElem> clipboardSources = null;
+
+    // UI 元素
+    private static Element overlay;
+    private static boolean initialized = false;
+    private static InputListener captureListener;
+    private static InputListener deleteKeyListener;
+    private static LogicDialog hiddenHookDialog;
+    private static LCanvas attachedCanvas;
+    private static WidgetGroup attachedStatements;
+
+    // 反射缓存（vScrollBounds / vKnobBounds）
+    private static Field vScrollBoundsField;
+    private static Field vKnobBoundsField;
+
+    // ===== 初始化 =====
+
+    public static void init(){
+        // The capture listener must exist before the first touch. Waiting for a canvas
+        // through Core.app.post lets the vanilla StatementElem consume that touch first.
+        installSceneListeners();
+
+        LCanvas canvas = getCanvas();
+        if(canvas != null){
+            attachCanvasExtras(canvas);
+        }
+
+        if(!initialized && captureListener != null){
+            initialized = true;
+            Log.info("[LogicAssist] BoxSelect initialized (event-driven mode).");
+        }
+    }
+
+    /** Installs scene-wide listeners without depending on a particular canvas instance. */
+    private static void installSceneListeners(){
+        if(Core.scene == null) return;
+
+        if(captureListener == null){
+            captureListener = new InputListener(){
+                @Override
+                public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+                    return handleTouchDown(event, x, y, pointer, button);
+                }
+
+                @Override
+                public void touchDragged(InputEvent event, float x, float y, int pointer){
+                    handleTouchDragged(event, x, y, pointer);
+                }
+
+                @Override
+                public void touchUp(InputEvent event, float x, float y, int pointer, KeyCode button){
+                    handleTouchUp(event, x, y, pointer, button);
+                }
+            };
+        }
+        if(!Core.scene.root.getCaptureListeners().contains(captureListener, true)){
+            Core.scene.addCaptureListener(captureListener);
+            Log.info("[LogicAssist] Capture listener registered.");
+        }
+
+        if(deleteKeyListener == null){
+            deleteKeyListener = new InputListener(){
+                @Override
+                public boolean keyDown(InputEvent event, KeyCode key){
+                    if(key != KeyCode.del && key != KeyCode.backspace) return false;
+                    // 输入框优先。arc 只把事件标成 handled，不会停止冒泡，所以焦点在文本框里时
+                    // 这里照样会收到按键：少了这道门，退格删字符会连带删掉画布上的选区。
+                    if(Core.scene != null && Core.scene.hasField()) return false;
+                    LogicDialog dialog = Vars.ui.logic;
+                    if(dialog == null || !dialog.isShown()) return false;
+                    // 只让最上面的逻辑编辑器响应：MDT 的 Vars / Log / Profiler 对话框盖在上面时，
+                    // 底下的编辑器仍然 isShown()，少了这道门 Delete 会把下面画布的选区一起删掉。
+                    if(!SelectionClipboardUi.isFront(dialog)) return false;
+                    if(state != State.SELECTED || selected.isEmpty()) return false;
+                    LCanvas canvas = getCanvas();
+                    if(canvas != null){
+                        deleteSelected(canvas);
+                    }
+                    return false;
+                }
+            };
+        }
+        if(!Core.scene.root.getListeners().contains(deleteKeyListener, true)){
+            Core.scene.addListener(deleteKeyListener);
+        }
+    }
+
+    /** Adds the canvas-bound overlay and hidden callback once per active dialog. */
+    private static void attachCanvasExtras(LCanvas canvas){
+        if(canvas == null || Core.scene == null) return;
+        if(attachedCanvas != null && attachedCanvas != canvas){
+            resetState(attachedCanvas);
+        }
+        attachedCanvas = canvas;
+        attachedStatements = canvas.statements;
+
+        if(overlay == null){
+            overlay = new Element(){
+                @Override
+                public void draw(){
+                    drawOverlay();
+                }
+            };
+            overlay.touchable = Touchable.disabled;
+            overlay.cullable = false;
+            overlay.visible = true;
+            overlay.update(() -> {
+                // 不使用 visible 控制显示——visible=false 会导致 act() 不执行，
+                // update() 不会被调用，形成死锁。直接执行 setSize + toFront 即可。
+                overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
+                // 只在需要绘制覆盖层时才 toFront，避免干扰 MindustryX 等第三方 UI 的层级
+                // SELECTED/IDLE 状态的高亮和滚动条改由 LogicCanvas.draw() 绘制，无需 toFront
+                if(state == State.SELECTING || state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+                    overlay.toFront();
+                }
+
+                // 拖拽期间每帧重新计算插入指示器位置（滚轮滚动时 touchDragged 不触发）
+                if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+                    LCanvas c = getCanvas();
+                    if(c != null){
+                        syncCanvasState(c);
+                        if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+                            float mx = Core.input.mouseX();
+                            float my = Core.input.mouseY();
+                            updateDrag(c, mx, my);
+                            autoScroll(c);
+                        }
+                    }
+                }else{
+                    // 空闲/选中态也要体检：若"重复积木"松手后仍然可见，拖动路径就不是源头，
+                    // 这一行会给出卡内部的真实结构（正常卡 = 卡头表 + 内容表，children=2）。
+                    diagnoseStatementCards(getCanvas());
+                }
+            });
+        }
+        if(overlay.parent == null){
+            Core.scene.add(overlay);
+        }
+
+        LogicDialog dialog = Vars.ui.logic;
+        if(dialog != null && hiddenHookDialog != dialog){
+            hiddenHookDialog = dialog;
+            dialog.hidden(() -> {
+                // A stale dialog may hide after a replacement dialog is already active.
+                if(Vars.ui.logic != dialog) return;
+                LCanvas current = getCanvas();
+                resetState(current != null ? current : attachedCanvas);
+            });
+        }
+    }
+
+    /** Reconciles canvas identity before handling input, clearing stale block references. */
+    private static boolean syncCanvasState(LCanvas canvas){
+        if(canvas == null) return false;
+        if(attachedCanvas != null && (attachedCanvas != canvas || attachedStatements != canvas.statements)){
+            resetState(attachedCanvas);
+        }
+        attachedCanvas = canvas;
+        attachedStatements = canvas.statements;
+        return canvas.statements != null;
+    }
+
+    /** Called by SugarCanvas before/after load or rebuild replaces statement elements. */
+    public static void canvasWillChange(LCanvas canvas){
+        if(canvas == null) return;
+        if(state != State.IDLE && attachedCanvas != null){
+            resetState(attachedCanvas);
+        }
+        attachedCanvas = canvas;
+        attachedStatements = canvas.statements;
+    }
+
+    public static void canvasDidChange(LCanvas canvas){
+        if(canvas == null) return;
+        attachedCanvas = canvas;
+        attachedStatements = canvas.statements;
+    }
+
+    // ===== 事件处理（Capture 阶段，在 target 之前执行）=====
+
+    /** 判断当前事件是否应该由我们处理。
+     *  只在 LogicDialog 显示且 canvas 可用时才介入。 */
+    private static boolean shouldIntercept(LCanvas canvas){
+        LogicDialog dialog = Vars.ui.logic;
+        return dialog != null && dialog.isShown() && canvas != null && canvas.statements != null;
+    }
+
+    /** 判断点击是否在积木的拖动区（header 条）上，而非按钮上。
+     *  原版 InputListener 用 event.targetActor instanceof Image 来排除按钮点击。
+     *  我们用类似逻辑：如果 target 是 Image（按钮图标），放行给原版处理。 */
+    private static boolean isClickOnButton(Element target){
+        return target instanceof Image;
+    }
+
+    /** True when the click hits a text input or the expression editor (self or ancestor chain).
+     *  These must never be swallowed by the drag state machine, or they cannot take focus.
+     *  ExprStatement's expression field is a plain Label styled with the nodeField background
+     *  (click switches it to a TextField), so a Label with that input-box style is editable too. */
+    private static boolean isClickOnEditable(Element target){
+        Element cur = target;
+        while(cur != null){
+            if(cur instanceof TextField || cur instanceof logicsugar.assist.expr.ExpressionEditor) return true;
+            // 输入框样式的 Label（ExprStatement 的表达式区域：点击后切换为 TextField 编辑）
+            if(cur instanceof Label label && label.getStyle() != null
+                && label.getStyle().background == Styles.nodeField.background) return true;
+            cur = cur.parent;
+        }
+        return false;
+    }
+
+    /** 判断元素是否是 canvas（LCanvas）的后代。
+     *  返回按钮、变量按钮等在 LogicDialog.buttons 区，不在 canvas 内。
+     *  只有 canvas 内的空白区才允许框选。 */
+    private static boolean isDescendantOfCanvas(Element elem, LCanvas canvas){
+        Element current = elem;
+        while(current != null){
+            if(current == canvas) return true;
+            current = current.parent;
+        }
+        return false;
+    }
+
+    /** 兜底检测：点击位置是否落在某个 Button 的实际边界内。
+     *  当 arc 的 hit test 因父容器裁剪、层叠顺序等原因未命中按钮内部元素时，
+     *  通过遍历 target 所在 StatementElem 的子元素树，手动检测按钮边界。
+     *  避免 MindustryX 的 JUMP/pencil 等按钮被误判为"点击积木"而触发框选/拖动。 */
+    private static boolean isClickWithinButtonBounds(Element target, float stageX, float stageY){
+        // 找到 target 所在的 StatementElem
+        StatementElem stmt = null;
+        Element cur = target;
+        while(cur != null){
+            if(cur instanceof StatementElem){
+                stmt = (StatementElem)cur;
+                break;
+            }
+            cur = cur.parent;
+        }
+        if(stmt == null) return false;
+        return hasButtonAtRecursive(stmt, stageX, stageY);
+    }
+
+    /** 递归遍历元素树，检查是否有 Button 的边界包含指定 stage 坐标 */
+    private static boolean hasButtonAtRecursive(Element elem, float stageX, float stageY){
+        if(elem instanceof Button){
+            Vec2 local = elem.stageToLocalCoordinates(Tmp.v2.set(stageX, stageY));
+            // 加 2px 容差，避免边缘点击漏判
+            if(local.x >= -2f && local.x <= elem.getWidth() + 2f &&
+               local.y >= -2f && local.y <= elem.getHeight() + 2f){
+                return true;
+            }
+        }
+        if(elem instanceof Group){
+            Seq<Element> children = ((Group)elem).getChildren();
+            for(int i = 0; i < children.size; i++){
+                if(hasButtonAtRecursive(children.get(i), stageX, stageY)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean handleTouchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+        LCanvas canvas = getCanvas();
+        if(canvas == null || !shouldIntercept(canvas)) return false;
+        if(!syncCanvasState(canvas)) return false;
+        attachCanvasExtras(canvas);
+        if(activePointer != -1 && activePointer != pointer) return false;
+
+        // 右键：拖拽非 IDLE 时必须在 touchDown 拦截，防止穿透到原版 StatementElem
+        // 的 toFront()，否则批量拖拽中点右键，第一条选中的积木会被原版移到 list 末尾。
+        if(button == KeyCode.mouseRight){
+            if(state != State.IDLE && isDescendantOfCanvas(event.targetActor, canvas)){
+                event.stop();
+                return true;
+            }
+            return false;
+        }
+
+        // 只处理鼠标左键和中键（中键原版用于复制单个积木）
+        if(button != KeyCode.mouseLeft && button != KeyCode.mouseMiddle){
+            return false;
+        }
+
+        Vec2 stageCoords = Tmp.v1.set(x, y);
+        Element target = event.targetActor;
+
+        // 只处理 canvas 内的点击。
+        // MindustryX 的 LogicSupport 左侧面板等非 canvas UI 直接放行，
+        // 避免其按钮（ImageButton 内的 Image）进入 tryHijackButton 影响事件传递。
+        // 面板能命中到自己而不是 canvas，靠的是 SugarCoexist.swapCanvas() 换完画布后把它放回
+        // 原来的 children 层——Cell.setElement() 内部是 addChild()，会把画布追加到末尾，那样画布
+        // 会画在面板之上并抢走它所有按钮的点击。这里只是第二道保险：万一层还是不对，落在面板上的
+        // 点击也绝不能被当成"点击积木"吞掉。
+        if(!isDescendantOfCanvas(target, canvas)){
+            return false;
+        }
+
+        // canvas 内的按钮：检查是否是选中积木的功能按钮
+        if(isClickOnButton(target)){
+            if(tryHijackButton(canvas, event, target)){
+                activePointer = pointer;
+                return true;
+            }
+            return false;
+        }
+        // MindustryX 兼容：TextButton（如 JUMP 按钮、注释切换按钮）内部是 Label 而非 Image，
+        // 不被 isClickOnButton 捕获。必须放行给原版处理，否则会被当作"点击积木"拦截。
+        // 检查 target 自身或祖先链中是否有 Button
+        Element btnCheck = target;
+        while(btnCheck != null && !(btnCheck instanceof Button)) btnCheck = btnCheck.parent;
+        if(btnCheck != null){
+            return false;
+        }
+        // 兜底：hit test 可能因父容器裁剪/层叠等原因未命中按钮内部元素，
+        // 手动检测点击位置是否落在任何 Button 的边界内（MindustryX 的 JUMP/pencil 按钮等）
+        if(isClickWithinButtonBounds(target, stageCoords.x, stageCoords.y)){
+            return false;
+        }
+
+        // 输入框/表达式编辑器必须放行给原版（聚焦、进入编辑）。
+        // 上游 "fix accidental statement dragging" 把普通点击改为进入候选拖动并吞掉事件，
+        // 导致语句上的 TextField 收不到 touchDown、无法聚焦（B12.4 回归）。
+        if(isClickOnEditable(target)){
+            return false;
+        }
+
+        // 滚动条点击跳转：点击轨道（非滑块）时直接跳转到对应位置，点击滑块放行给原版拖拽
+        if(canvas.pane != null && canvas.pane.hasScroll()){
+            float paneX = canvas.pane.x;
+            float paneW = canvas.pane.getWidth();
+            if(stageCoords.x > paneX + paneW - SCROLLBAR_WIDTH){
+                boolean handled = handleScrollbarClick(canvas.pane, stageCoords.x, stageCoords.y);
+                if(handled) activePointer = pointer;
+                return handled;
+            }
+        }
+
+        StatementElem clickedStmt = null;
+        Element current = target;
+        while(current != null){
+            if(current instanceof StatementElem){
+                clickedStmt = (StatementElem)current;
+                break;
+            }
+            current = current.parent;
+        }
+
+        boolean onStatement = clickedStmt != null;
+        boolean onSelectedStatement = onStatement && selected.contains(clickedStmt);
+
+        if(onStatement && !onSelectedStatement){
+            // Ctrl+点击非选中积木 → 选中该积木并开始复制拖动（开关关闭时退化为普通点击）
+            boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
+            if(ctrlDown && ctrlClickCopyEnabled()){
+                selected.clear();
+                selected.add(clickedStmt);
+                // 折叠块头部单选也应作为整体拖动：补全 body+end，避免方案B 误拦
+                expandSelectionToFoldBody(canvas);
+                startDrag(canvas, stageCoords.x, stageCoords.y, button);
+                activePointer = pointer;
+                event.stop();
+                return true;
+            }
+            // 中键复制仍交给原版；它在 touchDown 中直接执行 copy()。
+            if(button == KeyCode.mouseMiddle){
+                if(!selected.isEmpty()) clearSelection();
+                return false;
+            }
+
+            // 普通点击先进入候选拖动状态。原版 StatementElem 会在 touchDown
+            // 时立即 toFront()，所以必须延迟给它事件，才能让误触保持原顺序。
+            activePointer = pointer;
+            if(!selected.isEmpty()){
+                clearSelection();
+            }
+            startPendingSingleDrag(clickedStmt, stageCoords.x, stageCoords.y, false);
+            event.stop();
+            return true;
+        }
+
+        if(onSelectedStatement){
+            activePointer = pointer;
+            if(button == KeyCode.mouseMiddle){
+                startDrag(canvas, stageCoords.x, stageCoords.y, button);
+                event.stop();
+                return true;
+            }
+            // 点击选中积木 → 先等待足够移动，避免误触语句本体时改变顺序
+            startPendingSingleDrag(clickedStmt, stageCoords.x, stageCoords.y, true);
+            event.stop(); // 阻止原版 InputListener 收到事件
+            return true;  // 注册 touchFocus，接收后续 drag/up
+        }
+
+        // canvas 内的空白区点击 → 开始框选，拦截事件
+        activePointer = pointer;
+        startBoxSelect(canvas, stageCoords.x, stageCoords.y);
+        event.stop();
+        return true;
+    }
+
+    private static void handleTouchDragged(InputEvent event, float x, float y, int pointer){
+        LCanvas canvas = getCanvas();
+        if(canvas == null || state == State.IDLE || pointer != activePointer) return;
+        if(!syncCanvasState(canvas)) return;
+
+        float mx = x;
+        float my = y;
+
+        if(state == State.PENDING_SINGLE_DRAG){
+            if(!singleDragThresholdReached(mx, my)) return;
+
+            StatementElem statement = pendingSingleDrag;
+            float startX = pendingSingleDragX;
+            float startY = pendingSingleDragY;
+            boolean keepsSelection = pendingSingleDragKeepsSelection;
+            clearPendingSingleDrag();
+            if(!keepsSelection){
+                selected.clear();
+                selected.add(statement);
+                // 折叠块头部单拖应作为整体拖动：补全 body+end，避免方案B 误拦
+                expandSelectionToFoldBody(canvas);
+            }
+            singleStatementDrag = true;
+            singleStatementDragKeepsSelection = keepsSelection;
+            startDrag(canvas, startX, startY, KeyCode.mouseLeft);
+        }
+
+        if(state == State.SELECTING){
+            selCurX = mx;
+            selCurY = my;
+            Vec2 curLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            selCurLocalX = curLocal.x;
+            selCurLocalY = curLocal.y;
+            float dx = Math.abs(selCurX - selStartX);
+            float dy = Math.abs(selCurY - selStartY);
+            if(dx > MIN_DRAG_DIST || dy > MIN_DRAG_DIST){
+                dragMoved = true;
+                updateSelection(canvas);
+            }
+            autoScroll(canvas);
+        }else if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+            updateDrag(canvas, mx, my);
+            float dx = mx - dragStartMouseX;
+            float dy = my - dragStartMouseY;
+            if(BoxSelectDragPolicy.moved(dx, dy)){
+                dragMoved = true;
+            }
+            // 拖动时也支持自动滚动
+            autoScroll(canvas);
+        }
+    }
+
+    private static void handleTouchUp(InputEvent event, float x, float y, int pointer, KeyCode button){
+        LCanvas canvas = getCanvas();
+        if(pointer != activePointer) return;
+        if(event.isTouchFocusCancel()){
+            resetState(canvas);
+            event.stop();
+            return;
+        }
+        // 右键 touchDown 拦截会注册 touchFocus，配套的 touchUp 必须过滤非左/中键，
+        // 否则右键松开会误触 executeDragMove/cancelDrag（左键仍按着，不能因右键松开而取消）。
+        // 放在 isTouchFocusCancel 之后：焦点取消事件的 button 值不确定，必须在其后过滤。
+        if(button != KeyCode.mouseLeft && button != KeyCode.mouseMiddle){
+            return;
+        }
+        if(canvas == null){
+            resetState(null);
+            return;
+        }
+        if(!syncCanvasState(canvas)) return;
+
+        if(state == State.PENDING_SINGLE_DRAG){
+            boolean keepsSelection = pendingSingleDragKeepsSelection;
+            clearPendingSingleDrag();
+            if(keepsSelection){
+                state = State.SELECTED;
+            }else{
+                selected.clear();
+                state = State.IDLE;
+            }
+            event.stop();
+        }else if(state == State.SELECTING){
+            if(!dragMoved){
+                if(!selected.isEmpty()) clearSelection();
+                state = State.IDLE;
+            }else{
+                if(!selected.isEmpty()){
+                    state = State.SELECTED;
+                    // 更新选中积木的按钮图标（显示 copy/move 模式）
+                    updateSelectedButtonIcons(canvas);
+                }else{
+                    state = State.IDLE;
+                }
+            }
+        }else if(state == State.DRAGGING_MOVE){
+            if(dragMoved && dragInsertPos >= 0){
+                executeDragMove(canvas, dragInsertPos);
+            }else{
+                cancelDrag(canvas);
+            }
+        }else if(state == State.DRAGGING_COPY){
+            if(dragMoved && dragInsertPos >= 0){
+                executeDragCopy(canvas, dragInsertPos);
+            }else{
+                cancelDrag(canvas);
+            }
+        }
+
+        if(singleStatementDrag){
+            finishSingleStatementDrag();
+        }
+        activePointer = -1;
+    }
+
+    // ==================================================================
+    // 接管按钮（方向1：劫持选中积木上的功能按钮）
+    // ==================================================================
+
+    /** 尝试接管选中积木上的按钮点击。
+     *  如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。
+     *  @return true 如果已拦截，false 如果应放行 */
+    private static boolean tryHijackButton(LCanvas canvas, InputEvent event, Element target){
+        if(selected.isEmpty()) return false;
+
+        Element btn = target.parent;
+        while(btn != null && !(btn instanceof ImageButton)) btn = btn.parent;
+        if(btn == null) return false;
+        ImageButton button = (ImageButton)btn;
+
+        StatementElem stmtElem = null;
+        Element p = btn.parent;
+        while(p != null){
+            if(p instanceof StatementElem){
+                stmtElem = (StatementElem)p;
+                break;
+            }
+            p = p.parent;
+        }
+        if(stmtElem == null || !selected.contains(stmtElem)) return false;
+
+        // 识别按钮：通过 style.imageUp（包括被接管后改过的图标）
+        Drawable icon = button.getStyle().imageUp;
+        // 删除按钮：Icon.cancel → 批量删除
+        if(icon == Icon.cancel){
+            event.stop();
+            Core.app.post(() -> deleteSelected(canvas));
+            return true;
+        }
+        // +按钮：Icon.add → 在选中积木下方批量复制一份
+        if(icon == Icon.add){
+            event.stop();
+            Core.app.post(() -> duplicateSelectedBelow(canvas));
+            return true;
+        }
+        // 复制/移动切换按钮：Icon.copy 或 Icon.move → 切换模式
+        if(icon == Icon.copy || icon == Icon.move){
+            event.stop();
+            dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
+            updateSelectedButtonIcons(canvas);
+            return true;
+        }
+        // 其他按钮放行（MindustryX 的额外按钮等）
+        return false;
+    }
+
+    /** 更新所有选中积木的复制/移动按钮图标 */
+    private static void updateSelectedButtonIcons(LCanvas canvas){
+        Drawable modeIcon = (dragMode == DragMode.MOVE) ? Icon.move : Icon.copy;
+        for(StatementElem elem : selected){
+            findAndSetIcon(elem, Icon.copy, modeIcon);
+            findAndSetIcon(elem, Icon.move, modeIcon);
+        }
+    }
+
+    /** 在 StatementElem 中查找指定图标的 ImageButton 并替换图标 */
+    private static void findAndSetIcon(StatementElem elem, Drawable oldIcon, Drawable newIcon){
+        findAndSetIconRecursive(elem, oldIcon, newIcon);
+    }
+
+    private static boolean findAndSetIconRecursive(Element e, Drawable oldIcon, Drawable newIcon){
+        if(e instanceof ImageButton){
+            ImageButton btn = (ImageButton)e;
+            if(btn.getStyle().imageUp == oldIcon){
+                // 创建新样式副本，避免修改全局样式
+                ImageButton.ImageButtonStyle newStyle = new ImageButton.ImageButtonStyle(btn.getStyle());
+                newStyle.imageUp = newIcon;
+                btn.setStyle(newStyle);
+                return true;
+            }
+        }
+        if(e instanceof Group){
+            for(Element child : ((Group)e).getChildren()){
+                if(findAndSetIconRecursive(child, oldIcon, newIcon)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 恢复所有积木的按钮图标（取消选中时调用） */
+    private static void restoreButtonIcons(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem){
+                // 把 Icon.move 改回 Icon.copy
+                findAndSetIcon((StatementElem)child, Icon.move, Icon.copy);
+            }
+        }
+    }
+
+    /** 在选中积木最后一块的下方批量复制一份 */
+    private static void duplicateSelectedBelow(LCanvas canvas){
+        clearDraggingField(canvas);
+
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        Seq<Element> children = canvas.statements.getChildren();
+        int lastIdx = children.indexOf(sorted.get(sorted.size() - 1), true);
+        int insertPos = lastIdx + 1;
+
+        Seq<LStatement> copies = new Seq<>();
+        List<StatementElem> copySources = new ArrayList<>();
+        for(int i = 0; i < sorted.size(); i++){
+            SugarCanvas.normalizeJumpUI(sorted.get(i).st);
+            LStatement copy = sorted.get(i).st.copy();
+            Log.debug("[LogicAssist] duplicateSelectedBelow: st=@ copy=@", sorted.get(i).st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            if(copy != null){
+                copies.add(copy);
+                copySources.add(sorted.get(i));
+            }
+        }
+        int copySize = copies.size;
+
+        int generatedEnds = copiedBlockEndCount(copySources);
+        int limit = InstructionBudget.vanillaLimit();
+        if(children.size + copySize + generatedEnds > limit){
+            dragNoteOnce("abort|duplicate", "duplicate aborted: would exceed maxInstructions (children="
+                + children.size + " copies=" + copySize + " ends=" + generatedEnds
+                + " limit=" + limit + ")");
+            return;
+        }
+
+        if(copies.isEmpty()) return;
+
+        insertCopiedStatements(canvas, insertPos, copies, copySources);
+
+        finalizeLayout(canvas);
+        // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
+        saveAllJumpUI(canvas);
+        SugarCanvas.refreshJumpLayer(canvas);
+        refreshStructureLayout(canvas);
+        // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
+        restoreButtonIcons(canvas);
+        selected.clear();
+        reselectRange(canvas, insertPos, copies.size);
+        enterSelectedState(canvas);
+        Log.debug("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
+    }
+
+    // ===== 框选 =====
+
+    private static void startBoxSelect(LCanvas canvas, float mx, float my){
+        selStartX = mx;
+        selStartY = my;
+        selCurX = mx;
+        selCurY = my;
+        Vec2 startLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+        selStartLocalX = startLocal.x;
+        selStartLocalY = startLocal.y;
+        selCurLocalX = startLocal.x;
+        selCurLocalY = startLocal.y;
+        dragMoved = false;
+        state = State.SELECTING;
+    }
+
+    private static void updateSelection(LCanvas canvas){
+        selected.clear();
+        float minX = Math.min(selStartLocalX, selCurLocalX);
+        float minY = Math.min(selStartLocalY, selCurLocalY);
+        float maxX = Math.max(selStartLocalX, selCurLocalX);
+        float maxY = Math.max(selStartLocalY, selCurLocalY);
+
+        for(Element child : canvas.statements.getChildren()){
+            if(!(child instanceof StatementElem)) continue;
+            // 跳过折叠隐藏的语句（visible=false）：它们不可见、不参与框选。
+            // 否则非紧凑模式下折叠块内部的 gap 会把隐藏 body 撑成一条线而被框选命中，
+            // 且折叠 body 的 getPrefHeight() 可能为负，几何相交判定会失真。
+            if(!child.visible) continue;
+            float cx = child.x;
+            float cy = child.y;
+            float cw = child.getWidth();
+            float ch = child.getHeight();
+            if(minX < cx + cw && maxX > cx && minY < cy + ch && maxY > cy){
+                selected.add((StatementElem)child);
+            }
+        }
+        expandSelectionToFoldBody(canvas);
+    }
+
+    /** 结构补全：选中某个 BeginStatement（含其子类）后，自动把该块内部被隐藏的 body
+     *  （visible=false，框选时跳过）及 end（BlockEndStatement，若未选中）也纳入 selected，
+     *  使结构块（begin+body+end）作为整体参与选中/拖动，避免只搬 begin/end 而 body 遗留原地
+     *  导致结构撕裂、折叠释放。
+     *  ⚠️ 不检查 begin.collapsed：展开的语句块同样应整体补全（结构原子化），
+     *  保证选中 begin 头部拖动时配对的 body/end 跟随。
+     *  LinkedHashSet 幂等，重复调用不会重复添加。 */
+    private static void expandSelectionToFoldBody(LCanvas canvas){
+        if(selected.isEmpty()) return;
+        Seq<Element> children = canvas.statements.getChildren();
+        if(children.isEmpty()) return;
+
+        int startSize = selected.size();
+        for(Element child : children){
+            if(!(child instanceof StatementElem ste)) continue;
+            // 仅处理被选中的 begin，且其 body 处于折叠隐藏状态
+            if(!selected.contains(ste)) continue;
+            if(!(ste.st instanceof BeginStatement begin)) continue;
+            int endIdx = begin.destIndex;
+            if(endIdx < 0 || endIdx >= children.size) continue;
+            int beginIdx = children.indexOf(ste, true);
+            if(beginIdx < 0) continue;
+            // 补全区间 (beginIdx, endIdx) 内的隐藏 body，以及 end 本身（若未选中）
+            for(int i = beginIdx + 1; i <= endIdx; i++){
+                Element c = children.get(i);
+                if(c instanceof StatementElem && !selected.contains(c)){
+                    selected.add((StatementElem)c);
+                }
+            }
+        }
+        // 结构补全改变了选中集，需要同步刷新选中按钮/图标状态
+        if(selected.size() != startSize){
+            updateSelectedButtonIcons(canvas);
+        }
+    }
+
+    private static void clearSelection(){
+        LCanvas canvas = getCanvas();
+        if(canvas != null) restoreButtonIcons(canvas);
+        selected.clear();
+        state = State.IDLE;
+    }
+
+    private static void startPendingSingleDrag(StatementElem statement, float mx, float my, boolean keepsSelection){
+        pendingSingleDrag = statement;
+        pendingSingleDragX = mx;
+        pendingSingleDragY = my;
+        pendingSingleDragStartedNanos = Time.nanos();
+        pendingSingleDragKeepsSelection = keepsSelection;
+        state = State.PENDING_SINGLE_DRAG;
+    }
+
+    private static void clearPendingSingleDrag(){
+        pendingSingleDrag = null;
+        pendingSingleDragX = 0f;
+        pendingSingleDragY = 0f;
+        pendingSingleDragStartedNanos = 0L;
+        pendingSingleDragKeepsSelection = false;
+    }
+
+    /** Minimum movement that starts a single-statement drag without waiting for a long press.
+     *  Mobile scales the policy constant with the UI scale, so the gesture matches what the user
+     *  sees; desktop passes the small slop and keeps the pre-existing slop-only behaviour. */
+    private static float singleDragImmediateSlop(){
+        return Vars.mobile ? Scl.scl(BoxSelectDragPolicy.IMMEDIATE_SLOP) : BoxSelectDragPolicy.SLOP;
+    }
+
+    /** Require a deliberate long press and movement before taking over vanilla dragging,
+     *  unless the finger already travelled far enough for the swipe to be unambiguous. */
+    private static boolean singleDragThresholdReached(float mx, float my){
+        if(pendingSingleDrag == null) return false;
+        long elapsed = Time.nanos() - pendingSingleDragStartedNanos;
+        float dx = mx - pendingSingleDragX;
+        float dy = my - pendingSingleDragY;
+        return BoxSelectDragPolicy.singleDragReady(elapsed, dx, dy, Vars.mobile, singleDragImmediateSlop());
+    }
+
+    private static void finishSingleStatementDrag(){
+        singleStatementDrag = false;
+        if(singleStatementDragKeepsSelection){
+            singleStatementDragKeepsSelection = false;
+        }else if(!selected.isEmpty()){
+            clearSelection();
+        }else{
+            state = State.IDLE;
+        }
+    }
+
+    /** 重置所有积木的 translation（移动模式下选中积木设了 translation 跟随鼠标） */
+    private static void resetAllTranslations(LCanvas canvas){
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
+        }
+    }
+
+    private static void resetState(LCanvas canvas){
+        if(canvas != null){
+            clearDraggingField(canvas);
+            // 兜底恢复紧凑布局（若拖动中对话框被关闭等场景）
+            // 仅在开启间距扩展时空间被切换过，此时才需要恢复；关闭时 space 从未变，跳过。
+            if(spaceSwitchedDuringDrag) setDragLayoutSpace(canvas, idleLayoutSpace());
+            restoreButtonIcons(canvas);
+            if(canvas.statements != null) resetAllTranslations(canvas);
+        }
+        dragBaseYs = null;
+        dragYOffsets = null;
+        dragAnchorOffset = 0f;
+        spaceSwitchedDuringDrag = false;
+        clearPendingSingleDrag();
+        singleStatementDrag = false;
+        singleStatementDragKeepsSelection = false;
+        selected.clear();
+        state = State.IDLE;
+        activePointer = -1;
+        dragInsertPos = -1;
+        dragMoved = false;
+        clipboardCopies = null;
+        clipboardSize = 0;
+        clipboardSources = null;
+    }
+
+    // ===== 拖动 =====
+
+    private static void startDrag(LCanvas canvas, float mx, float my, KeyCode button){
+        // 先清除原版 dragging 字段，避免任何残留影响本次判定
+        clearDraggingField(canvas);
+
+        State entryState = state;
+        Seq<Element> children = canvas.statements.getChildren();
+        dragSequence++;
+        dragRedrawSourceReported = false;
+        seedGeometryBaseline(canvas);
+
+        // 方案B：拒绝拖拽"部分选中"的结构块。若选中集含孤立的 begin 或 end
+        // （配对端不在选中集内），拖动会把结构撕裂（body 悬空），这里直接不进入拖拽态。
+        if(isStructureSelectionIncomplete(canvas)){
+            // 这条门以前只在 debug 日志里可见，用户看到的只是"按下去没反应"，正是最难诊断的一类报告。
+            dragNoteOnce("blocked|incomplete", "startDrag blocked: incomplete structure selection selected="
+                + selected.size() + " dragMode=" + dragMode);
+            return;
+        }
+        dragStartMouseX = mx;
+        dragStartMouseY = my;
+        Vec2 startLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+        dragStartLocalX = startLocal.x;
+        dragStartLocalY = startLocal.y;
+        dragInsertPos = -1;
+        dragMoved = false;
+
+        dragAnchorOffset = 0f;
+        dragYOffsets = null;
+
+        // 可选：拖动时把积木间距从 0f 临时扩到 10f，让积木分得更开、方便观察与操作。
+        // 开启（需用户在设置里打开「拖动时扩展间距」，默认关闭）：0f↔10f 切换会触发
+        //              layout 重排 + 视野滚动偏移，需靠下面整套
+        //              dragYOffsets/dragAnchorOffset 补偿锚定（历史复杂问题）。
+        // 关闭（默认）：拖动全程保持间距不变，无任何空间切换，视野/虚拟块偏移彻底消失；
+        //       代价是往折叠语句里拖语句时腾位空间按原间距计算，可能显得随机。
+        if(dragExpandSpacingEnabled()){
+            spaceSwitchedDuringDrag = true;
+            // 切换布局前记录每个积木的 y（0f 间距布局），用于计算切换补偿。
+            // setDragLayoutSpace(10f) 会触发重排，所有积木上移 (N-i)×10f，
+            // 若不补偿，被拖积木相对鼠标锚点会整体偏移（blockend 等高小的块尤其明显）。
+            float[] yBefore = new float[children.size];
+            for(int i = 0; i < children.size; i++){
+                yBefore[i] = children.get(i).y;
+            }
+
+            // 拖动期间把积木间距切到 10f（分得更开，方便操作），并立即重排，
+            // 让 DragLayout 高度/滚动条范围同步变大。结束拖动时恢复 0f。
+            setDragLayoutSpace(canvas, Scl.scl(10f));
+
+            // 保存所有积木的原始 y 坐标（layout() 会修改，拖动期间需要恢复）。
+            // 注意：必须在 setDragLayoutSpace 重排之后记录，基准才是 10f 间距的布局。
+            dragBaseYs = new float[children.size];
+            dragYOffsets = new float[children.size];
+            for(int i = 0; i < children.size; i++){
+                dragBaseYs[i] = children.get(i).y;
+                // 补偿 = 切换前位置 - 切换后位置：让被拖积木视觉上仍锚定在按下点
+                dragYOffsets[i] = yBefore[i] - dragBaseYs[i];
+            }
+
+            // 批量拖拽统一补偿：定位"鼠标按下时所在积木"，取其 dragYOffsets 作为整组统一偏移。
+            // 否则组内每块各自锚定 0f 紧凑布局，导致被拖组内部间距挤成 0f，
+            // 与腾位/指示器/非选中积木（都用 10f）不一致，批量拖拽时间距混乱。
+            int anchorIdx = -1;
+            for(int i = 0; i < children.size; i++){
+                float top = yBefore[i] + children.get(i).getHeight();
+                boolean isSelected = children.get(i) instanceof StatementElem && selected.contains(children.get(i));
+                if(dragStartLocalY >= yBefore[i] && dragStartLocalY <= top && isSelected){
+                    anchorIdx = i;
+                    break;
+                }
+            }
+            if(anchorIdx < 0){
+                // 兜底：选中组里最靠前的一块
+                for(int i = 0; i < children.size; i++){
+                    if(children.get(i) instanceof StatementElem && selected.contains(children.get(i))){
+                        anchorIdx = i;
+                        break;
+                    }
+                }
+            }
+            if(anchorIdx >= 0){
+                dragAnchorOffset = dragYOffsets[anchorIdx];
+            }
+        }else{
+            // 关闭间距扩展（默认）：不切换 space，积木保持当前布局。记录当前 y 作为拖动基准，
+            // 无任何补偿（dragYOffsets/dragAnchorOffset 均为 0），translation 只跟随纯鼠标位移。
+            spaceSwitchedDuringDrag = false;
+            dragBaseYs = new float[children.size];
+            for(int i = 0; i < children.size; i++){
+                dragBaseYs[i] = children.get(i).y;
+            }
+        }
+
+        // 拖动模式：dragMode 持久模式 + Ctrl/中键临时覆盖。
+        // 框选框/高亮框颜色由 getModeColor() 实时反映此判断，保证与松手后拖动模式一致。
+        boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
+        boolean isCopy = (ctrlDown && ctrlDragCopyEnabled()) || dragMode == DragMode.COPY || button == KeyCode.mouseMiddle;
+
+        if(isCopy){
+            prepareCopyData(canvas);
+            state = State.DRAGGING_COPY;
+        }else{
+            state = State.DRAGGING_MOVE;
+        }
+
+        // (c) 入口快照：手机报"拖动出现重复积木"时，这一行决定后面往哪个机制上查。
+        StatementElem firstSelected = selected.isEmpty() ? null : selected.iterator().next();
+        dragNoteOnce("startDrag|" + dragSequence, "startDrag seq=" + dragSequence
+            + " entryState=" + entryState + " finalState=" + state
+            + " selected=" + selected.size() + " children=" + children.size
+            + " statementsHeight=" + canvas.statements.getHeight()
+            + " dragMode=" + dragMode + " anchorOffset=" + dragAnchorOffset
+            + " expandSpacing=" + spaceSwitchedDuringDrag
+            + " first=" + describeElement(firstSelected, canvas));
+    }
+
+    /** 拖动期间每帧更新 translation 和插入位置。
+     *  关键：不触发 layout()，而是恢复 dragBaseYs 后用 translation 做所有偏移。
+     *  translation 会被 localToAscendantCoordinates 正确计算，JumpCurve 能跟随。 */
+    private static void updateDrag(LCanvas canvas, float mx, float my){
+        clearDraggingField(canvas);
+
+        Seq<Element> children = canvas.statements.getChildren();
+
+        // 恢复原始 y 坐标（防止 layout() 的修改累积）
+        if(dragBaseYs != null && dragBaseYs.length == children.size){
+            for(int i = 0; i < children.size; i++){
+                children.get(i).y = dragBaseYs[i];
+            }
+        }
+
+        // 重置 needsLayout，防止 draw() 中 validate() → layout() 覆盖我们的修改
+        if(needsLayoutField != null){
+            try{
+                needsLayoutField.setBoolean(canvas.statements, false);
+            }catch(Exception ignored){}
+        }
+
+        // 干净起点，避免累积
+        resetAllTranslations(canvas);
+
+        if(state == State.DRAGGING_MOVE){
+            // 移动模式：紧凑排列非选中积木，消除选中积木原始位置占用的空间
+            relayoutNonSelected(canvas);
+            // 选中积木用 translation 跟随鼠标。
+            // 关键：translation.y 要加上布局切换补偿（dragAnchorOffset，整组统一），
+            // 否则 setDragLayoutSpace(10f) 重排让积木上移后，视觉锚点不再在按下点，
+            // 鼠标会跑到积木下侧甚至块外（blockend 等高小的块尤其明显）。
+            // 用整组统一的 dragAnchorOffset 而非各自 dragYOffsets[idx]：
+            //   - 组内间距与 dragBaseYs(10f 布局) 一致，与腾位/指示器/非选中积木统一
+            //   - 批量拖拽组内不再挤成 0f
+            Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            float dx = localMouse.x - dragStartLocalX;
+            float dy = localMouse.y - dragStartLocalY;
+            for(StatementElem elem : selected){
+                if(!elem.visible) continue; // 隐藏折叠 body 不随鼠标位移（不可见，无需跟随）
+                elem.setTranslation(dx, dy + dragAnchorOffset);
+            }
+        }
+        // 复制模式：原积木保持原位，预览由 drawCopyPreview() 绘制
+
+        // 先按上一帧的插入位置腾位，让视觉空隙出现在用户上次看到的位置，
+        // 再基于"腾位后"的视觉位置判定新插入点——否则判定用的是紧凑位置，
+        // 鼠标落在视觉空隙（如 C、D 之间）时会被误判成下一块积木的位置。
+        applyInsertShift(canvas);
+        int newInsertPos = computeInsertPosition(canvas, my);
+        if(newInsertPos != dragInsertPos){
+            // 插入点变化：清掉旧腾位，按新位置重新排列并腾位，保证判定与显示一致
+            dragInsertPos = newInsertPos;
+            resetAllTranslations(canvas);
+            if(state == State.DRAGGING_MOVE){
+                relayoutNonSelected(canvas);
+                Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+                float dx = localMouse.x - dragStartLocalX;
+                float dy = localMouse.y - dragStartLocalY;
+                for(StatementElem elem : selected){
+                    elem.setTranslation(dx, dy + dragAnchorOffset);
+                }
+            }
+            applyInsertShift(canvas);
+        }
+
+        // 腾位后更新跳转线位置——此时 translation 已反映腾位，JumpCurve 能正确定位
+        SugarCanvas.refreshJumpLayer(canvas);
+        updateIndicatorGeometry(canvas);
+
+        // (e) 每帧比对几何基准：layout 一跑，dragBaseYs/紧凑排布的基准就过期了
+        reportGeometryChange(canvas, "updateDrag");
+
+        if(Core.input.keyTap(KeyCode.mouseRight) || Core.input.keyTap(KeyCode.escape)){
+            cancelDrag(canvas);
+        }
+    }
+
+    // ===== 结构完整性校验（方案B：阻止部分选中拖拽） =====
+
+    /** 判断当前选中集里是否含有"不完整的结构块"——即某个被选中的 BeginStatement
+     *  或 BlockEndStatement，其配对端不在选中集内。若 such 不完整结构存在，返回 true，
+     *  以阻止拖拽，避免把 begin/body/end 撕裂。
+     *
+     *  判定口径（只针对"会被框选/点选所选中"的端点做配对校验，不做 body 全量要求，
+     *  避免误伤折叠块——折叠块 body 隐藏不可选，只要求 begin 与 end 成对即可）：
+     *   - 选中 BeginStatement b：要求其 destIndex 对应端（end）也在 selected。
+     *   - 选中 BlockEndStatement e：要求存在一个被选中的 BeginStatement，其 destIndex 指向 e。
+     */
+    private static boolean isStructureSelectionIncomplete(LCanvas canvas){
+        if(selected.isEmpty()) return false;
+        Seq<Element> children = canvas.statements.getChildren();
+        if(children.isEmpty()) return false;
+
+        for(Element child : children){
+            if(!(child instanceof StatementElem ste)) continue;
+            LStatement st = ste.st;
+            if(st instanceof BeginStatement begin){
+                if(!selected.contains(ste)) continue;
+                // begin 被选中：配对 end 必须在选中集内，否则结构不完整
+                int endIdx = begin.destIndex;
+                if(endIdx < 0 || endIdx >= children.size) return true; // 孤立 begin，无合法 end
+                Element end = children.get(endIdx);
+                if(!(end instanceof StatementElem) || !selected.contains(end)) return true;
+            }else if(st instanceof BlockEndStatement){
+                if(!selected.contains(ste)) continue;
+                // end 被选中：必须有配对的 begin 也在选中集内
+                int idx = children.indexOf(ste, true);
+                boolean paired = false;
+                for(Element c : children){
+                    if(c instanceof StatementElem se2 && se2.st instanceof BeginStatement b2
+                       && b2.destIndex == idx && selected.contains(se2)){
+                        paired = true;
+                        break;
+                    }
+                }
+                if(!paired) return true;
+            }
+        }
+        return false;
+    }
+
+    // ===== 插入位置计算 =====
+
+    /** 把"可见语句相对索引"映射为 children 绝对索引（含折叠语句的占位）。
+     *  移动模式的 dragInsertPos 跳过折叠语句语义，而 executeDragMove 的 addChildAt
+     *  需要 children 真实索引。第 visibleIdx 个可见元素落在第几个 children 位置，
+     *  即往前累加折叠语句/不可见元素的个数。 */
+    private static int visibleIndexToAbsolute(Seq<Element> children, int visibleIdx){
+        int seen = 0;
+        for(int i = 0; i < children.size; i++){
+            if(seen >= visibleIdx) return i;
+            if(children.get(i).visible) seen++;
+        }
+        return children.size;
+    }
+
+    /** 判断 localY（DragLayout 本地坐标，向上为正）是否落在某个折叠块（Begin.collapsed）
+     *  的视觉区间内。若是，返回该折叠块 Begin 的绝对索引，否则返回 -1。
+     *  折叠块：Begin 可见（含头部），body 全部 visible=false 高度 0，end 紧贴。由于 body
+     *  隐藏 + 间距原本占据位置，折叠块在屏幕上其实是"Begin .. end"连续的一段，鼠标落在这段
+     *  区域内时不应插入其内部，否则会"拖进折叠区放第一条"。
+     *  注意：跳过"正在被拖拽的选中折叠块"——否则拖折叠块时鼠标始终落在该块区间内，
+     *  computeInsertPosition 恒返回该块之前的位置，导致只有原位置一个插入点。 */
+    private static int collapsedBlockContaining(Seq<Element> children, float localY){
+        for(int i = 0; i < children.size; i++){
+            Element elem = children.get(i);
+            if(!(elem instanceof StatementElem ste) || !(ste.st instanceof BeginStatement begin)) continue;
+            if(!begin.collapsed) continue;
+            // 跳过被拖拽的选中元素（该折叠块自身）：它是要被移动的，不作为落点拦截对象
+            if(selected.contains(ste)) continue;
+            int endIndex = begin.destIndex;
+            if(endIndex < 0 || endIndex >= children.size) continue;
+            Element end = children.get(endIndex);
+            // 折叠块视觉范围（底对齐向上）：begin 的上沿 到 end 的下沿。
+            float beginTop = elem.y + elem.translation.y + elem.getHeight();
+            float endBottom = end.y + end.translation.y;
+            // 若鼠标 y 落在 [endBottom, beginTop] 区间（即折叠块内部），返回 begin 索引。
+            if(localY <= beginTop && localY >= endBottom) return i;
+        }
+        return -1;
+    }
+
+    private static int computeInsertPosition(LCanvas canvas, float stageY){
+        Seq<Element> children = canvas.statements.getChildren();
+        if(children.isEmpty()) return 0;
+
+        Vec2 local = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(0, stageY));
+        float localY = local.y;
+
+        // 硬禁止：若鼠标落在某个折叠块内部，落点强制锚定到该块之前（begin 之前），
+        // 无论移动还是复制，都不能插入折叠块内部——除非先展开折叠。
+        int blockBegin = collapsedBlockContaining(children, localY);
+        if(blockBegin >= 0){
+            if(state == State.DRAGGING_COPY){
+                // 复制模式返回值 = children 绝对索引：锚定到 begin（块之前的位置）
+                return blockBegin;
+            }else{
+                // 移动模式返回值 = 跳过选中+折叠后的相对索引：数到 blockBegin 之前的可见计数
+                int count = 0;
+                for(int i = 0; i < blockBegin; i++){
+                    Element child = children.get(i);
+                    if(child instanceof StatementElem && selected.contains(child)) continue;
+                    if(!child.visible) continue;
+                    count++;
+                }
+                return count;
+            }
+        }
+
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：遍历所有 children，用视觉位置（y + translation.y）计算。
+            // 跳过折叠隐藏的语句（visible=false）：它们不可见、高度为 0，不应成为落点目标，
+            // 否则拖拽会"落入"折叠块内部，显得随机放。返回的是 children 绝对索引。
+            for(int i = 0; i < children.size; i++){
+                Element child = children.get(i);
+                if(!child.visible) continue;
+                float visualY = child.y + child.translation.y;
+                float centerLocalY = visualY + child.getHeight() / 2f;
+                if(localY > centerLocalY){
+                    return i;
+                }
+            }
+            return children.size;
+        }
+
+        // 移动模式：跳过选中积木（它们已从原位移走）和折叠语句，用视觉位置计算。
+        // dragInsertPos 语义 = 跳过选中积木后的相对索引，这里同样跳过折叠语句，
+        // 使其与 updateIndicatorGeometry / executeDragMove 的 nonSelected 集合口径一致。
+        int nonSelectedCount = 0;
+        for(Element child : children){
+            if(child instanceof StatementElem && selected.contains(child)) continue;
+            if(!child.visible) continue;
+            float visualY = child.y + child.translation.y;
+            float centerLocalY = visualY + child.getHeight() / 2f;
+            if(localY > centerLocalY){
+                return nonSelectedCount;
+            }
+            nonSelectedCount++;
+        }
+        return nonSelectedCount;
+    }
+
+    // ===== 腾位 =====
+
+    /** 移动模式：紧凑排列非选中积木，消除选中积木原始位置占用的空间。
+     *  用 translation 设置偏移（相对于 dragBaseYs 的原始位置），
+     *  这样 localToAscendantCoordinates 能正确计算，JumpCurve 跟随。 */
+    private static void relayoutNonSelected(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        float space = getLayoutSpace(canvas);
+
+        // 从顶部开始紧凑排列非选中积木（用 translation 表示相对于原始位置的偏移）
+        // 跳过折叠隐藏的语句（visible=false）：它们不可见、高度为 0，不参与紧凑排布，
+        // 也不占据 space 间隙——否则折叠区会产生隐形空隙，拖动落点错乱（随机放）。
+        float compactY = 0; // 紧凑布局中的累积 y（从顶部开始）
+        for(int i = 0; i < children.size; i++){
+            Element e = children.get(i);
+            if(e instanceof StatementElem && selected.contains(e)) continue;
+            if(!e.visible) continue;
+            // 原始位置（从顶部开始）：totalHeight - originalYFromTop
+            // 紧凑位置（从顶部开始）：compactY
+            // translation = 紧凑位置 - 原始位置（在 DragLayout 本地坐标系中，y 向上为正）
+            // 但 DragLayout 的 y 是从底部向上的，所以需要用 height 转换
+            float totalHeight = canvas.statements.getHeight();
+            float originalY = dragBaseYs != null && i < dragBaseYs.length ? dragBaseYs[i] : e.y;
+            // originalY 是底对齐的，转换为顶对齐：topY = totalHeight - originalY - height
+            // 紧凑位置的顶对齐：compactTopY = compactY
+            // 新的底对齐 y = totalHeight - compactY - height
+            // translation.y = 新底对齐y - 原始底对齐y
+            float newY = totalHeight - compactY - e.getPrefHeight();
+            float transY = newY - originalY;
+            e.setTranslation(0, transY);
+            compactY += e.getPrefHeight() + space;
+        }
+    }
+
+    /** 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
+     *  用 translation 而非修改 child.y，因为 translation 会被
+     *  localToAscendantCoordinates 正确计算，JumpCurve 能跟随。 */
+    private static void applyInsertShift(LCanvas canvas){
+        if(dragInsertPos < 0 || selected.isEmpty()) return;
+
+        Seq<Element> children = canvas.statements.getChildren();
+        float space = getLayoutSpace(canvas);
+
+        // 腾位量 = 所有可见选中积木高度 + 间距。每个被拖积木后都带一个间距隔开下方积木；
+        // 不再减去末尾间距，否则非紧凑模式(10f)下腾位不足，占位方块下方会挤成 0f。
+        // 跳过隐藏折叠 body（visible=false）：它们的 getHeight() 是负值（gap 归零），
+        // 若计入会拉低 shiftAmount 甚至使其 <= 0 而提前返回，导致无法腾位插入。
+        float shiftAmount = 0;
+        for(StatementElem elem : selected){
+            if(!elem.visible) continue;
+            shiftAmount += elem.getHeight() + space;
+        }
+        if(shiftAmount <= 0) return;
+
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：dragInsertPos 是绝对索引，移该索引及以下的积木。
+            // 跳过折叠隐藏的语句：它们不可见，不腾位，保持折叠区域原样。
+            for(int i = dragInsertPos; i < children.size; i++){
+                Element child = children.get(i);
+                if(!child.visible) continue;
+                child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
+            }
+        }else{
+            // 移动模式：dragInsertPos 是非选中积木的相对索引（已跳过折叠语句，与
+            // computeInsertPosition 口径一致），跳过选中积木和折叠语句找到对应绝对位置。
+            int nonSelectedSeen = 0;
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                if(!child.visible) continue;
+                if(nonSelectedSeen >= dragInsertPos){
+                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
+                }
+                nonSelectedSeen++;
+            }
+        }
+    }
+
+    // ===== 指示器几何 =====
+
+    private static void updateIndicatorGeometry(LCanvas canvas){
+        if(dragInsertPos < 0) return;
+
+        Seq<Element> children = canvas.statements.getChildren();
+        float paneWidth = canvas.statements.getWidth();
+        float space = getLayoutSpace(canvas);
+
+        float totalH = 0;
+        for(StatementElem elem : selected){
+            if(!elem.visible) continue; // 跳过隐藏折叠 body（负高度），否则指示器高度失真
+            totalH += elem.getHeight() + space;
+        }
+        totalH -= space;
+
+        float insertLocalY;
+        float drawLocalX = 0;
+
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：dragInsertPos 是真实 child 索引，用视觉位置计算
+            if(children.isEmpty() || dragInsertPos == 0){
+                insertLocalY = canvas.statements.getHeight();
+            }else if(dragInsertPos >= children.size){
+                Element last = children.get(children.size - 1);
+                insertLocalY = last.y + last.translation.y - space;
+                drawLocalX = last.x;
+            }else{
+                Element before = children.get(dragInsertPos - 1);
+                insertLocalY = before.y + before.translation.y - space;
+                drawLocalX = before.x;
+            }
+        }else{
+            // 移动模式：用非选中 children 的视觉位置计算。
+            // 跳过选中积木和折叠语句，与 computeInsertPosition 的 dragInsertPos 口径一致。
+            List<Element> nonSelected = new ArrayList<>();
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                if(!child.visible) continue;
+                nonSelected.add(child);
+            }
+
+            if(nonSelected.isEmpty() || dragInsertPos == 0){
+                insertLocalY = canvas.statements.getHeight();
+            }else if(dragInsertPos >= nonSelected.size()){
+                Element last = nonSelected.get(nonSelected.size() - 1);
+                insertLocalY = last.y + last.translation.y - space;
+                drawLocalX = last.x;
+            }else{
+                Element before = nonSelected.get(dragInsertPos - 1);
+                insertLocalY = before.y + before.translation.y - space;
+                drawLocalX = before.x;
+            }
+        }
+
+        Vec2 stagePos = canvas.statements.localToStageCoordinates(Tmp.v1.set(drawLocalX, insertLocalY));
+        indicatorX = stagePos.x;
+        indicatorY = stagePos.y - totalH;
+        indicatorW = paneWidth;
+        indicatorH = totalH;
+    }
+
+    // ===== 自动滚动 =====
+
+    private static void autoScroll(LCanvas canvas){
+        if(canvas.pane == null) return;
+        float mouseY = Core.input.mouseY();
+        float screenH = Core.graphics.getHeight();
+        float margin = Scl.scl(AUTOSCROLL_MARGIN);
+        float speed = Scl.scl(AUTOSCROLL_SPEED) * Time.delta;
+
+        if(mouseY < margin){
+            canvas.pane.setScrollY(canvas.pane.getScrollY() + speed);
+        }else if(mouseY > screenH - margin){
+            canvas.pane.setScrollY(canvas.pane.getScrollY() - speed);
+        }
+    }
+
+    /** 处理滚动条点击：点击滑块放行给原版拖拽，点击轨道跳转到对应位置 */
+    private static boolean handleScrollbarClick(ScrollPane pane, float stageX, float stageY){
+        try{
+            if(vScrollBoundsField == null){
+                vScrollBoundsField = ScrollPane.class.getDeclaredField("vScrollBounds");
+                vScrollBoundsField.setAccessible(true);
+            }
+            if(vKnobBoundsField == null){
+                vKnobBoundsField = ScrollPane.class.getDeclaredField("vKnobBounds");
+                vKnobBoundsField.setAccessible(true);
+            }
+            Rect vScrollBounds = (Rect)vScrollBoundsField.get(pane);
+            Rect vKnobBounds = (Rect)vKnobBoundsField.get(pane);
+            if(vScrollBounds == null || vScrollBounds.width <= 0 || vScrollBounds.height <= 0) return false;
+
+            Vec2 local = pane.stageToLocalCoordinates(Tmp.v1.set(stageX, stageY));
+
+            // 点击在滑块上 → 放行给原版拖拽
+            if(vKnobBounds != null && vKnobBounds.width > 0 && vKnobBounds.height > 0 &&
+               local.x >= vKnobBounds.x && local.x <= vKnobBounds.x + vKnobBounds.width &&
+               local.y >= vKnobBounds.y && local.y <= vKnobBounds.y + vKnobBounds.height){
+                return false;
+            }
+
+            // 点击在轨道上（非滑块）→ 跳转到对应位置
+            float scrollHeight = pane.getScrollHeight();
+            float visibleHeight = pane.getHeight();
+            float maxScroll = scrollHeight - visibleHeight;
+            if(maxScroll <= 0) return false;
+
+            // Y 轴向上：轨道顶部对应 scrollY=0，底部对应 scrollY=maxScroll
+            float ratio = (vScrollBounds.y + vScrollBounds.height - local.y) / vScrollBounds.height;
+            ratio = Mathf.clamp(ratio, 0f, 1f);
+
+            pane.setScrollY(ratio * maxScroll);
+            return true;
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    // ===== 绘制 =====
+
+    private static void drawOverlay(){
+        LCanvas canvas = getCanvas();
+        if(canvas == null || canvas.statements == null) return;
+        LogicDialog dialog = Vars.ui.logic;
+        if(dialog == null || !dialog.isShown()) return;
+
+        switch(state){
+            case SELECTING:
+                drawSelectionBox(canvas);
+                drawHighlights(canvas);
+                break;
+            case DRAGGING_MOVE:
+                // 插入指示器在 LogicCanvas.draw() 中绘制（在积木下方）
+                redrawSelectedBlocksOnTop(canvas);
+                break;
+            case DRAGGING_COPY:
+                // 复制模式：原积木在原位由 DragLayout.draw 正常绘制
+                // 插入指示器在 LogicCanvas.draw() 中绘制，半透明预览跟随鼠标
+                drawCopyPreview(canvas);
+                break;
+            case SELECTED:
+                // SELECTED 状态的高亮由 LogicCanvas.draw() 绘制，避免 toFront 干扰 MindustryX
+                break;
+            default:
+                break;
+        }
+
+        // 彩色滚动条：overlay 在前时（SELECTING/DRAGGING）由此绘制；
+        // IDLE/SELECTED 时由 LogicCanvas.draw() 绘制
+        if(state == State.SELECTING || state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+            drawColorScrollbar(canvas);
+        }
+    }
+
+    /** 返回框选框/高亮框颜色，实时反映"松手后会进入的拖动模式"。
+     *  拖动中按 state 判断；框选/选中态按 dragMode + Ctrl 实时判断，保证与按钮图标和拖动模式一致。 */
+    private static Color getModeColor(){
+        boolean isCopy;
+        if(state == State.DRAGGING_MOVE){
+            isCopy = false;
+        }else if(state == State.DRAGGING_COPY){
+            isCopy = true;
+        }else{
+            // 框选/选中态：与 startDrag 的判断保持一致
+            boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
+            isCopy = (ctrlDown && ctrlDragCopyEnabled()) || dragMode == DragMode.COPY;
+        }
+        return isCopy ? Pal.heal : Pal.place;
+    }
+
+    private static void drawSelectionBox(LCanvas canvas){
+        float minX = Math.min(selStartLocalX, selCurLocalX);
+        float minY = Math.min(selStartLocalY, selCurLocalY);
+        float maxX = Math.max(selStartLocalX, selCurLocalX);
+        float maxY = Math.max(selStartLocalY, selCurLocalY);
+
+        Vec2 bottomLeft = canvas.statements.localToStageCoordinates(Tmp.v1.set(minX, minY));
+        Vec2 topRight = canvas.statements.localToStageCoordinates(Tmp.v2.set(maxX, maxY));
+
+        float sx = bottomLeft.x;
+        float sy = bottomLeft.y;
+        float w = topRight.x - bottomLeft.x;
+        float h = topRight.y - bottomLeft.y;
+
+        Color modeColor = getModeColor();
+        Draw.color(modeColor);
+        Draw.alpha(FILL_ALPHA);
+        Fill.crect(sx, sy, w, h);
+
+        Draw.color(modeColor);
+        Draw.alpha(BORDER_ALPHA);
+        Lines.stroke(Scl.scl(1.5f), modeColor);
+        Lines.rect(sx, sy, w, h);
+        Draw.reset();
+    }
+
+    public static void drawHighlights(LCanvas canvas){
+        if(selected.isEmpty()) return;
+
+        // 计算所有选中积木的总包围框
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+        float maxX = Float.MIN_VALUE, maxY = Float.MIN_VALUE;
+        for(StatementElem elem : selected){
+            if(!elem.visible) continue; // 隐藏折叠 body 不显示，不纳入包围框
+            Vec2 v = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
+            minX = Math.min(minX, v.x);
+            minY = Math.min(minY, v.y);
+            maxX = Math.max(maxX, v.x + elem.getWidth());
+            maxY = Math.max(maxY, v.y + elem.getHeight());
+        }
+
+        float pad = Scl.scl(4f);
+        float x = minX - pad;
+        float y = minY - pad;
+        float w = maxX - minX + pad * 2;
+        float h = maxY - minY + pad * 2;
+
+        // 选中框：半透明填充 + 边框
+        Color modeColor = getModeColor();
+        Draw.color(modeColor);
+        Draw.alpha(FILL_ALPHA);
+        Fill.crect(x, y, w, h);
+
+        Draw.color(modeColor);
+        Draw.alpha(BORDER_ALPHA);
+        Lines.stroke(Scl.scl(1.5f), modeColor);
+        Lines.rect(x, y, w, h);
+        Draw.reset();
+    }
+
+    /** 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。 */
+    public static void drawColorScrollbar(LCanvas canvas){
+        ScrollPane pane = canvas.pane;
+        if(pane == null || !pane.hasScroll()) return;
+
+        // 用反射读取 vScrollBounds（ScrollPane 内部的滚动条轨道 Rect，本地坐标）
+        Rect vScrollBounds = null;
+        try{
+            if(vScrollBoundsField == null){
+                vScrollBoundsField = ScrollPane.class.getDeclaredField("vScrollBounds");
+                vScrollBoundsField.setAccessible(true);
+            }
+            vScrollBounds = (Rect)vScrollBoundsField.get(pane);
+        }catch(Exception e){
+            return;
+        }
+        if(vScrollBounds == null || vScrollBounds.width <= 0 || vScrollBounds.height <= 0) return;
+
+        // 将 vScrollBounds（本地坐标）转换为 stage 坐标
+        Vec2 bl = pane.localToStageCoordinates(Tmp.v1.set(vScrollBounds.x, vScrollBounds.y));
+        float scrollbarX = bl.x;
+        float scrollbarBottom = bl.y;
+        float scrollbarW = vScrollBounds.width;
+        float scrollbarH = vScrollBounds.height;
+        float scrollbarTop = scrollbarBottom + scrollbarH;
+
+        // 计算总高度和每个积木的位置
+        Seq<Element> children = canvas.statements.getChildren();
+        if(children.isEmpty()) return;
+
+        float space = getLayoutSpace(canvas);
+        float totalHeight = 0;
+        for(Element child : children){
+            totalHeight += child.getPrefHeight() + space;
+        }
+        totalHeight -= space;
+        if(totalHeight <= 0) return;
+
+        // 积木总高度不超过可视区域时不绘制彩色滚动条
+        if(totalHeight <= pane.getHeight()) return;
+
+        // 绘制每个积木对应的颜色段，手动裁剪到滚动条可视区域内（不使用 ScissorStack，
+        // 避免与 MindustryX 面板的 ScrollPane scissor 产生交集导致裁剪异常）
+        float cy = 0;
+        for(Element child : children){
+            float elemH = child.getPrefHeight();
+            float elemColorH = (elemH + space) / totalHeight * scrollbarH;
+            float elemTop = scrollbarTop - (cy / totalHeight) * scrollbarH;
+
+            Color c = Color.white;
+            if(child instanceof StatementElem se && se.st != null){
+                LCategory cat = se.st.category();
+                if(cat != null && cat.color != null){
+                    c = cat.color;
+                }
+            }
+
+            // 手动裁剪到 [scrollbarBottom, scrollbarTop] 范围内
+            float segTop = Math.min(scrollbarTop, elemTop);
+            float segBottom = Math.max(scrollbarBottom, elemTop - elemColorH);
+            if(segTop > segBottom){
+                Draw.color(c);
+                Draw.alpha(SCROLLBAR_SEG_ALPHA);
+                Fill.crect(scrollbarX, segBottom, scrollbarW, segTop - segBottom);
+            }
+
+            cy += elemH + space;
+        }
+        Draw.flush();
+        Draw.reset();
+    }
+
+    /** 是否正在拖动（供 LogicCanvas.draw() 查询） */
+    public static boolean isDragging(){
+        return state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY;
+    }
+
+    /** 是否正在框选（供 LogicCanvas.draw() 查询） */
+    public static boolean isSelecting(){
+        return state == State.SELECTING;
+    }
+
+    /** 在画布坐标系中绘制插入指示器（在积木下方）。
+     *  供 LogicCanvas.draw() 在 super.draw() 之前调用。
+     *  indicatorX/Y 是 stage 坐标，直接用 identity 矩阵在 stage 坐标系绘制，
+     *  避免坐标转换错误（localToStageCoordinates 方向反了会导致位置偏移）。 */
+    public static void drawInsertIndicatorUnder(LCanvas canvas){
+        if(dragInsertPos < 0) return;
+        Mat oldTrans = tmpMat.set(Draw.trans());
+        Draw.trans(tmpMat2.idt());
+        Draw.reset();
+        Tex.pane.draw(indicatorX, indicatorY, indicatorW, indicatorH);
+        Draw.reset();
+        Draw.trans(oldTrans);
+    }
+
+    private static void drawInsertIndicator(LCanvas canvas){
+        if(dragInsertPos < 0) return;
+        Draw.reset();
+        Tex.pane.draw(indicatorX, indicatorY, indicatorW, indicatorH);
+        Draw.reset();
+    }
+
+    /** 在正确的 transform 矩阵内重画选中积木，确保积木画在插入阴影上方。
+     *  DRAGGING_MOVE 时用选中积木的 translation（鼠标偏移）作为绘制偏移。 */
+    private static void redrawSelectedBlocksOnTop(LCanvas canvas){
+        if(selected.isEmpty()) return;
+        // 所有选中积木共享相同的 translation（在 updateDrag 中统一设置）
+        StatementElem first = selected.iterator().next();
+        // (d) 偏移来源每场报一次：首个选中积木若不可见/已脱离画布，它的 translation 就不再是
+        // 这一组的偏移（重绘位置错位，视觉上像"多了一块"），这条日志直接把那件事摊开。
+        if(!dragRedrawSourceReported){
+            dragRedrawSourceReported = true;
+            boolean detachedSeen = false;
+            for(StatementElem elem : selected){
+                if(canvas.statements == null || elem.parent != canvas.statements){
+                    detachedSeen = true;
+                    break;
+                }
+            }
+            dragNoteOnce("redrawOffset|" + dragSequence, "redraw offset seq=" + dragSequence
+                + " source=" + describeElement(first, canvas) + " detachedSeen=" + detachedSeen
+                + " selected=" + selected.size());
+        }
+        drawElementsWithOffset(canvas, first.translation.x, first.translation.y, 1f);
+    }
+
+    /** 复制模式：绘制半透明的积木预览跟随鼠标。 */
+    private static void drawCopyPreview(LCanvas canvas){
+        if(selected.isEmpty()) return;
+
+        float mx = Core.input.mouseX();
+        float my = Core.input.mouseY();
+        Vec2 stageMouse = new Vec2();
+        Core.scene.screenToStageCoordinates(stageMouse.set(mx, my));
+        Vec2 localMouse = new Vec2();
+        canvas.statements.stageToLocalCoordinates(localMouse.set(stageMouse));
+        float dx = localMouse.x - dragStartLocalX;
+        float dy = localMouse.y - dragStartLocalY;
+
+        // 复制预览同样加 dragAnchorOffset，与移动模式锚定一致（批量复制时预览组内间距统一）
+        drawElementsWithOffset(canvas, dx, dy + dragAnchorOffset, COPY_PREVIEW_ALPHA);
+    }
+
+    /** 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复
+     *  @param alpha 1f = 不透明（重画在顶层），0.5f = 半透明（复制预览） */
+    private static void drawElementsWithOffset(LCanvas canvas, float dx, float dy, float alpha){
+        if(selected.isEmpty()) return;
+
+        Mat oldTrans = tmpMat.set(Draw.trans());
+
+        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
+        tmpMat2.idt().setToTranslation(origin.x, origin.y);
+        Draw.trans(tmpMat2);
+
+        Draw.reset();
+        Draw.alpha(alpha);
+        try{
+            for(StatementElem elem : selected){
+                // 跳过隐藏折叠 body（visible=false，负高度）：它们不可见，重画/预览时不应
+                // 绘制，否则拖折叠块会渲染出异常的虚拟块（负高度导致高度异常）。
+                if(!elem.visible) continue;
+                // 重画偏移必须与 vanilla 的 translation 一致，否则原位置会留下一份"拖不走的
+                // 积木"。这一行把两个数以及该元素的实际 stage 坐标摆出来对比（每拖每元素一行）。
+                if(dragSequence > 0 && reportedDragNotes.add("redraw|" + dragSequence
+                    + "|" + Integer.toHexString(System.identityHashCode(elem)))){
+                    Vec2 vanilla = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
+                    Log.info("[LogicSugar] drag redraw elem=#"
+                        + Integer.toHexString(System.identityHashCode(elem))
+                        + " x=" + elem.x + " y=" + elem.y
+                        + " translation=(" + elem.translation.x + "," + elem.translation.y + ")"
+                        + " dx=" + dx + " dy=" + dy
+                        + " stageWithTranslation=(" + vanilla.x + "," + vanilla.y + ")"
+                        + " children=" + elem.getChildren().size);
+                }
+                boolean oldCullable = elem.cullable;
+                elem.cullable = false;
+                elem.x += dx;
+                elem.y += dy;
+                try{
+                    elem.draw();
+                }finally{
+                    elem.x -= dx;
+                    elem.y -= dy;
+                    elem.cullable = oldCullable;
+                }
+            }
+        }finally{
+            // 某个 elem.draw() 抛异常时也必须恢复矩阵，避免后续 UI 绘制错位
+            Draw.reset();
+            Draw.trans(oldTrans);
+        }
+    }
+    // ===== 拖动移动 =====
+
+    private static void executeDragMove(LCanvas canvas, int insertPos){
+        clearDraggingField(canvas);
+
+        // 拖动期间是 10f 间距，移动完成后恢复紧凑布局（滚动条同步缩回）
+        // 仅在开启间距扩展时空间被切换过，此时才需要恢复；关闭时跳过。
+        if(spaceSwitchedDuringDrag) setDragLayoutSpace(canvas, idleLayoutSpace());
+
+        resetAllTranslations(canvas);
+        dragBaseYs = null;
+        dragYOffsets = null;
+        dragAnchorOffset = 0f;
+        spaceSwitchedDuringDrag = false;
+
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        Seq<Element> children = canvas.statements.getChildren();
+        int count = sorted.size();
+
+        for(StatementElem elem : sorted){
+            elem.remove();
+        }
+
+        // insertPos 是"可见非选中"相对索引（跳过选中积木与折叠语句）。移除选中积木后，
+        // children 仍含折叠语句，需映射为 children 绝对索引，否则 addChildAt 位置错位。
+        int actualInsert = Math.max(0, Math.min(visibleIndexToAbsolute(children, insertPos), children.size));
+
+        for(int i = 0; i < count; i++){
+            canvas.statements.addChildAt(actualInsert + i, sorted.get(i));
+        }
+
+        // 双重 invalidate + validate 处理高度变化，jumps.act 同步跳转线位置
+        // saveAllJumpUI 通过 dest.parent.getChildren().indexOf(dest) 反查更新 destIndex，
+        // 覆盖 jump 自身被移动 / dest 被移动 / 两者都被移动 / 都未被移动 所有情况
+        finalizeLayout(canvas);
+        saveAllJumpUI(canvas);
+        // saveAllJumpUI 改变了 destIndex，需再次 act 让 JumpCurve 重新连接目标
+        SugarCanvas.refreshJumpLayer(canvas);
+        refreshStructureLayout(canvas);
+        reselectRange(canvas, actualInsert, count);
+        enterSelectedState(canvas);
+        Log.debug("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
+        reportDuplicateCheck(canvas, "move");
+    }
+
+    // ===== 拖动复制 =====
+
+    private static void prepareCopyData(LCanvas canvas){
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        Seq<Element> children = canvas.statements.getChildren();
+
+        // 用 copy() 保持 ExprStatement 折叠状态（write+read 会展开表达式为 op 链）
+        clipboardCopies = new ArrayList<>();
+        clipboardSources = new ArrayList<>();
+        for(StatementElem elem : sorted){
+            SugarCanvas.normalizeJumpUI(elem.st);
+            LStatement copy = elem.st.copy();
+            Log.debug("[LogicAssist] prepareCopyData: st=@ copy=@", elem.st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            if(copy != null){
+                clipboardCopies.add(copy);
+                clipboardSources.add(elem);
+            }
+        }
+        clipboardSize = clipboardCopies.size();
+    }
+
+    private static void executeDragCopy(LCanvas canvas, int insertPos){
+        clearDraggingField(canvas);
+
+        // 拖动期间是 10f 间距，复制完成后恢复紧凑布局（滚动条同步缩回）
+        if(spaceSwitchedDuringDrag) setDragLayoutSpace(canvas, idleLayoutSpace());
+
+        resetAllTranslations(canvas);
+        dragBaseYs = null;
+        dragYOffsets = null;
+        dragAnchorOffset = 0f;
+        spaceSwitchedDuringDrag = false;
+
+        if(clipboardCopies == null || clipboardCopies.isEmpty()){
+            enterSelectedState(canvas);
+            return;
+        }
+
+        int currentSize = canvas.statements.getChildren().size;
+        int generatedEnds = copiedBlockEndCount(clipboardSources);
+        int limit = InstructionBudget.vanillaLimit();
+        if(currentSize + clipboardSize + generatedEnds > limit){
+            // 静默拒绝复制在用户看来只是"拖了没反应"，留一行可见日志。
+            dragNoteOnce("abort|copy", "copy aborted: would exceed maxInstructions (children=" + currentSize
+                + " copies=" + clipboardSize + " ends=" + generatedEnds + " limit=" + limit + ")");
+            enterSelectedState(canvas);
+            reportDuplicateCheck(canvas, "copy-aborted");
+            return;
+        }
+
+        // 从 clipboardCopies 创建新副本（每次复制都需要独立对象）
+        Seq<LStatement> copies = new Seq<>();
+        for(LStatement st : clipboardCopies){
+            LStatement copy = st.copy();
+            Log.debug("[LogicAssist] executeDragCopy: st=@ copy=@", st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            copies.add(copy);
+        }
+        if(copies.isEmpty()){
+            enterSelectedState(canvas);
+            return;
+        }
+
+        int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
+
+        insertCopiedStatements(canvas, actualInsert, copies, clipboardSources);
+
+        finalizeLayout(canvas);
+        // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
+        saveAllJumpUI(canvas);
+        SugarCanvas.refreshJumpLayer(canvas);
+        refreshStructureLayout(canvas);
+        reselectRange(canvas, actualInsert, copies.size);
+
+        clipboardCopies = null;
+        clipboardSize = 0;
+        clipboardSources = null;
+
+        enterSelectedState(canvas);
+        Log.debug("[LogicAssist] Drag-copied " + copies.size + " blocks to position " + insertPos);
+        reportDuplicateCheck(canvas, "copy");
+    }
+
+    private static void cancelDrag(LCanvas canvas){
+        clearDraggingField(canvas);
+
+        // 拖动期间是 10f 间距，取消后恢复紧凑布局（滚动条同步缩回）
+        if(spaceSwitchedDuringDrag) setDragLayoutSpace(canvas, idleLayoutSpace());
+
+        resetAllTranslations(canvas);
+        dragBaseYs = null;
+        dragYOffsets = null;
+        dragAnchorOffset = 0f;
+        spaceSwitchedDuringDrag = false;
+        clipboardCopies = null;
+        clipboardSize = 0;
+        clipboardSources = null;
+        dragInsertPos = -1;
+        state = State.SELECTED;
+        Log.debug("[LogicAssist] Drag cancelled.");
+        reportDuplicateCheck(canvas, "cancel");
+    }
+
+    /** Delete 键快速删除选中积木 */
+    private static void deleteSelected(LCanvas canvas){
+        clearDraggingField(canvas);
+        // 兜底恢复紧凑布局（删除可从任何状态进入）
+        if(spaceSwitchedDuringDrag) setDragLayoutSpace(canvas, idleLayoutSpace());
+
+        resetAllTranslations(canvas);
+        dragBaseYs = null;
+        dragYOffsets = null;
+        dragAnchorOffset = 0f;
+        spaceSwitchedDuringDrag = false;
+
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        int count = sorted.size();
+
+        for(StatementElem elem : sorted){
+            elem.remove();
+        }
+
+        saveAllJumpUI(canvas);
+        finalizeLayout(canvas);
+        refreshStructureLayout(canvas);
+
+        selected.clear();
+        state = State.IDLE;
+        Log.debug("[LogicAssist] Deleted " + count + " blocks.");
+    }
+
+    // ===== 辅助方法 =====
+
+    private static List<StatementElem> getSortedSelected(LCanvas canvas){
+        List<StatementElem> sorted = new ArrayList<>(selected);
+        Seq<Element> children = canvas.statements.getChildren();
+        sorted.sort((a, b) -> {
+            int ia = children.indexOf(a, true);
+            int ib = children.indexOf(b, true);
+            return Integer.compare(ia, ib);
+        });
+        return sorted;
+    }
+
+    /** 从 destIndex 重建 JumpStatement.dest 引用。
+     *  JumpStatement 默认 copy() 用 write→read 序列化，dest 是 transient 字段不会被复制，
+     *  setupUI() 是空方法不会自动重建。必须手动从 children 列表按 destIndex 查找。 */
+    private static void resolveJumpDests(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        for(Element child : children){
+            if(!(child instanceof StatementElem)) continue;
+            LStatement st = ((StatementElem)child).st;
+            if(st instanceof JumpStatement js && js.destIndex >= 0 && js.destIndex < children.size){
+                Element destChild = children.get(js.destIndex);
+                if(destChild instanceof StatementElem){
+                    js.dest = (StatementElem)destChild;
+                }
+            }
+        }
+    }
+
+    /** Number of generated ends needed when a copied selection omits a structure's matching end. */
+    private static int copiedBlockEndCount(List<StatementElem> sources){
+        if(sources == null) return 0;
+        IdentityHashMap<StatementElem, Boolean> included = new IdentityHashMap<>();
+        for(StatementElem source : sources) included.put(source, true);
+
+        int result = 0;
+        for(StatementElem source : sources){
+            if(source.st instanceof SugarStatements.BeginStatement begin && !included.containsKey(begin.dest)){
+                result++;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Inserts a copied selection as one stable batch. SugarCanvas.addAt() creates an end immediately
+     * for a Begin block, but later insertions shift that end and invalidate its stored index.
+     * Elements are inserted as plain StatementElems on purpose: the copied statements keep their
+     * index-based dest links valid during the batch, and StructureController.normalizeElements()
+     * replaces them with SugarStatementElems on the next frame.
+     */
+    private static void insertCopiedStatements(LCanvas canvas, int insertPos, Seq<LStatement> copies, List<StatementElem> sources){
+        if(!(canvas instanceof SugarCanvas) || sources == null || sources.size() != copies.size){
+            for(int i = 0; i < copies.size; i++){
+                canvas.addAt(insertPos + i, copies.get(i));
+                copies.get(i).setupUI();
+            }
+            return;
+        }
+
+        IdentityHashMap<StatementElem, Integer> sourcePositions = new IdentityHashMap<>();
+        for(int i = 0; i < sources.size(); i++) sourcePositions.put(sources.get(i), i);
+
+        for(int i = 0; i < copies.size; i++){
+            canvas.statements.addChildAt(insertPos + i, canvas.new StatementElem(copies.get(i)));
+        }
+
+        List<SugarStatements.BeginStatement> unpairedBegins = new ArrayList<>();
+        for(int i = 0; i < copies.size; i++){
+            if(!(copies.get(i) instanceof SugarStatements.BeginStatement copyBegin)
+                || !(sources.get(i).st instanceof SugarStatements.BeginStatement sourceBegin)) continue;
+
+            Integer target = sourcePositions.get(sourceBegin.dest);
+            if(target != null && copies.get(target) instanceof SugarStatements.BlockEndStatement){
+                copyBegin.dest = copies.get(target).elem;
+            }else{
+                unpairedBegins.add(copyBegin);
+            }
+        }
+
+        // Close unmatched copied blocks after the batch, from inner to outer.
+        int endAt = insertPos + copies.size;
+        for(int i = unpairedBegins.size() - 1; i >= 0; i--){
+            SugarStatements.BlockEndStatement end = new SugarStatements.BlockEndStatement();
+            canvas.statements.addChildAt(endAt++, canvas.new StatementElem(end));
+            unpairedBegins.get(i).dest = end.elem;
+        }
+
+        for(int i = 0; i < copies.size; i++){
+            LStatement copy = copies.get(i);
+            if(copy instanceof JumpStatement copyJump && sources.get(i).st instanceof JumpStatement sourceJump){
+                Integer target = sourcePositions.get(sourceJump.dest);
+                copyJump.dest = target == null ? sourceJump.dest : copies.get(target).elem;
+            }else if(!(copy instanceof SugarStatements.BeginStatement)){
+                copy.setupUI();
+            }
+        }
+    }
+
+    /** 从 children 中重新选中指定范围的积木 */
+    private static void reselectRange(LCanvas canvas, int start, int count){
+        selected.clear();
+        Seq<Element> newChildren = canvas.statements.getChildren();
+        for(int i = start; i < start + count && i < newChildren.size; i++){
+            if(newChildren.get(i) instanceof StatementElem){
+                selected.add((StatementElem)newChildren.get(i));
+            }
+        }
+        // 接管新选中积木的 copy/move 按钮图标
+        updateSelectedButtonIcons(canvas);
+    }
+
+    /** 重新选中“本次插入产生的积木”（插入前的元素身份集合之外的元素）：表达式卡在插入后被
+     *  折叠成一张新元素，按条数算选中范围会多杠一张卡，按身份取差集不会。 */
+    private static void reselectInserted(LCanvas canvas, Set<Element> existing){
+        selected.clear();
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem elem && !existing.contains(child)){
+                selected.add(elem);
+            }
+        }
+        updateSelectedButtonIcons(canvas);
+    }
+
+    /** 双重 invalidate + validate，处理高度变化后的布局稳定 */
+    private static void finalizeLayout(LCanvas canvas){
+        SugarCanvas.markJumpHeightsDirty(canvas);
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+        // layout() 发现 height 变化后调用 invalidateHierarchy() 标记父节点，
+        // 但自身 layout() 已执行完毕（用的是旧 height）。需要第二次 validate 用新 height 重新布局。
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+        // 更新跳转线位置（基于最终布局）
+        SugarCanvas.refreshJumpLayer(canvas);
+    }
+
+    /** Keep Logic Sugar's structural indentation and guide layer in sync with the reordered child list. */
+    private static void refreshStructureLayout(LCanvas canvas){
+        if(canvas instanceof SugarCanvas sugarCanvas){
+            sugarCanvas.refreshStructureLayout();
+        }
+    }
+
+    /** 更新所有积木的 JumpStatement destIndex（移动/删除后调用） */
+    private static void saveAllJumpUI(LCanvas canvas){
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem se && se.st instanceof JumpStatement js){
+                // dest 可能指向已删除的积木（dest.parent == null），需要安全检查
+                if(js.dest == null || js.dest.parent == null){
+                    js.dest = null;
+                    js.destIndex = -1;
+                }else{
+                    js.saveUI();
+                }
+            }
+        }
+    }
+
+    /** 进入 SELECTED 状态 */
+    private static void enterSelectedState(LCanvas canvas){
+        state = State.SELECTED;
+    }
+
+    private static LCanvas getCanvas(){
+        try{
+            if(Vars.ui.logic == null) return null;
+            return Vars.ui.logic.canvas;
+        }catch(Exception e){
+            return null;
+        }
+    }
+
+    private static boolean isPrivileged(LCanvas canvas){
+        if(privilegedField == null) return false;
+        try{
+            return privilegedField.getBoolean(canvas);
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private static void clearDraggingField(LCanvas canvas){
+        if(draggingField == null) return;
+        try{
+            draggingField.set(canvas, null);
+        }catch(Exception e){
+            Log.warn("[LogicAssist] Failed to clear dragging field", e);
+        }
+    }
+
+    // ===== 跨逻辑复制粘贴（编辑菜单入口）=====
+
+    /**
+     * 把当前选区作为糖源码写入系统剪贴板，供其它逻辑处理器（或其它会话）粘贴。
+     *
+     * <p>边界判定与同画布拖拽复制逐条对齐：空选区不做任何事，结构不完整的选区拒绝（拖动
+     * 复制同样在这个条件下直接 return），插入上限沿用 {@link LExecutor#maxInstructions}。</p>
+     *
+     * <p>跳转目标是唯一必须另立规则的地方。同画布复制时"目标在选区外就保留原目标"是对的，
+     * 因为程序没变；跨程序时那个数字是**源程序的行号**，粘到别处就会指向一条无关语句，因此
+     * 这里选择拒绝并让调用方给出提示，而不是留下一个会静默改坏程序的剪贴板。</p>
+     */
+    public static StatementClipboard.Result copySelection(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return StatementClipboard.Result.EMPTY;
+        List<StatementElem> sorted = sortedSelectedIn(canvas);
+        if(sorted.isEmpty()) return StatementClipboard.Result.EMPTY;
+
+        // 与 startDrag 同一条门：撕裂结构的行为一律不做
+        if(isStructureSelectionIncomplete(canvas)){
+            Log.debug("[LogicAssist] Copy blocked: incomplete structure selection");
+            return StatementClipboard.Result.INCOMPLETE_STRUCTURE;
+        }
+
+        Seq<Element> children = canvas.statements.getChildren();
+        Seq<LStatement> fragment = new Seq<>(sorted.size());
+        Map<Integer, Integer> absoluteToRelative = new HashMap<>();
+        for(StatementElem elem : sorted){
+            SugarCanvas.normalizeJumpUI(elem.st);
+            LStatement copy = elem.st.copy();
+            if(copy == null) continue;
+            int absolute = children.indexOf(elem, true);
+            if(absolute >= 0) absoluteToRelative.put(absolute, fragment.size);
+            fragment.add(copy);
+        }
+        if(fragment.isEmpty()) return StatementClipboard.Result.EMPTY;
+
+        int escaped = StatementClipboard.rebase(fragment, absoluteToRelative);
+        if(escaped > 0){
+            Log.debug("[LogicAssist] Copy blocked: @ jump(s) leave the selection", escaped);
+            return StatementClipboard.Result.ESCAPING_JUMP;
+        }
+
+        Core.app.setClipboardText(StatementClipboard.write(fragment));
+        Log.debug("[LogicAssist] Copied @ statements to the clipboard.", fragment.size);
+        return StatementClipboard.Result.OK;
+    }
+
+    /** 上一次粘贴插入的语句条数，仅在 {@link #pasteClipboard} 返回 OK 时有效。 */
+    private static int lastPasteCount = 0;
+
+    public static int lastPasteCount(){
+        return lastPasteCount;
+    }
+
+    /**
+     * 从系统剪贴板取出糖源码并插入当前画布。落点与"Ctrl+点击复制"一致：选中积木的最后一块
+     * 之下；没有选区时追加到末尾。
+     */
+    public static StatementClipboard.Result pasteClipboard(LCanvas canvas){
+        lastPasteCount = 0;
+        if(canvas == null || canvas.statements == null) return StatementClipboard.Result.EMPTY;
+
+        String text = Core.app.getClipboardText();
+        // 表达式卡的标记行与单行表达式（`x = buf[3]`）在这里先换成哨兵，与
+        // {@code SugarCanvas.load} 同一口径：下面的“能不能解析”与空载荷判定看到的是标准
+        // {@code set} 语句，粘贴进来的表达式行才不会被当成无效语句拒掉。
+        ExprTextImport.Plan importPlan = ExprTextImport.plan(text);
+        // 我们自己的载荷是原样复刻的（源画布上本来就有的无效卡也要照搬）；外来文本则要求
+        // 每一条都解析成功，否则一段散文会变成一堆静默的无效卡。判定只有这一个实现 —— 轮询
+        // 的 Ctrl+V 也问它，各自写一份迟早会漂。
+        if(!StatementClipboard.isAcceptable(importPlan.text())) return StatementClipboard.Result.NOT_LOGIC;
+
+        Seq<LStatement> incoming = StatementClipboard.parse(importPlan.text());
+        if(incoming == null) return StatementClipboard.Result.NOT_LOGIC;
+        // 哨兵原位换回表达式卡：一对一替换，语句条数不变，片段内的 jump 相对下标不受影响。
+        // 否则“复制一张 Expr 卡再粘贴”会变成一叠普通 op/set 积木（2026-10 报告）。
+        ExprTextImport.applyToStatements(incoming, importPlan);
+
+        if(StatementClipboard.countEscapingJumps(incoming) > 0){
+            return StatementClipboard.Result.ESCAPING_JUMP;
+        }
+
+        int insertPos = pasteInsertPosition(canvas);
+        int currentSize = canvas.statements.getChildren().size;
+        if(currentSize + incoming.size > InstructionBudget.vanillaLimit()){
+            Log.debug("[LogicAssist] Paste aborted: would exceed maxInstructions");
+            return StatementClipboard.Result.TOO_BIG;
+        }
+
+        // 配对必须在插入之前完成：一半的结构是收不回来的。载荷由本模组写出时源选区已经过了
+        // isStructureSelectionIncomplete，这里主要拦外来文本（手写的 ifbegin 没有 end）。
+        if(!SugarStatements.pairBlockEnds(incoming)){
+            Log.debug("[LogicAssist] Paste aborted: fragment has unpaired begin/end");
+            return StatementClipboard.Result.INCOMPLETE_STRUCTURE;
+        }
+
+        // 插入前的元素身份：折叠会重建元素，选中范围按“插入前不存在的元素”取差集重算，
+        // 而不是按条数（多行表达式卡粘贴后会折成一张卡）。
+        Set<Element> existing = Collections.newSetFromMap(new IdentityHashMap<>());
+        for(Element child : canvas.statements.getChildren()) existing.add(child);
+
+        insertPastedStatements(canvas, insertPos, incoming);
+        // 外来 op 链（旧载荷 / 纯 mlog 片段）按重开处理器的同一口径折回表达式卡；折不动就原样留着。
+        ExprHook.foldAll(canvas);
+
+        finalizeLayout(canvas);
+        // 插入改变了所有下标，跳转层与结构引导线都要跟着重算
+        saveAllJumpUI(canvas);
+        SugarCanvas.refreshJumpLayer(canvas);
+        refreshStructureLayout(canvas);
+        restoreButtonIcons(canvas);
+        reselectInserted(canvas, existing);
+        enterSelectedState(canvas);
+
+        lastPasteCount = selected.size();
+        Log.debug("[LogicAssist] Pasted @ statements at @.", lastPasteCount, insertPos);
+        return StatementClipboard.Result.OK;
+    }
+
+    /** 选中积木最后一块的下方；没有选区时接在末尾（与 duplicateSelectedBelow 同一口径）。 */
+    private static int pasteInsertPosition(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        List<StatementElem> sorted = sortedSelectedIn(canvas);
+        if(sorted.isEmpty()) return children.size;
+        int lastIdx = children.indexOf(sorted.get(sorted.size() - 1), true);
+        return Math.max(0, Math.min(lastIdx + 1, children.size));
+    }
+
+    /**
+     * 选区中属于这本画布的元素，按画布顺序排列。
+     *
+     * <p>{@code selected} 是跨对话框存活的静态集合，而编辑器复用的是同一个 canvas 对象、每次
+     * load 换掉全部子元素 —— 旧选区里的 {@link StatementElem} 于是成了无主引用。按 children
+     * 遍历天然把它们滤掉，顺带也给出了顺序；这比 {@code getSortedSelected} 里的排序更稳妥，
+     * 因为那里的 {@code indexOf} 对非成员返回 -1，会把陈旧元素排到最前面去。</p>
+     */
+    private static List<StatementElem> sortedSelectedIn(LCanvas canvas){
+        List<StatementElem> result = new ArrayList<>();
+        if(canvas == null || canvas.statements == null) return result;
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem elem && selected.contains(elem)) result.add(elem);
+        }
+        return result;
+    }
+
+    /**
+     * 插入一段从文本解析出来的语句，并把块与跳转重新指向新副本。
+     *
+     * <p>与 {@link #insertCopiedStatements} 的区别在于这里没有源积木可参照：文本里的下标都是
+     * 片段内部的相对下标，所以 begin 的配对已由调用方用 {@link SugarStatements#pairBlockEnds}
+     * 按嵌套重算好，这里只按下标把 {@code dest} 指到同一批次里的目标。</p>
+     */
+    private static void insertPastedStatements(LCanvas canvas, int insertPos, Seq<LStatement> copies){
+        for(int i = 0; i < copies.size; i++){
+            canvas.statements.addChildAt(insertPos + i, canvas.new StatementElem(copies.get(i)));
+        }
+
+        for(int i = 0; i < copies.size; i++){
+            LStatement copy = copies.get(i);
+            if(copy instanceof BeginStatement begin){
+                if(begin.destIndex >= 0 && begin.destIndex < copies.size){
+                    begin.dest = copies.get(begin.destIndex).elem;
+                }
+            }else if(copy instanceof JumpStatement jump){
+                if(jump.destIndex >= 0 && jump.destIndex < copies.size){
+                    jump.dest = copies.get(jump.destIndex).elem;
+                }else{
+                    jump.dest = null;
+                }
+            }else{
+                copy.setupUI();
+            }
+        }
+    }
+}

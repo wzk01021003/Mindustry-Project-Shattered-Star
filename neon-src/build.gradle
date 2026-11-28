@@ -1,0 +1,370 @@
+plugins{
+    id "java"
+    id "org.jetbrains.kotlin.jvm" version "2.2.0"
+}
+
+def releaseArtifactBaseName = "Neon"
+
+group = "bektools"
+version = "190011"
+
+java{
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+sourceSets{
+    main{
+        kotlin.srcDirs = ["src/main/kotlin"]
+    }
+}
+
+def mindustryVersion = (findProperty("mindustryVersion") ?: "v160.1").toString()
+def localMindustryCoreJar = new File(rootDir.parentFile, "Mindustry-master/core/build/libs/core-release.jar")
+def localMindustryDesktopJar = new File(rootDir.parentFile, "Mindustry-master/desktop/build/libs/Mindustry.jar")
+def localArcCoreJar = new File(rootDir.parentFile, "Arc/arc-core/build/libs/arc-core-1.0.jar")
+
+repositories{
+    mavenCentral()
+    maven{ url "https://jitpack.io" }
+}
+
+dependencies{
+    // Prefer the local Mindustry-master jars so Neon builds against the same checkout used for local testing.
+    if(localMindustryCoreJar.exists()){
+        def localMindustryClasspath = [localMindustryCoreJar]
+        if(localArcCoreJar.exists()){
+            localMindustryClasspath.add(localArcCoreJar)
+        }
+        if(localMindustryDesktopJar.exists()){
+            localMindustryClasspath.add(localMindustryDesktopJar)
+        }
+        compileOnly files(localMindustryClasspath)
+        testImplementation files(localMindustryClasspath)
+    }else{
+        // jitpack's Mindustry pom pulls in arc-core/arcnet. The v159 pom points at an orphan
+        // arc commit (6aee8e7686) that can no longer be built, and Neon pins its runtime
+        // baseline anyway, so the arc transitive dependencies stay excluded and come from
+        // tools/deps/ (arc-core + arcnet at the baseline's archash). Keep both parts.
+        def bundledArcClasspath = [
+            new File(rootDir, "tools/deps/arc-core.jar"),
+            new File(rootDir, "tools/deps/arcnet.jar")
+        ].findAll{ it.exists() }
+        compileOnly("com.github.Anuken.Mindustry:core:$mindustryVersion"){
+            exclude group: "com.github.Anuken.Arc"
+        }
+        testImplementation("com.github.Anuken.Mindustry:core:$mindustryVersion"){
+            exclude group: "com.github.Anuken.Arc"
+        }
+        compileOnly files(bundledArcClasspath)
+        testImplementation files(bundledArcClasspath)
+    }
+
+    // def mindustryXClasses = [
+    //     new File(rootDir.parentFile, "MindustryX-main/work/core/build/classes/java/main"),
+    //     new File(rootDir.parentFile, "MindustryX-main/work/core/build/classes/kotlin/main")
+    // ].findAll{ it.exists() }
+    // if(!mindustryXClasses.isEmpty()){
+    //     compileOnly files(mindustryXClasses)
+    // }
+
+    implementation "com.belerweb:pinyin4j:2.5.1"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    runtimeOnly "org.xerial:sqlite-jdbc:3.46.1.3"
+}
+
+tasks.withType(JavaCompile).configureEach{
+    options.encoding = "UTF-8"
+    // Neon targets Java 17; D8 still converts the compiled classes into Android dex output.
+    if(JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_1_9)){
+        options.release.set(17)
+    }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach{
+    compilerOptions{
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+tasks.withType(Jar).configureEach{
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register("dataImagePackerCompatTest", JavaExec){
+    group = "verification"
+    description = "Runs the Neon DataImagePacker compatibility regression test."
+    dependsOn tasks.named("testClasses")
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass.set("bektools.DataImagePackerCompatTest")
+}
+
+tasks.register("pinyinScopeContextTest", JavaExec){
+    group = "verification"
+    description = "Runs the PinyinSearchSupport scene-scope regression test."
+    dependsOn tasks.named("testClasses")
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass.set("pinyinsearchsupport.ui.PinyinScopeContextTest")
+}
+
+tasks.register("versionUtilTest", JavaExec){
+    group = "verification"
+    description = "Runs the Neon release-label/version-code regression test."
+    dependsOn tasks.named("testClasses")
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass.set("modupdater.features.VersionUtilTest")
+}
+
+tasks.named("test").configure{
+    dependsOn tasks.named("dataImagePackerCompatTest")
+    dependsOn tasks.named("pinyinScopeContextTest")
+    dependsOn tasks.named("versionUtilTest")
+}
+
+jar{
+    // A Mindustry Java mod is a zip/jar archive with classes + resources.
+    // Keep the desktop-only intermediate separate from the merged release zip.
+    archiveFileName = "Neon-desktop.zip"
+    from(projectDir){
+        include "mod.json"
+        include "mod.hjson"
+        include "icon.png"
+    }
+}
+
+// Keep a copy in workspace root "构建/<mod-name>/" (mod name + version).
+def buildOutDir = new File(rootDir.parentFile, "构建/${releaseArtifactBaseName}")
+def localDevOutputDir = new File(rootDir.parentFile, "构建/Neon")
+
+// Keep only the native SQLite builds for supported desktop platforms. Android cannot load
+// sqlite-jdbc (the classes are not in classes.dex), so Linux-Android natives are dead weight;
+// FreeBSD/musl/32-bit/POWER/RISC-V are not part of the desktop support matrix.
+def sqliteNativeExcludes = [
+    "org/sqlite/native/FreeBSD/**",
+    "org/sqlite/native/Linux-Android/**",
+    "org/sqlite/native/Linux-Musl/**",
+    "org/sqlite/native/Linux/arm/**",
+    "org/sqlite/native/Linux/armv6/**",
+    "org/sqlite/native/Linux/armv7/**",
+    "org/sqlite/native/Linux/x86/**",
+    "org/sqlite/native/Linux/ppc64/**",
+    "org/sqlite/native/Linux/riscv64/**",
+    "org/sqlite/native/Windows/x86/**",
+    "org/sqlite/native/Windows/armv7/**"
+]
+
+tasks.register("jarLocalDev", Jar){
+    group = "build"
+    description = "Packages the local Neon dev test jar."
+    dependsOn tasks.named("classes")
+    archiveFileName = "Neon-dev.jar"
+    destinationDirectory.set(localDevOutputDir)
+    from(sourceSets.main.output)
+    from({ configurations.runtimeClasspath.collect{ zipTree(it) } }){
+        exclude "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        sqliteNativeExcludes.each{ exclude it }
+    }
+    from(projectDir){
+        include "mod.json"
+        include "mod.hjson"
+        include "icon.png"
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+def isWindows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+
+def findD8 = {
+    def explicit = System.getenv("D8_PATH")
+    if(explicit){
+        def f = new File(explicit)
+        if(f.exists()) return f
+    }
+
+    def sdkRoot = System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME")
+    if(sdkRoot){
+        def buildToolsDir = new File(sdkRoot, "build-tools")
+        if(buildToolsDir.isDirectory()){
+            def toolName = isWindows ? "d8.bat" : "d8"
+            def candidates = (buildToolsDir.listFiles() ?: [])
+                .findAll{ it.isDirectory() }
+                .sort{ a, b -> b.name <=> a.name }
+
+            for(def dir : candidates){
+                def exe = new File(dir, toolName)
+                if(exe.exists()) return exe
+            }
+        }
+    }
+
+    if(isWindows){
+        def workspaceRoot = rootDir.parentFile
+        def matches = (workspaceRoot.listFiles() ?: [])
+            .findAll{ it.isDirectory() && it.name.startsWith("commandlinetools-win-") }
+            .sort{ a, b -> b.name <=> a.name }
+
+        for(def dir : matches){
+            def exe = new File(dir, "cmdline-tools/bin/d8.bat")
+            if(exe.exists()) return exe
+        }
+    }
+
+    return null
+}
+
+def androidDexOutDir = layout.buildDirectory.dir("d8").get().asFile
+def modelsDir = new File(projectDir, "models")
+def embeddedModelFileName = "bge-base-zh-v1.5-q8_0.gguf"
+def embeddedModelFile = new File(modelsDir, embeddedModelFileName)
+def embeddedModelUrl = "https://hf-mirror.com/CompendiumLabs/bge-base-zh-v1.5-gguf/resolve/main/${embeddedModelFileName}"
+
+tasks.register("downloadEmbeddingModel"){
+    group = "build"
+    description = "Downloads the embedded GGUF model used for SPDB semantic search packaging."
+
+    outputs.file(embeddedModelFile)
+
+    doLast{
+        modelsDir.mkdirs()
+        if(embeddedModelFile.exists() && embeddedModelFile.length() > 0){
+            logger.lifecycle("Embedding model already present: ${embeddedModelFile}")
+            return
+        }
+
+        logger.lifecycle("Downloading embedding model from ${embeddedModelUrl}")
+        new java.net.URL(embeddedModelUrl).withInputStream{ input ->
+            embeddedModelFile.withOutputStream{ output ->
+                output << input
+            }
+        }
+    }
+}
+
+tasks.register("d8InputJar", Jar){
+    group = "build"
+    description = "Builds a jar used only as input for D8 (no dist side effects)."
+    dependsOn tasks.named("classes")
+    archiveFileName = "${project.name}-d8-input.jar"
+    destinationDirectory = layout.buildDirectory.dir("d8-input")
+    from(sourceSets.main.output)
+    from({ configurations.runtimeClasspath.findAll{ it.name.contains("pinyin4j") || it.name.contains("kotlin-stdlib") }.collect{ zipTree(it) } })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register("dexAndroid", Exec){
+    group = "build"
+    description = "Compiles Java bytecode into classes.dex for Mindustry Android mod loading."
+    dependsOn tasks.named("d8InputJar")
+
+    doFirst{
+        def d8 = findD8()
+        if(d8 == null){
+            throw new GradleException("D8 not found. Set ANDROID_SDK_ROOT/ANDROID_HOME or D8_PATH (or keep commandlinetools-win-* in workspace root on Windows).")
+        }
+        delete(androidDexOutDir)
+        androidDexOutDir.mkdirs()
+
+        def programZip = tasks.named("d8InputJar").get().archiveFile.get().asFile
+
+        commandLine d8.absolutePath
+        args "--min-api", "14", "--release", "--output", androidDexOutDir.absolutePath
+
+        // Feed arc-core as a library classpath so D8 keeps the InputProcessor interface
+        // methods as default methods; without --lib the interface is dexed as external
+        // and on-device calls like touchDragged crash with AbstractMethodError.
+        def arcCoreLib = new File(rootDir, "tools/deps/arc-core.jar")
+        if(!arcCoreLib.exists()){
+            arcCoreLib = new File(rootDir.parentFile, "Arc/arc-core/build/libs/arc-core-1.0.jar")
+        }
+        if(arcCoreLib.exists()){
+            args "--lib", arcCoreLib.absolutePath
+        }
+
+        args programZip.absolutePath
+    }
+}
+
+def mergedArchiveBase = releaseArtifactBaseName
+
+tasks.register("jarMerged", Jar){
+    group = "build"
+    description = "Packages a single jar for both desktop and Android."
+    dependsOn tasks.named("classes")
+    dependsOn tasks.named("dexAndroid")
+    archiveFileName = "${mergedArchiveBase}.jar"
+    destinationDirectory = layout.buildDirectory.dir("libs")
+    from(sourceSets.main.output)
+    from({ configurations.runtimeClasspath.collect{ zipTree(it) } }){
+        exclude "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        sqliteNativeExcludes.each{ exclude it }
+    }
+    from(androidDexOutDir){
+        include "classes.dex"
+    }
+    from(projectDir){
+        include "mod.json"
+        include "mod.hjson"
+        include "icon.png"
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register("zipMerged", Zip){
+    group = "build"
+    description = "Packages a single zip for both desktop and Android."
+    dependsOn tasks.named("jarMerged")
+    archiveFileName = "${mergedArchiveBase}.zip"
+    destinationDirectory = layout.buildDirectory.dir("libs")
+    from({ zipTree(tasks.named("jarMerged").get().archiveFile.get().asFile) })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register("copyMergedJarToDist", Copy){
+    dependsOn tasks.named("jarMerged")
+    from(tasks.named("jarMerged").flatMap{ it.archiveFile })
+    into(new File(project.projectDir, "dist"))
+    rename{ _ -> "${mergedArchiveBase}.jar" }
+    doNotTrackState("Copying into dist is a convenience step; state tracking is unnecessary here.")
+}
+
+tasks.register("copyMergedZipToDist", Copy){
+    dependsOn tasks.named("zipMerged")
+    from(tasks.named("zipMerged").flatMap{ it.archiveFile })
+    into(new File(project.projectDir, "dist"))
+    rename{ _ -> "${mergedArchiveBase}.zip" }
+    doNotTrackState("Copying into dist is a convenience step; state tracking is unnecessary here.")
+}
+
+tasks.register("copyMergedJarToBuildDir", Copy){
+    doNotTrackState("Copies into build output folder for convenience.")
+    dependsOn tasks.named("jarMerged")
+    from(tasks.named("jarMerged").flatMap{ it.archiveFile })
+    into(buildOutDir)
+    rename{ _ -> "${releaseArtifactBaseName}.jar" }
+}
+
+tasks.register("copyMergedZipToBuildDir", Copy){
+    doNotTrackState("Copies into build output folder for convenience.")
+    dependsOn tasks.named("zipMerged")
+    from(tasks.named("zipMerged").flatMap{ it.archiveFile })
+    into(buildOutDir)
+    rename{ _ -> "${releaseArtifactBaseName}.zip" }
+}
+
+tasks.named("jarMerged").configure{
+    finalizedBy tasks.named("copyMergedJarToDist")
+    finalizedBy tasks.named("copyMergedJarToBuildDir")
+}
+
+tasks.named("zipMerged").configure{
+    finalizedBy tasks.named("copyMergedZipToDist")
+    finalizedBy tasks.named("copyMergedZipToBuildDir")
+}
+
+tasks.register("deploy"){
+    group = "build"
+    description = "Builds merged desktop+android jar and zip artifacts."
+    dependsOn tasks.named("jarMerged")
+    dependsOn tasks.named("zipMerged")
+    dependsOn tasks.named("jarLocalDev")
+}
